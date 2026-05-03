@@ -162,7 +162,7 @@ function ColorBySection() {
     colorBy, setColorBy,
     cellColorPalette, setCellColorPalette,
     allGenes, setAllGenes,
-    hiddenGenes,
+    selectedGenes,
     cellColorRange,
     cellColorClamp, setCellColorClamp,
   } = useStore();
@@ -182,7 +182,7 @@ function ColorBySection() {
   }, [apiBase, dataset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { mode, field } = colorBy;
-  const selectedCount = allGenes.length - hiddenGenes.size;
+  const selectedCount = selectedGenes === null ? allGenes.length : selectedGenes.size;
 
   // Determine if the selected metadata column is categorical
   const fieldDtype = field && cellSchema ? cellSchema.columns[field] : null;
@@ -452,66 +452,108 @@ function CellSegmentsRow() {
 
 // ── Transcript species section ────────────────────────────────────────────────
 function TranscriptSpeciesSection() {
-  const { viewportGenes, hiddenGenes, toggleGene, setAllGenesVisible, hideAllViewportGenes } = useStore();
+  const { allGenes, selectedGenes, setSelectedGenes, toggleSelectedGene } = useStore();
+  const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
 
-  const filtered = search.trim()
-    ? viewportGenes.filter((g) => g.toLowerCase().includes(search.toLowerCase()))
-    : viewportGenes;
+  const filterActive = selectedGenes !== null;
+  const selectedList = filterActive ? [...selectedGenes].sort() : [];
 
-  const visibleCount = viewportGenes.filter((g) => !hiddenGenes.has(g)).length;
+  const pickerGenes = search.trim()
+    ? allGenes.filter((g) => g.toLowerCase().includes(search.toLowerCase()))
+    : allGenes;
 
-  if (viewportGenes.length === 0) {
-    return <div style={{ color: "#3a3a3a", paddingLeft: 4, marginBottom: 6, fontSize: 11 }}>— no transcripts loaded</div>;
+  if (allGenes.length === 0) {
+    return <div style={{ color: "#3a3a3a", paddingLeft: 4, marginBottom: 6, fontSize: 11 }}>— loading genes…</div>;
   }
 
   return (
     <div style={{ marginBottom: 8 }}>
-      {/* Summary + all/none buttons */}
+      {/* Status + action buttons */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
         <span style={{ fontSize: 10, color: "#555", flex: 1 }}>
-          {visibleCount} / {viewportGenes.length} visible
+          {filterActive
+            ? `${selectedGenes.size} / ${allGenes.length} genes selected`
+            : `all ${allGenes.length} genes`}
         </span>
-        <button onClick={setAllGenesVisible} style={CHIP_STYLE}>all</button>
-        <button onClick={hideAllViewportGenes} style={CHIP_STYLE}>none</button>
+        {filterActive && (
+          <button
+            onClick={() => { setSelectedGenes(null); setExpanded(false); }}
+            style={CHIP_STYLE}
+          >
+            clear
+          </button>
+        )}
+        <button onClick={() => setExpanded((e) => !e)} style={CHIP_STYLE}>
+          {expanded ? "▲" : filterActive ? "edit ▼" : "select ▼"}
+        </button>
       </div>
 
-      {/* Search */}
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="filter genes…"
-        style={{ ...SELECT_STYLE, marginBottom: 4 }}
-      />
-
-      {/* Gene list */}
-      <div style={{ maxHeight: 180, overflowY: "auto" }}>
-        {filtered.map((gene) => {
-          const visible = !hiddenGenes.has(gene);
-          return (
-            <label key={gene} style={{ ...LABEL_STYLE, marginBottom: 3, display: "flex" }}>
-              <input
-                type="checkbox"
-                checked={visible}
-                onChange={() => toggleGene(gene)}
-                style={{ accentColor: "#e88", width: 12, height: 12, cursor: "pointer", flexShrink: 0 }}
-              />
-              <span
-                style={{
-                  marginLeft: 4,
-                  color: visible ? "#ccc" : "#444",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
+      {/* Compact selected-gene list (filter active, picker closed) */}
+      {filterActive && !expanded && (
+        <div style={{ maxHeight: 110, overflowY: "auto", marginBottom: 4 }}>
+          {selectedList.length === 0 && (
+            <div style={{ fontSize: 11, color: "#555", paddingLeft: 2 }}>no genes selected</div>
+          )}
+          {selectedList.map((gene) => (
+            <div
+              key={gene}
+              style={{ display: "flex", alignItems: "center", fontSize: 11, color: "#e88", padding: "1px 0" }}
+            >
+              <span style={{ flex: 1 }}>{gene}</span>
+              <button
+                onClick={() => toggleSelectedGene(gene)}
+                style={{ background: "transparent", border: "none", color: "#844", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1 }}
               >
-                {gene}
-              </span>
-            </label>
-          );
-        })}
-      </div>
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Expanded gene picker */}
+      {expanded && (
+        <div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="filter genes…"
+            style={{ ...SELECT_STYLE, marginBottom: 4 }}
+          />
+          <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+            <button onClick={() => setSelectedGenes(null)} style={CHIP_STYLE}>all</button>
+            <button onClick={() => setSelectedGenes(new Set())} style={CHIP_STYLE}>none</button>
+          </div>
+          <div style={{ maxHeight: 180, overflowY: "auto" }}>
+            {pickerGenes.map((gene) => {
+              const checked = selectedGenes === null || selectedGenes.has(gene);
+              return (
+                <label key={gene} style={{ ...LABEL_STYLE, marginBottom: 3, display: "flex" }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSelectedGene(gene)}
+                    style={{ accentColor: "#e88", width: 12, height: 12, cursor: "pointer", flexShrink: 0 }}
+                  />
+                  <span
+                    style={{
+                      marginLeft: 4,
+                      color: checked ? "#ccc" : "#444",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {gene}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

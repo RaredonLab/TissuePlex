@@ -8,7 +8,7 @@ export const useStore = create((set, get) => ({
   dataset: null,             // initialized from /xenium/datasets on first load
   activeImage: "morphology", // which OME-TIFF is loaded as the background
 
-  setDataset: (dataset) => set({ dataset }),
+  setDataset: (dataset) => set({ dataset, selectedGenes: null, allGenes: [] }),
   setActiveImage: (activeImage) => set({ activeImage }),
 
   // ── Image dimensions (from DZI descriptor, set when OSD opens) ───────────
@@ -153,32 +153,18 @@ export const useStore = create((set, get) => ({
     set({ activeRegion: [], regions: [], measurements: [] }),
 
   // ── Transcript species filter ──────────────────────────────────────────────
-  // hiddenGenes: Set of gene names to suppress in the transcript layer.
-  // viewportGenes: sorted list of gene names present in the current viewport
-  //   (updated by Viewer whenever the transcript fetch result changes).
-  hiddenGenes: new Set(),
-  viewportGenes: [],
-  setViewportGenes: (genes) => set((s) => {
-    // If the user has an active filter, auto-hide genes newly entering the viewport
-    // so panning doesn't reveal genes the user deliberately excluded.
-    let hiddenGenes = s.hiddenGenes;
-    if (hiddenGenes.size > 0) {
-      const prevSet = new Set(s.viewportGenes);
-      const incoming = genes.filter((g) => !prevSet.has(g));
-      if (incoming.length > 0) {
-        hiddenGenes = new Set(hiddenGenes);
-        incoming.forEach((g) => hiddenGenes.add(g));
-      }
-    }
-    return { viewportGenes: genes, hiddenGenes };
-  }),
-  toggleGene: (gene) =>
+  // selectedGenes: null = no filter (show all); Set<string> = allowlist (show only these).
+  // The selection is dataset-scoped and persists across pan/zoom.
+  selectedGenes: null,
+  setSelectedGenes: (genes) => set({ selectedGenes: genes }),
+  toggleSelectedGene: (gene) =>
     set((s) => {
-      const next = new Set(s.hiddenGenes);
+      if (s.selectedGenes === null) {
+        // First selection from "show all" state: start an allowlist with just this gene.
+        return { selectedGenes: new Set([gene]) };
+      }
+      const next = new Set(s.selectedGenes);
       if (next.has(gene)) next.delete(gene); else next.add(gene);
-      return { hiddenGenes: next };
+      return { selectedGenes: next };
     }),
-  setAllGenesVisible: () => set({ hiddenGenes: new Set() }),
-  hideAllViewportGenes: () =>
-    set((s) => ({ hiddenGenes: new Set(s.viewportGenes) })),
 }));

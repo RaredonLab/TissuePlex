@@ -52,7 +52,7 @@ export default function Viewer() {
     setViewport,
     layers: layerState,
     cellColorEnabled, colorBy, cellColorPalette,
-    allGenes, hiddenGenes, setViewportGenes,
+    allGenes, selectedGenes,
     selectedCell, setSelectedCell,
     edgeMinStrength,
     edgeColorBy, edgeColorPalette, edgeDirectional, showAutocrine,
@@ -344,19 +344,13 @@ export default function Viewer() {
     apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength
   );
 
-  // Keep viewportGenes list in sync with whatever transcripts are loaded
-  useEffect(() => {
-    const names = [...new Set(transcripts.map((t) => t.feature_name))].sort();
-    setViewportGenes(names);
-  }, [transcripts, setViewportGenes]);
-
-  // Apply per-gene visibility filter
-  const visibleTranscripts = hiddenGenes.size > 0
-    ? transcripts.filter((t) => !hiddenGenes.has(t.feature_name))
-    : transcripts;
+  // Apply per-gene visibility filter (null = no filter, show all)
+  const visibleTranscripts = selectedGenes === null
+    ? transcripts
+    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
 
   const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
-    apiBase, dataset, colorBy, allGenes, hiddenGenes, cellColorPalette, cellColorEnabled, cellColorClamp
+    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp
   );
   useEffect(() => { setCellColorRange(cellVmin, cellVmax); }, [cellVmin, cellVmax]); // eslint-disable-line
 

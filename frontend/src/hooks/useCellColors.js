@@ -16,7 +16,7 @@ import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading
  */
-export function useCellColors(apiBase, dataset, colorBy, allGenes, hiddenGenes, palette, enabled, clamp) {
+export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes, palette, enabled, clamp) {
   const [result, setResult] = useState({
     colorValues: null, type: "continuous", vmin: 0, vmax: 0,
     categories: [], categoryColors: new Map(),
@@ -32,11 +32,11 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, hiddenGenes, 
 
     const { mode, field } = colorBy;
 
-    // gene_set requires at least one selected gene
-    const selectedGenes = mode === "gene_set"
-      ? allGenes.filter((g) => !hiddenGenes.has(g))
+    // gene_set: null selectedGenes means show all; Set means use only those genes
+    const genesToSend = mode === "gene_set"
+      ? (selectedGenes === null ? allGenes : [...selectedGenes])
       : null;
-    if (mode === "gene_set" && (!selectedGenes || selectedGenes.length === 0)) {
+    if (mode === "gene_set" && (!genesToSend || genesToSend.length === 0)) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       return;
     }
@@ -50,7 +50,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, hiddenGenes, 
       setLoading(true);
       try {
         const body = mode === "gene_set"
-          ? { mode: "gene_set", genes: selectedGenes }
+          ? { mode: "gene_set", genes: genesToSend }
           : { mode: "metadata", field };
 
         const res = await fetch(`${apiBase}/xenium/${dataset}/color-values`, {
@@ -86,7 +86,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, hiddenGenes, 
       }
     }, 150);
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, colorBy?.mode, colorBy?.field, allGenes, hiddenGenes, palette, enabled, clamp?.low, clamp?.high]);
+  }, [apiBase, dataset, colorBy?.mode, colorBy?.field, allGenes, selectedGenes, palette, enabled, clamp?.low, clamp?.high]);
 
   return { ...result, loading };
 }
