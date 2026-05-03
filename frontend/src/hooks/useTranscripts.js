@@ -29,9 +29,8 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
             setLoading(false);
             return;
           }
-          if (fracW < 0.5) {
-            url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
-          }
+          // Always send bbox so the backend can sample uniformly within the viewport.
+          url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
         const res = await fetch(url);
         if (!res.ok) { setTranscripts([]); return; }

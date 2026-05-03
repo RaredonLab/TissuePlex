@@ -65,7 +65,7 @@ class XeniumReader:
                 ]
         if genes:
             df = df[df["feature_name"].isin(genes)]
-        df = df.head(limit).copy()
+        df = df.sample(n=min(limit, len(df)), random_state=42).copy() if len(df) > limit else df.copy()
         # Scale from Xenium µm coords to image pixel coords
         df["x_location"] = df["x_location"] / self.pixel_size
         df["y_location"] = df["y_location"] / self.pixel_size
