@@ -24,7 +24,7 @@ export function useEdges(apiBase, dataset, viewport, imageSize, enabled, minStre
       }
 
       fetch(`${apiBase}/edges/${dataset}/query?${params}`)
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : []))
         .then(setEdges)
         .catch(() => {});
     }, DEBOUNCE_MS);

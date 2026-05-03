@@ -37,6 +37,26 @@ def list_datasets():
     )
 
 
+@router.get("/{dataset}/images")
+def list_images(dataset: str):
+    """Return base names of available morphology images (OME-TIFF / TIFF) in a dataset folder."""
+    path = DATA_ROOT / dataset
+    if not path.exists():
+        raise HTTPException(404, f"Dataset '{dataset}' not found")
+    names = []
+    for f in sorted(path.iterdir()):
+        if not f.is_file():
+            continue
+        name = f.name
+        for ext in (".ome.tiff", ".ome.tif", ".tiff", ".tif"):
+            if name.lower().endswith(ext):
+                names.append(name[: -len(ext)])
+                break
+    # Sort so "morphology" variants come first
+    names.sort(key=lambda n: (not n.startswith("morphology"), n))
+    return names
+
+
 @router.get("/{dataset}/info")
 def dataset_info(dataset: str):
     """Return experiment metadata from experiment.xenium."""
@@ -85,10 +105,12 @@ def cell_boundaries(
     ymin: float = Query(None),
     xmax: float = Query(None),
     ymax: float = Query(None),
+    limit: int = Query(20_000),
 ):
     """Return cell polygon boundaries filtered by bounding box."""
     return _reader(dataset).cell_boundaries(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
+        limit=limit,
     )
 
 

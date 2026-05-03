@@ -19,21 +19,23 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
       setLoading(true);
       setError(null);
       try {
-        let url = `${apiBase}/xenium/${dataset}/transcripts?limit=100000`;
-        // Add bbox if we have a real viewport (not loading the whole dataset)
+        let url = `${apiBase}/xenium/${dataset}/transcripts?limit=50000`;
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
-          // Only filter if the viewport covers less than ~25% of the image
-          // (at high zoom); at low zoom just load everything
           const fracW = (xmax - xmin) / imageSize.w;
-          if (fracW < 0.5) {
-            url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
+          if (fracW >= 0.7) {
+            // Zoomed too far out — transcripts are sub-pixel; skip fetch.
+            setTranscripts([]);
+            setLoading(false);
+            return;
           }
+          // Always send bbox so the backend can sample uniformly within the viewport.
+          url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) { setTranscripts([]); return; }
         const data = await res.json();
-        setTranscripts(data);
+        setTranscripts(Array.isArray(data) ? data : []);
       } catch (e) {
         setError(e.message);
       } finally {

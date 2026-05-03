@@ -2,11 +2,9 @@
 OME-TIFF → DZI tile pyramid.
 
 Two backends:
-  1. pyvips  — fast, used in Docker (libvips installed in Dockerfile)
-  2. tifffile + Pillow  — pure Python fallback for local dev without libvips
-
-The OME-TIFF format stores pyramid levels internally; we read each level
-directly rather than resampling from full resolution.
+  1. pyvips  — primary; uses libvips streaming so even a 100K×40K Z-stack
+               never loads the full image into RAM.
+  2. tifffile + Pillow  — fallback when libvips is not available (local dev).
 
 DZI level numbering: level 0 = 1×1, level max = full resolution.
 OME level numbering: level 0 = full resolution, level n = most downsampled.
@@ -27,10 +25,7 @@ TILE_FORMAT = "jpeg"
 JPEG_QUALITY = 85
 DZI_CACHE_SUBDIR = ".dzi_cache"
 
-# If CACHE_DIR is set (e.g. a writable Docker volume), tile pyramids are stored
-# there as {CACHE_DIR}/{dataset_name}/{image_name}/ instead of inside the
-# (potentially read-only) data folder.
-_CACHE_DIR = os.getenv("CACHE_DIR")  # None means "write alongside the data"
+_CACHE_DIR = os.getenv("CACHE_DIR")  # None → write alongside the data
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -47,10 +42,9 @@ def ensure_pyramid(dataset_path: Path, image_name: str) -> dict:
     if dzi_file.exists():
         return {"status": "ready", "path": str(dzi_file)}
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     try:
-        _build_dzi_tifffile(src, out_dir, image_name)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _build_dzi(src, out_dir, image_name)
         return {"status": "ready", "path": str(dzi_file)}
     except Exception as exc:
         shutil.rmtree(out_dir, ignore_errors=True)
@@ -58,11 +52,12 @@ def ensure_pyramid(dataset_path: Path, image_name: str) -> dict:
 
 
 def get_dzi_descriptor(dataset_path: Path, image_name: str) -> dict:
-    """Return the DZI descriptor as a dict (serialised to JSON by the router)."""
+    """Return the DZI descriptor as a dict."""
     dzi_file = _pyramid_root(dataset_path, image_name) / f"{image_name}.dzi"
     if not dzi_file.exists():
         raise FileNotFoundError(
-            f"DZI not built for '{image_name}'. POST /tiles/{{dataset}}/build-pyramid/{image_name} first."
+            f"DZI not built for '{image_name}'. "
+            f"POST /tiles/{{dataset}}/build-pyramid/{image_name} first."
         )
     tree = ET.parse(dzi_file)
     root = tree.getroot()
@@ -93,7 +88,230 @@ def get_tile_path(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Internal helpers
+# Build dispatcher
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _build_dzi(src: Path, out_dir: Path, image_name: str) -> None:
+    """Try pyvips first; fall back to tifffile+Pillow on any failure."""
+    pyvips_started = False
+    try:
+        import pyvips
+        pyvips.version(0)   # confirms libvips C library loaded
+        pyvips_started = True
+        _build_dzi_pyvips(src, out_dir, image_name)
+        return
+    except Exception:
+        # pyvips not installed, libvips missing, or can't process this file.
+        # Clean up any partial output before falling back.
+        if pyvips_started:
+            for item in list(out_dir.iterdir()):
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+    _build_dzi_tifffile(src, out_dir, image_name)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Backend 1 — pyvips (streaming, handles very large images)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _build_dzi_pyvips(src: Path, out_dir: Path, image_name: str) -> None:
+    """
+    Build DZI using pyvips streaming pipeline.
+
+    Handles ZYX OME-TIFFs by building a lazy max-intensity-projection pipeline.
+    pyvips never loads the full image into RAM — it processes tiles on demand.
+    """
+    import pyvips
+
+    # Probe the file to find the number of pages (Z planes)
+    probe = pyvips.Image.new_from_file(str(src), access="sequential")
+    n_pages = probe.get("n-pages") if probe.get_typeof("n-pages") else 1
+
+    if n_pages > 1:
+        # Build a lazy MIP pipeline: per-pixel max across all Z planes.
+        # pyvips evaluates this tile-by-tile, never holding the full stack in RAM.
+        pages = [
+            pyvips.Image.new_from_file(str(src), page=i, access="sequential")
+            for i in range(n_pages)
+        ]
+        img = pages[0]
+        for p in pages[1:]:
+            img = (p > img).ifthenelse(p, img)
+    else:
+        img = pyvips.Image.new_from_file(str(src), access="sequential")
+
+    # Squeeze multi-band to single band if needed (e.g. RGB → luminance)
+    if img.bands > 1:
+        img = img.colourspace(pyvips.enums.Interpretation.B_W).extract_band(0)
+
+    # Compute normalization range from a small thumbnail (fast — uses OME sub-levels)
+    thumb = pyvips.Image.thumbnail(str(src), 512)
+    if thumb.bands > 1:
+        thumb = thumb.colourspace(pyvips.enums.Interpretation.B_W).extract_band(0)
+    buf = thumb.write_to_memory()
+    dtype = np.uint8 if thumb.format == pyvips.BandFormat.UCHAR else np.uint16
+    arr = np.frombuffer(buf, dtype=dtype)
+    lo = float(np.percentile(arr, 2))
+    hi = float(np.percentile(arr, 98))
+    del arr, buf, thumb
+
+    # Apply linear normalization to uint8
+    if img.format != pyvips.BandFormat.UCHAR:
+        scale = 255.0 / max(hi - lo, 1.0)
+        img = img.linear([scale], [-lo * scale])
+        img = img.cast(pyvips.BandFormat.UCHAR)
+
+    # Stream-write DZI tiles — pyvips processes one tile at a time.
+    # depth="onepixel" (default) generates all pyramid levels down to 1×1.
+    out_prefix = str(out_dir / image_name)
+    img.dzsave(
+        out_prefix,
+        tile_size=TILE_SIZE,
+        overlap=OVERLAP,
+        suffix=f".{TILE_FORMAT}",
+        Q=JPEG_QUALITY,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Backend 2 — tifffile + Pillow (pure Python fallback)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _build_dzi_tifffile(src: Path, out_dir: Path, image_name: str) -> None:
+    """
+    Build DZI from OME-TIFF using tifffile + Pillow.
+
+    Reads one OME pyramid level at a time (rather than all at once) to keep
+    peak memory usage bounded.  For images wider than MAX_TIFFFILE_DIM the
+    smallest OME level that fits within the limit is used as the top DZI level,
+    which is sufficient for laboratory-scale Xenium data.
+    """
+    import tifffile
+
+    MAX_TIFFFILE_DIM = 16384  # pixels; skip OME levels larger than this
+
+    with tifffile.TiffFile(src) as tif:
+        series = tif.series[0]
+        ax = series.axes.upper()
+        n_levels = len(series.levels)
+
+        full_shape = series.levels[0].shape
+        if ax.startswith(("Z", "C")):
+            full_h, full_w = full_shape[-2], full_shape[-1]
+        else:
+            full_h, full_w = full_shape[0], full_shape[1]
+
+        # Compute normalization from the smallest OME level
+        lo, hi = _tiff_norm_stats(series, ax)
+
+        max_dzi_level = math.ceil(math.log2(max(full_w, full_h)))
+        tiles_root = out_dir / f"{image_name}_files"
+
+        for dzi_level in range(max_dzi_level + 1):
+            level_w = max(1, math.ceil(full_w / 2 ** (max_dzi_level - dzi_level)))
+            level_h = max(1, math.ceil(full_h / 2 ** (max_dzi_level - dzi_level)))
+
+            # Pick smallest OME level >= target, but skip if still too large
+            ome_idx = _pick_ome_level_idx(series, ax, full_w, full_h, level_w, level_h)
+            ome_lvl = series.levels[ome_idx]
+            ome_shape = ome_lvl.shape
+            ome_w = ome_shape[-1]
+            ome_h = ome_shape[-2]
+
+            if max(ome_w, ome_h) > MAX_TIFFFILE_DIM:
+                # This OME level is too large to load safely; skip — lower DZI
+                # levels will be generated from smaller OME levels.
+                continue
+
+            arr = _read_ome_level_arr(ome_lvl, ax)
+            arr_u8 = _to_uint8(arr, lo, hi)
+            del arr
+
+            pil_img = Image.fromarray(arr_u8, mode="L")
+            del arr_u8
+
+            if pil_img.width != level_w or pil_img.height != level_h:
+                pil_img = pil_img.resize((level_w, level_h), Image.LANCZOS)
+
+            level_dir = tiles_root / str(dzi_level)
+            level_dir.mkdir(parents=True, exist_ok=True)
+
+            n_cols = math.ceil(level_w / TILE_SIZE)
+            n_rows = math.ceil(level_h / TILE_SIZE)
+
+            for row in range(n_rows):
+                for col in range(n_cols):
+                    x0 = col * TILE_SIZE - (OVERLAP if col > 0 else 0)
+                    y0 = row * TILE_SIZE - (OVERLAP if row > 0 else 0)
+                    x1 = min(x0 + TILE_SIZE + OVERLAP * 2, level_w)
+                    y1 = min(y0 + TILE_SIZE + OVERLAP * 2, level_h)
+                    x0 = max(x0, 0)
+                    y0 = max(y0, 0)
+                    tile = pil_img.crop((x0, y0, x1, y1))
+                    tile.save(level_dir / f"{col}_{row}.{TILE_FORMAT}", quality=JPEG_QUALITY)
+
+            del pil_img
+
+    _write_dzi_xml(out_dir, image_name, full_w, full_h)
+
+
+def _tiff_norm_stats(series, ax: str) -> tuple[float, float]:
+    """Compute 2nd–98th percentile range from the smallest OME level."""
+    arr = _read_ome_level_arr(series.levels[-1], ax)
+    if arr.dtype == np.uint8:
+        return 0.0, 255.0
+    lo = float(np.percentile(arr, 2))
+    hi = float(np.percentile(arr, 98))
+    return lo, max(hi, lo + 1.0)
+
+
+def _read_ome_level_arr(lvl, ax: str) -> np.ndarray:
+    """Read one OME level and return a 2-D (Y, X) array with MIP if ZYX."""
+    arr = lvl.asarray()
+    if ax.startswith("Z"):
+        arr = arr.max(axis=0)
+    elif ax.startswith("C"):
+        arr = arr[0]
+    elif len(arr.shape) == 3:
+        arr = arr[0]
+    return arr
+
+
+def _pick_ome_level_idx(series, ax: str, full_w: int, full_h: int,
+                        target_w: int, target_h: int) -> int:
+    """Return index of smallest OME level whose dims are >= (target_w, target_h)."""
+    n = len(series.levels)
+    for i in range(n - 1, -1, -1):
+        shape = series.levels[i].shape
+        w = shape[-1]
+        h = shape[-2]
+        if w >= target_w and h >= target_h:
+            return i
+    return 0
+
+
+def _to_uint8(arr: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    if arr.dtype == np.uint8:
+        return arr
+    clipped = np.clip(arr.astype(np.float32), lo, hi)
+    return ((clipped - lo) / (hi - lo) * 255).astype(np.uint8)
+
+
+def _write_dzi_xml(out_dir: Path, image_name: str, width: int, height: int) -> None:
+    dzi_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" '
+        f'Format="{TILE_FORMAT}" Overlap="{OVERLAP}" TileSize="{TILE_SIZE}">\n'
+        f'  <Size Width="{width}" Height="{height}"/>\n'
+        f'</Image>\n'
+    )
+    (out_dir / f"{image_name}.dzi").write_text(dzi_xml)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Shared helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _pyramid_root(dataset_path: Path, image_name: str) -> Path:
@@ -108,144 +326,3 @@ def _find_source(dataset_path: Path, image_name: str) -> Optional[Path]:
         if candidate.exists():
             return candidate
     return None
-
-
-def _read_ome_as_uint8(tif_path: Path) -> tuple[list[np.ndarray], int, int]:
-    """
-    Return (pyramid_levels_as_uint8, full_width, full_height).
-
-    Handles:
-      ZYX  — max-intensity projection across Z
-      CYX  — first channel only (DAPI / brightfield)
-      YX   — used as-is
-
-    uint16 values are contrast-normalised per level using the 2nd–98th
-    percentile of level 0 (so all levels share the same LUT).
-    """
-    import tifffile
-
-    with tifffile.TiffFile(tif_path) as tif:
-        series = tif.series[0]
-        full_shape = series.levels[0].shape  # e.g. (Z, Y, X) or (C, Y, X) or (Y, X)
-        axes = series.axes  # e.g. "ZYX", "CYX", "YX"
-
-        # Determine which axes are spatial vs. projection
-        ax = axes.upper()
-
-        def _read_level(lvl) -> np.ndarray:
-            arr = lvl.asarray()
-            # Collapse non-spatial leading dims
-            if ax.startswith("Z") or ax.startswith("C"):
-                # Z: MIP; C: first channel
-                if ax.startswith("Z"):
-                    arr = arr.max(axis=0)
-                else:
-                    arr = arr[0]
-            elif len(arr.shape) == 3:
-                arr = arr[0]
-            return arr  # (Y, X), uint16 or uint8
-
-        # Read level 0 to compute the normalisation LUT
-        arr0 = _read_level(series.levels[0])
-        if arr0.dtype == np.uint16:
-            lo = float(np.percentile(arr0, 2))
-            hi = float(np.percentile(arr0, 98))
-            if hi <= lo:
-                hi = lo + 1.0
-
-        def _to_uint8(arr: np.ndarray) -> np.ndarray:
-            if arr.dtype == np.uint8:
-                return arr
-            clipped = np.clip(arr.astype(np.float32), lo, hi)
-            scaled = ((clipped - lo) / (hi - lo) * 255).astype(np.uint8)
-            return scaled
-
-        levels_u8 = []
-        for lvl in series.levels:
-            arr = _read_level(lvl)
-            levels_u8.append(_to_uint8(arr))
-
-        h, w = levels_u8[0].shape
-        return levels_u8, w, h
-
-
-def _build_dzi_tifffile(src: Path, out_dir: Path, image_name: str) -> None:
-    """
-    Generate DZI tile pyramid using tifffile + Pillow.
-    Reads OME pyramid levels directly; no libvips required.
-    """
-    levels_u8, full_w, full_h = _read_ome_as_uint8(src)
-
-    # Total DZI level count: 0 (1×1) … max_dzi_level (full res)
-    max_dzi_level = math.ceil(math.log2(max(full_w, full_h)))
-
-    tiles_root = out_dir / f"{image_name}_files"
-
-    # Generate tiles for each DZI level
-    for dzi_level in range(max_dzi_level + 1):
-        level_w = max(1, math.ceil(full_w / 2 ** (max_dzi_level - dzi_level)))
-        level_h = max(1, math.ceil(full_h / 2 ** (max_dzi_level - dzi_level)))
-
-        # Pick the OME pyramid level whose resolution is ≥ the target
-        img_arr = _pick_ome_level(levels_u8, full_w, full_h, level_w, level_h)
-
-        # Resize to exact DZI dimensions if needed
-        pil_img = Image.fromarray(img_arr, mode="L")
-        if pil_img.width != level_w or pil_img.height != level_h:
-            pil_img = pil_img.resize((level_w, level_h), Image.LANCZOS)
-
-        # Tile the level
-        level_dir = tiles_root / str(dzi_level)
-        level_dir.mkdir(parents=True, exist_ok=True)
-
-        n_cols = math.ceil(level_w / TILE_SIZE)
-        n_rows = math.ceil(level_h / TILE_SIZE)
-
-        for row in range(n_rows):
-            for col in range(n_cols):
-                x0 = col * TILE_SIZE - (OVERLAP if col > 0 else 0)
-                y0 = row * TILE_SIZE - (OVERLAP if row > 0 else 0)
-                x1 = min(x0 + TILE_SIZE + OVERLAP * 2, level_w)
-                y1 = min(y0 + TILE_SIZE + OVERLAP * 2, level_h)
-                x0 = max(x0, 0)
-                y0 = max(y0, 0)
-
-                tile = pil_img.crop((x0, y0, x1, y1))
-                tile.save(
-                    level_dir / f"{col}_{row}.{TILE_FORMAT}",
-                    quality=JPEG_QUALITY,
-                )
-
-    # Write DZI descriptor
-    dzi_xml = (
-        f'<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<Image xmlns="http://schemas.microsoft.com/deepzoom/2008" '
-        f'Format="{TILE_FORMAT}" Overlap="{OVERLAP}" TileSize="{TILE_SIZE}">\n'
-        f'  <Size Width="{full_w}" Height="{full_h}"/>\n'
-        f'</Image>\n'
-    )
-    (out_dir / f"{image_name}.dzi").write_text(dzi_xml)
-
-
-def _pick_ome_level(
-    levels_u8: list[np.ndarray],
-    full_w: int,
-    full_h: int,
-    target_w: int,
-    target_h: int,
-) -> np.ndarray:
-    """
-    Return the OME pyramid level whose dimensions are closest to but
-    at least as large as (target_w, target_h). Falls back to level 0.
-    """
-    n = len(levels_u8)
-    for i in range(n - 1, -1, -1):
-        arr = levels_u8[i]
-        h, w = arr.shape
-        # Scale factor relative to full res
-        scale = 2 ** i  # OME level i is ~2^i downsampled
-        approx_w = max(1, math.ceil(full_w / scale))
-        approx_h = max(1, math.ceil(full_h / scale))
-        if approx_w >= target_w and approx_h >= target_h:
-            return arr
-    return levels_u8[0]
