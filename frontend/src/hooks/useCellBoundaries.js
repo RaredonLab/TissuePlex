@@ -23,9 +23,14 @@ export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
           const fracW = (xmax - xmin) / imageSize.w;
-          if (fracW < 0.5) {
-            url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
+          if (fracW >= 0.5) {
+            // Zoomed too far out — cells are sub-pixel; skip to avoid OOM on
+            // large datasets.
+            setCells([]);
+            setLoading(false);
+            return;
           }
+          url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}&limit=20000`;
         }
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);

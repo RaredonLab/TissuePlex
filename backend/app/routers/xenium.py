@@ -105,10 +105,12 @@ def cell_boundaries(
     ymin: float = Query(None),
     xmax: float = Query(None),
     ymax: float = Query(None),
+    limit: int = Query(20_000),
 ):
     """Return cell polygon boundaries filtered by bounding box."""
     return _reader(dataset).cell_boundaries(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
+        limit=limit,
     )
 
 

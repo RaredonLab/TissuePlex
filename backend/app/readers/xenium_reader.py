@@ -103,7 +103,7 @@ class XeniumReader:
     # Cell boundaries
     # ------------------------------------------------------------------
 
-    def cell_boundaries(self, bbox: Optional[tuple] = None) -> list[dict]:
+    def cell_boundaries(self, bbox: Optional[tuple] = None, limit: int = 20_000) -> list[dict]:
         df = self._read_parquet("cell_boundaries.parquet")
         if df is None:
             return []
@@ -116,6 +116,10 @@ class XeniumReader:
                     (df[x_col] >= xmin) & (df[x_col] <= xmax) &
                     (df[y_col] >= ymin) & (df[y_col] <= ymax)
                 ]
+        # Limit by unique cell count (each cell has ~10–20 vertices)
+        if limit and "cell_id" in df.columns:
+            keep = df["cell_id"].drop_duplicates().iloc[:limit]
+            df = df[df["cell_id"].isin(keep)]
         df = df.copy()
         if x_col:
             df[x_col] = df[x_col] / self.pixel_size
