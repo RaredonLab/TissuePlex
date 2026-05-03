@@ -1,0 +1,21 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# Data I/O
+pandas==2.2.2
+pyarrow==16.1.0
+zarr==2.18.2
+fsspec==2024.6.0
+
+# Image tiling (Step 2)
+pyvips==2.2.3
+cffi<2.0  # pyvips 2.2.3 incompatible with cffi 2.0+
+Pillow>=10.0.0
+tifffile>=2024.1.1
+imagecodecs>=2024.1.1  # JPEG2000 / other OME-TIFF compression codecs
+
+# Xenium format support
+anndata==0.10.8
+scipy==1.13.1
+h5py>=3.9.0
