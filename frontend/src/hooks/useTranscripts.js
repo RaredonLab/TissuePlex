@@ -31,9 +31,9 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
           }
         }
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) { setTranscripts([]); return; }
         const data = await res.json();
-        setTranscripts(data);
+        setTranscripts(Array.isArray(data) ? data : []);
       } catch (e) {
         setError(e.message);
       } finally {

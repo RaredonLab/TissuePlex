@@ -33,8 +33,9 @@ export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled
           url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}&limit=20000`;
         }
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) { setCells([]); return; }
         const data = await res.json();
+        if (!Array.isArray(data)) { setCells([]); return; }
 
         // Group flat vertex list by cell_id → polygon arrays
         const byCell = new Map();
