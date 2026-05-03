@@ -158,7 +158,20 @@ export const useStore = create((set, get) => ({
   //   (updated by Viewer whenever the transcript fetch result changes).
   hiddenGenes: new Set(),
   viewportGenes: [],
-  setViewportGenes: (genes) => set({ viewportGenes: genes }),
+  setViewportGenes: (genes) => set((s) => {
+    // If the user has an active filter, auto-hide genes newly entering the viewport
+    // so panning doesn't reveal genes the user deliberately excluded.
+    let hiddenGenes = s.hiddenGenes;
+    if (hiddenGenes.size > 0) {
+      const prevSet = new Set(s.viewportGenes);
+      const incoming = genes.filter((g) => !prevSet.has(g));
+      if (incoming.length > 0) {
+        hiddenGenes = new Set(hiddenGenes);
+        incoming.forEach((g) => hiddenGenes.add(g));
+      }
+    }
+    return { viewportGenes: genes, hiddenGenes };
+  }),
   toggleGene: (gene) =>
     set((s) => {
       const next = new Set(s.hiddenGenes);

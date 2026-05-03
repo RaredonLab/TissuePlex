@@ -459,7 +459,7 @@ function TranscriptSpeciesSection() {
     ? viewportGenes.filter((g) => g.toLowerCase().includes(search.toLowerCase()))
     : viewportGenes;
 
-  const visibleCount = viewportGenes.length - hiddenGenes.size;
+  const visibleCount = viewportGenes.filter((g) => !hiddenGenes.has(g)).length;
 
   if (viewportGenes.length === 0) {
     return <div style={{ color: "#3a3a3a", paddingLeft: 4, marginBottom: 6, fontSize: 11 }}>— no transcripts loaded</div>;
