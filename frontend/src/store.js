@@ -5,7 +5,7 @@ const API = import.meta.env.VITE_API_URL ?? "/api";
 export const useStore = create((set, get) => ({
   // ── Dataset ────────────────────────────────────────────────────────────────
   apiBase: API,
-  dataset: "mouse_ileum_tiny",
+  dataset: null,             // initialized from /xenium/datasets on first load
   activeImage: "morphology", // which OME-TIFF is loaded as the background
 
   setDataset: (dataset) => set({ dataset }),

@@ -745,6 +745,15 @@ export default function Viewer() {
   }).filter(Boolean);
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (!dataset) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "100%", height: "100%", color: "#555", fontFamily: "monospace", fontSize: 13 }}>
+        Loading datasets…
+      </div>
+    );
+  }
+
   const inAnnotationMode = annotationMode !== "pan";
   const cursor = annotationMode === "region" ? "crosshair"
     : annotationMode === "measure" ? "cell" : "default";

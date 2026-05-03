@@ -48,23 +48,51 @@ const INPUT_STYLE = {
 const PALETTE_OPTIONS = ["viridis", "plasma", "magma", "inferno"];
 
 function DatasetPicker() {
-  const { apiBase, dataset, setDataset } = useStore();
+  const { apiBase, dataset, setDataset, activeImage, setActiveImage } = useStore();
   const [datasets, setDatasets] = useState([]);
+  const [images, setImages] = useState([]);
 
+  // Fetch dataset list; auto-initialize to first entry if store has no valid dataset
   useEffect(() => {
     fetch(`${apiBase}/xenium/datasets`)
       .then((r) => r.json())
-      .then(setDatasets)
+      .then((list) => {
+        setDatasets(list);
+        if (list.length > 0) {
+          const cur = useStore.getState().dataset;
+          if (!cur || !list.includes(cur)) setDataset(list[0]);
+        }
+      })
       .catch(() => {});
-  }, [apiBase]);
+  }, [apiBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (datasets.length <= 1) return null;
+  // Fetch available images for the current dataset
+  useEffect(() => {
+    if (!dataset) return;
+    fetch(`${apiBase}/xenium/${dataset}/images`)
+      .then((r) => r.json())
+      .then((list) => {
+        setImages(list);
+        if (list.length > 0 && !list.includes(activeImage)) {
+          setActiveImage(list[0]);
+        }
+      })
+      .catch(() => setImages([]));
+  }, [apiBase, dataset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (datasets.length === 0) {
+    return (
+      <div style={{ marginBottom: 12, color: "#555", fontSize: 11, fontFamily: "monospace" }}>
+        Connecting…
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{ ...SECTION_HEADER, marginTop: 0 }}>Dataset</div>
       <select
-        value={dataset}
+        value={dataset || ""}
         onChange={(e) => setDataset(e.target.value)}
         style={SELECT_STYLE}
       >
@@ -72,6 +100,20 @@ function DatasetPicker() {
           <option key={d} value={d}>{d}</option>
         ))}
       </select>
+      {images.length > 1 && (
+        <>
+          <div style={{ ...SECTION_HEADER, marginTop: 8 }}>Image</div>
+          <select
+            value={activeImage}
+            onChange={(e) => setActiveImage(e.target.value)}
+            style={SELECT_STYLE}
+          >
+            {images.map((img) => (
+              <option key={img} value={img}>{img}</option>
+            ))}
+          </select>
+        </>
+      )}
     </div>
   );
 }
