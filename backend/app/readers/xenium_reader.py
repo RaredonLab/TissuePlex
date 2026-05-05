@@ -271,54 +271,68 @@ class XeniumReader:
     # Supplemental metadata (cell-metadata/ directory)
     # ------------------------------------------------------------------
 
+    # Standard Xenium filenames that live in the dataset root and must not be
+    # treated as supplemental metadata even if they happen to be CSVs.
+    _XENIUM_ROOT_SKIP = frozenset({
+        "cells.csv", "cells.csv.gz", "transcripts.csv", "transcripts.csv.gz",
+    })
+
     def _load_supplemental_metadata(self) -> Optional[pd.DataFrame]:
         """
-        Scan {dataset}/cell-metadata/ for CSV / parquet files, merge them on
-        cell barcode, and return a DataFrame with a 'cell_id' column.
-        Result is cached for the lifetime of this reader instance.
+        Discover user-defined cell metadata and merge it into a single DataFrame.
+        Scans two locations (files found in both are merged, earlier takes precedence):
 
-        Supported file formats
-        ----------------------
-        CSV / CSV.GZ  — any .csv or .csv.gz file.  The barcode column is
-                        resolved in order of preference:
-                          1. A column explicitly named 'cell_id'.
-                          2. The first column when it contains unique strings
-                             that match known cell barcodes (handles R's default
-                             write.csv output where rownames become column 0,
-                             named "" or "Unnamed: 0").
-                          3. Fallback: read with index_col=0 and treat the index
-                             as the barcode.
-        Parquet       — must have a 'cell_id' column.
+          1. {dataset}/cell-metadata/  — dedicated subdirectory (any CSV / parquet)
+          2. {dataset}/               — dataset root, CSV / CSV.GZ only, skipping
+                                        known Xenium filenames
 
-        Multiple files are outer-joined on 'cell_id'.  Columns already present
-        in an earlier file are not overwritten by later files (cells.parquet
-        takes ultimate precedence in _cells_full).
+        Barcode column resolution for CSV files (in order):
+          • Column explicitly named 'cell_id'
+          • First column read as index (covers data.table::fwrite(row.names=TRUE)
+            and base R write.csv — both write barcodes as an unnamed first column)
+          • First string-typed unique column as fallback
+
+        Parquet files must have an explicit 'cell_id' column.
+
+        Multiple files are outer-joined on 'cell_id'.  Columns already present in
+        an earlier file are not overwritten.  cells.parquet takes final precedence
+        in _cells_full().  Result is cached for the reader lifetime.
         """
         if self._supp_meta is not _UNSET:
             return self._supp_meta  # type: ignore[return-value]
 
-        meta_dir = self.path / "cell-metadata"
-        if not meta_dir.is_dir():
-            self._supp_meta = None
-            return None
+        candidate_files: list[Path] = []
 
-        frames: list[pd.DataFrame] = []
-        for f in sorted(meta_dir.iterdir()):
+        # 1. cell-metadata/ subdirectory (all CSV + parquet)
+        meta_dir = self.path / "cell-metadata"
+        if meta_dir.is_dir():
+            candidate_files.extend(sorted(meta_dir.iterdir()))
+
+        # 2. Dataset root — CSV only, skip known Xenium filenames
+        for f in sorted(self.path.iterdir()):
             if not f.is_file():
                 continue
+            nl = f.name.lower()
+            if nl in self._XENIUM_ROOT_SKIP:
+                continue
+            if nl.endswith(".csv.gz") or nl.endswith(".csv"):
+                candidate_files.append(f)
+
+        frames: list[pd.DataFrame] = []
+        for f in candidate_files:
             try:
-                name_lower = f.name.lower()
-                if name_lower.endswith(".parquet"):
+                nl = f.name.lower()
+                if nl.endswith(".parquet"):
                     df = pd.read_parquet(f)
                     if "cell_id" not in df.columns:
                         print(f"[xenium_reader] skip {f.name}: no 'cell_id' column")
                         continue
-                elif name_lower.endswith(".csv.gz") or name_lower.endswith(".csv"):
+                elif nl.endswith(".csv.gz") or nl.endswith(".csv"):
                     df = self._read_csv_with_barcodes(f)
                     if df is None:
                         continue
                 else:
-                    continue  # ignore unrecognised files
+                    continue
 
                 df["cell_id"] = df["cell_id"].astype(str)
                 frames.append(df)
@@ -333,7 +347,6 @@ class XeniumReader:
 
         merged = frames[0]
         for frame in frames[1:]:
-            # Add only columns not already present
             new_cols = ["cell_id"] + [c for c in frame.columns if c not in merged.columns]
             merged = merged.merge(frame[new_cols], on="cell_id", how="outer")
 
@@ -342,30 +355,26 @@ class XeniumReader:
 
     def _read_csv_with_barcodes(self, path: Path) -> Optional[pd.DataFrame]:
         """
-        Read a CSV file and identify the barcode column.
-        Handles R's write.csv(row.names=TRUE) where barcodes land in column 0
-        with the header "" (read by pandas as "Unnamed: 0").
+        Read a CSV and promote the barcode column to 'cell_id'.
+
+        Strategy: read with index_col=0 so the first column — whether named ""
+        (base R write.csv), an empty header (data.table fwrite row.names=TRUE),
+        or any explicit name — becomes the DataFrame index.  We then rename it
+        to 'cell_id' and reset.  Explicit 'cell_id' column is also accepted.
         """
-        # Try reading with the first column as the index (covers R rownames)
         try:
             df = pd.read_csv(path, index_col=0)
-            if df.index.dtype == object and df.index.is_unique and df.index.name != "Unnamed: 0":
-                df.index.name = "cell_id"
-                return df.reset_index()
-            # index_col=0 read unnamed first column as index — treat as barcodes
             df.index.name = "cell_id"
             return df.reset_index()
         except Exception:
             pass
 
-        # Fallback: read normally, look for an obvious barcode column
+        # Fallback without index_col in case the file has no sensible first column
         df = pd.read_csv(path)
         if "cell_id" in df.columns:
             return df
-        # "Unnamed: 0" is pandas' name for R's unnamed rowname column
         if "Unnamed: 0" in df.columns:
             return df.rename(columns={"Unnamed: 0": "cell_id"})
-        # First column if it's string-typed and unique
         first = df.columns[0]
         if df[first].dtype == object and df[first].is_unique:
             return df.rename(columns={first: "cell_id"})
