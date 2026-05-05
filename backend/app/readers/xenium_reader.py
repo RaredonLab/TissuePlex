@@ -216,7 +216,11 @@ class XeniumReader:
 
     def cells_schema(self) -> dict:
         """Return column names and dtypes for cells.parquet + supplemental metadata."""
-        df = self._cells_full()
+        try:
+            df = self._cells_full()
+        except Exception as exc:
+            print(f"[xenium_reader] cells_schema: error building full cells df: {exc}")
+            df = self._read_parquet("cells.parquet")
         if df is None:
             return {"columns": {}}
         skip = {"cell_id"}
@@ -271,10 +275,12 @@ class XeniumReader:
     # Supplemental metadata (cell-metadata/ directory)
     # ------------------------------------------------------------------
 
-    # Standard Xenium filenames that live in the dataset root and must not be
-    # treated as supplemental metadata even if they happen to be CSVs.
+    # Plain-CSV filenames in the dataset root that are standard Xenium outputs,
+    # not user metadata.  .csv.gz files are ALWAYS skipped in the root (they are
+    # exclusively Xenium data files; user exports are never gzip-compressed).
     _XENIUM_ROOT_SKIP = frozenset({
-        "cells.csv", "cells.csv.gz", "transcripts.csv", "transcripts.csv.gz",
+        "cells.csv", "transcripts.csv", "metrics_summary.csv",
+        "analysis_summary.csv", "gene_panel.csv",
     })
 
     def _load_supplemental_metadata(self) -> Optional[pd.DataFrame]:
@@ -308,15 +314,17 @@ class XeniumReader:
         if meta_dir.is_dir():
             candidate_files.extend(sorted(meta_dir.iterdir()))
 
-        # 2. Dataset root — CSV only, skip known Xenium filenames
+        # 2. Dataset root — plain .csv only (never .csv.gz, which are always
+        #    Xenium data files), skipping known Xenium output filenames.
         for f in sorted(self.path.iterdir()):
             if not f.is_file():
                 continue
             nl = f.name.lower()
+            if not nl.endswith(".csv"):          # skip .csv.gz and everything else
+                continue
             if nl in self._XENIUM_ROOT_SKIP:
                 continue
-            if nl.endswith(".csv.gz") or nl.endswith(".csv"):
-                candidate_files.append(f)
+            candidate_files.append(f)
 
         frames: list[pd.DataFrame] = []
         for f in candidate_files:

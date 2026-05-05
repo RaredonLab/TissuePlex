@@ -62,6 +62,8 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
+        if (!data?.values) throw new Error("color-values response missing 'values'");
+
         if (data.type === "categorical") {
           const { categories } = data;
           const colorMap = new Map(
