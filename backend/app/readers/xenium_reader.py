@@ -11,10 +11,15 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 
+_UNSET = object()  # sentinel to distinguish "not yet loaded" from "loaded, no data"
+
+
 class XeniumReader:
     def __init__(self, dataset_path: Path):
         self.path = dataset_path
         self._pixel_size: Optional[float] = None
+        self._supp_meta = _UNSET   # supplemental metadata cache
+        self._cells_full_cache = _UNSET  # merged cells + supp cache
 
     # ------------------------------------------------------------------
     # Experiment metadata
@@ -188,7 +193,7 @@ class XeniumReader:
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
 
     def _color_values_meta(self, field: str) -> dict:
-        df = self._read_parquet("cells.parquet")
+        df = self._cells_full()
         if df is None or field not in df.columns:
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
         col = df[field]
@@ -210,8 +215,8 @@ class XeniumReader:
                     "min": float(filled.min()), "max": float(filled.max())}
 
     def cells_schema(self) -> dict:
-        """Return column names and dtypes for cells.parquet."""
-        df = self._read_parquet("cells.parquet")
+        """Return column names and dtypes for cells.parquet + supplemental metadata."""
+        df = self._cells_full()
         if df is None:
             return {"columns": {}}
         skip = {"cell_id"}
@@ -246,8 +251,8 @@ class XeniumReader:
             return {}
 
     def cell_detail(self, cell_id: str) -> Optional[dict]:
-        """Return merged cell metadata + expression for one cell."""
-        df = self._read_parquet("cells.parquet")
+        """Return merged cell metadata (incl. supplemental) + expression for one cell."""
+        df = self._cells_full()
         if df is None:
             return None
         row = df[df["cell_id"] == cell_id]
@@ -261,6 +266,146 @@ class XeniumReader:
                 record[col] = record[col] / ps
         record["expression"] = self.cell_expression(cell_id)
         return record
+
+    # ------------------------------------------------------------------
+    # Supplemental metadata (cell-metadata/ directory)
+    # ------------------------------------------------------------------
+
+    def _load_supplemental_metadata(self) -> Optional[pd.DataFrame]:
+        """
+        Scan {dataset}/cell-metadata/ for CSV / parquet files, merge them on
+        cell barcode, and return a DataFrame with a 'cell_id' column.
+        Result is cached for the lifetime of this reader instance.
+
+        Supported file formats
+        ----------------------
+        CSV / CSV.GZ  — any .csv or .csv.gz file.  The barcode column is
+                        resolved in order of preference:
+                          1. A column explicitly named 'cell_id'.
+                          2. The first column when it contains unique strings
+                             that match known cell barcodes (handles R's default
+                             write.csv output where rownames become column 0,
+                             named "" or "Unnamed: 0").
+                          3. Fallback: read with index_col=0 and treat the index
+                             as the barcode.
+        Parquet       — must have a 'cell_id' column.
+
+        Multiple files are outer-joined on 'cell_id'.  Columns already present
+        in an earlier file are not overwritten by later files (cells.parquet
+        takes ultimate precedence in _cells_full).
+        """
+        if self._supp_meta is not _UNSET:
+            return self._supp_meta  # type: ignore[return-value]
+
+        meta_dir = self.path / "cell-metadata"
+        if not meta_dir.is_dir():
+            self._supp_meta = None
+            return None
+
+        frames: list[pd.DataFrame] = []
+        for f in sorted(meta_dir.iterdir()):
+            if not f.is_file():
+                continue
+            try:
+                name_lower = f.name.lower()
+                if name_lower.endswith(".parquet"):
+                    df = pd.read_parquet(f)
+                    if "cell_id" not in df.columns:
+                        print(f"[xenium_reader] skip {f.name}: no 'cell_id' column")
+                        continue
+                elif name_lower.endswith(".csv.gz") or name_lower.endswith(".csv"):
+                    df = self._read_csv_with_barcodes(f)
+                    if df is None:
+                        continue
+                else:
+                    continue  # ignore unrecognised files
+
+                df["cell_id"] = df["cell_id"].astype(str)
+                frames.append(df)
+                print(f"[xenium_reader] loaded supplemental metadata: {f.name} "
+                      f"({len(df)} rows, {len(df.columns)-1} extra columns)")
+            except Exception as exc:
+                print(f"[xenium_reader] warning: could not load {f.name}: {exc}")
+
+        if not frames:
+            self._supp_meta = None
+            return None
+
+        merged = frames[0]
+        for frame in frames[1:]:
+            # Add only columns not already present
+            new_cols = ["cell_id"] + [c for c in frame.columns if c not in merged.columns]
+            merged = merged.merge(frame[new_cols], on="cell_id", how="outer")
+
+        self._supp_meta = merged
+        return merged
+
+    def _read_csv_with_barcodes(self, path: Path) -> Optional[pd.DataFrame]:
+        """
+        Read a CSV file and identify the barcode column.
+        Handles R's write.csv(row.names=TRUE) where barcodes land in column 0
+        with the header "" (read by pandas as "Unnamed: 0").
+        """
+        # Try reading with the first column as the index (covers R rownames)
+        try:
+            df = pd.read_csv(path, index_col=0)
+            if df.index.dtype == object and df.index.is_unique and df.index.name != "Unnamed: 0":
+                df.index.name = "cell_id"
+                return df.reset_index()
+            # index_col=0 read unnamed first column as index — treat as barcodes
+            df.index.name = "cell_id"
+            return df.reset_index()
+        except Exception:
+            pass
+
+        # Fallback: read normally, look for an obvious barcode column
+        df = pd.read_csv(path)
+        if "cell_id" in df.columns:
+            return df
+        # "Unnamed: 0" is pandas' name for R's unnamed rowname column
+        if "Unnamed: 0" in df.columns:
+            return df.rename(columns={"Unnamed: 0": "cell_id"})
+        # First column if it's string-typed and unique
+        first = df.columns[0]
+        if df[first].dtype == object and df[first].is_unique:
+            return df.rename(columns={first: "cell_id"})
+
+        print(f"[xenium_reader] skip {path.name}: cannot identify barcode column")
+        return None
+
+    def _cells_full(self) -> Optional[pd.DataFrame]:
+        """
+        Return cells.parquet merged with any supplemental metadata.
+        Supplemental columns are appended on the right; cells.parquet values
+        take precedence for any overlapping column names.
+        Result is cached.
+        """
+        if self._cells_full_cache is not _UNSET:
+            return self._cells_full_cache  # type: ignore[return-value]
+
+        cells = self._read_parquet("cells.parquet")
+        supp  = self._load_supplemental_metadata()
+
+        if cells is None and supp is None:
+            self._cells_full_cache = None
+            return None
+
+        if supp is None:
+            self._cells_full_cache = cells
+            return cells
+
+        if cells is None:
+            self._cells_full_cache = supp
+            return supp
+
+        # Only merge columns not already in cells.parquet
+        new_cols = [c for c in supp.columns if c not in cells.columns]
+        if new_cols:
+            merged = cells.merge(supp[["cell_id"] + new_cols], on="cell_id", how="left")
+        else:
+            merged = cells
+        self._cells_full_cache = merged
+        return merged
 
     # ------------------------------------------------------------------
     # Internal helpers
