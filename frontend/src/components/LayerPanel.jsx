@@ -54,7 +54,7 @@ function DatasetPicker() {
 
   // Fetch dataset list; auto-initialize to first entry if store has no valid dataset
   useEffect(() => {
-    fetch(`${apiBase}/xenium/datasets`)
+    fetch(`${apiBase}/spatial/datasets`)
       .then((r) => r.json())
       .then((list) => {
         setDatasets(list);
@@ -69,7 +69,7 @@ function DatasetPicker() {
   // Fetch available images for the current dataset
   useEffect(() => {
     if (!dataset) return;
-    fetch(`${apiBase}/xenium/${dataset}/images`)
+    fetch(`${apiBase}/spatial/${dataset}/images`)
       .then((r) => r.json())
       .then((list) => {
         setImages(list);
@@ -171,11 +171,11 @@ function ColorBySection() {
 
   // Fetch full gene list and cell schema once per dataset
   useEffect(() => {
-    fetch(`${apiBase}/xenium/${dataset}/genes`)
+    fetch(`${apiBase}/spatial/${dataset}/genes`)
       .then((r) => r.json())
       .then(setAllGenes)
       .catch(() => {});
-    fetch(`${apiBase}/xenium/${dataset}/cells/schema`)
+    fetch(`${apiBase}/spatial/${dataset}/cells/schema`)
       .then((r) => r.json())
       .then(setCellSchema)
       .catch(() => {});
@@ -322,7 +322,7 @@ function CategoricalLegend({ field, apiBase, dataset }) {
 
   useEffect(() => {
     if (!field) return;
-    fetch(`${apiBase}/xenium/${dataset}/color-values`, {
+    fetch(`${apiBase}/spatial/${dataset}/color-values`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "metadata", field }),
@@ -899,7 +899,7 @@ function RegionsSection() {
   if (regions.length === 0) return null;
 
   const exportRegion = async (region) => {
-    const res = await fetch(`${apiBase}/xenium/${dataset}/cells/export`, {
+    const res = await fetch(`${apiBase}/spatial/${dataset}/cells/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(region.selectedCellIds),

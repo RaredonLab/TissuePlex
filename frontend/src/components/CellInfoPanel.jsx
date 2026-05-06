@@ -1,6 +1,6 @@
 /**
  * Cell info panel — shown when the user clicks a cell.
- * Fetches /xenium/{dataset}/cells/{cell_id} and displays metadata + expression.
+ * Fetches /spatial/{dataset}/cells/{cell_id} and displays metadata + expression.
  */
 import React, { useEffect, useState } from "react";
 import { useStore } from "../store";
@@ -17,7 +17,7 @@ export default function CellInfoPanel() {
   useEffect(() => {
     if (!selectedCell) { setDetail(null); return; }
     setLoading(true);
-    fetch(`${apiBase}/xenium/${dataset}/cells/${selectedCell.cell_id}`)
+    fetch(`${apiBase}/spatial/${dataset}/cells/${selectedCell.cell_id}`)
       .then((r) => r.json())
       .then((d) => { setDetail(d); setLoading(false); })
       .catch(() => setLoading(false));

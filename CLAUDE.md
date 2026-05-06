@@ -8,14 +8,16 @@ of the project so any Claude instance can contribute immediately.
 
 ## What This Is
 
-A web-based spatial transcriptomics viewer for Xenium data with custom connectivity
-layers produced by the lab's NICHESv2 R pipeline. Built because Xenium Explorer does
-not support cell-cell ligand-receptor mechanism (LRM) visualization.
+A web-based spatial transcriptomics viewer supporting multiple platforms (Xenium,
+MERSCOPE, CosMx) with connectivity layers produced by the lab's NICHESv2 R pipeline.
+Built because Xenium Explorer does not support cell-cell ligand-receptor mechanism
+(LRM) visualization, and extended to be platform-agnostic.
 
 **Core insight**: Rather than rasterizing 488 LRM outputs as PNG images, we store
-connectivity data as a single `edges.parquet` file (analogous to Xenium's
-`transcripts.parquet`) and render it as WebGL vector lines. This allows instant
-toggling of 488 LRMs, coloring by any metadata, and zoom-independent rendering.
+connectivity data as a single `edges.parquet` file and render it as WebGL vector lines.
+This allows instant toggling of 488 LRMs, coloring by any metadata, and zoom-independent
+rendering. The `edges.parquet` format is platform-agnostic — it works with any spatial
+dataset as long as cell barcodes match.
 
 ---
 
@@ -29,15 +31,41 @@ Browser
 
 FastAPI backend
   /tiles     — OME-TIFF → DZI tile pyramid (pyvips/tifffile), tile serving
-  /xenium    — transcripts, cell boundaries, cell metadata, gene expression
+  /spatial   — platform-agnostic: transcripts, cell boundaries, cell metadata,
+               gene expression, color-values, dataset list, per-dataset image list
   /edges     — edge list, LRM catalogue, per-edge color values, edge detail
   /layers    — generic parquet layer serving (extensible)
 ```
 
 **Key architectural constraint**: OpenSeadragon handles all pan/zoom events. deck.gl
 sits in an absolutely-positioned canvas on top, with its viewport synced to OSD via a
-custom `syncDeckFromOSD` function on every OSD viewport-change event. All data uses
-Xenium pixel coordinates (µm / pixel_size).
+custom `syncDeckFromOSD` function on every OSD viewport-change event. All data is
+returned in image pixel coordinates (native_coord / pixel_size).
+
+---
+
+## Platform Support & Reader Architecture
+
+The backend uses an abstract reader pattern. All platform readers inherit from
+`SpatialDatasetReader` (base_reader.py) and implement the same interface.
+`ReaderFactory` auto-detects the platform from directory contents.
+
+**Detection order:**
+| Platform | Sentinel file |
+|---|---|
+| Xenium (10x Genomics) | `experiment.xenium` |
+| MERSCOPE (Vizgen) | `cell_by_gene.csv` or `cell_metadata.csv` |
+| CosMx (Nanostring) | `*_tx_file.csv` |
+
+**Coordinate contract**: Every reader converts native coordinates to image pixel space
+before returning data. The frontend always receives pixel coordinates.
+
+**Implementation status:**
+- Xenium: fully implemented
+- MERSCOPE: cells, transcripts, genes, color-values (metadata + gene-set) implemented;
+  cell boundaries stub (MERSCOPE uses HDF5 boundary format, not yet parsed)
+- CosMx: cells, transcripts, genes, metadata color-values implemented;
+  gene-set color-values stub (requires transcript aggregation per cell)
 
 ---
 
@@ -49,13 +77,16 @@ backend/
     main.py                  FastAPI entry point, CORS, router registration
     routers/
       tiles.py               DZI descriptor + tile serving; auto-builds pyramid on first request
-      xenium.py              transcripts, cell boundaries, cells, gene expression, color-values,
-                             dataset list, per-dataset image list
+      spatial.py             Platform-agnostic router: all /spatial/... endpoints
+      xenium.py              DEPRECATED — kept for reference; not registered in main.py
       edges.py               edge query, LRM catalogue, edge color values, edge detail
       layers.py              generic parquet layer router
     readers/
-      xenium_reader.py       reads all standard Xenium output files; merges
-                             supplemental metadata from cell-metadata/ directory
+      base_reader.py         Abstract base class — SpatialDatasetReader interface
+      reader_factory.py      ReaderFactory: auto-detect platform, instantiate reader
+      xenium_reader.py       Xenium implementation (inherits SpatialDatasetReader)
+      merscope_reader.py     MERSCOPE implementation (inherits SpatialDatasetReader)
+      cosmx_reader.py        CosMx implementation (inherits SpatialDatasetReader)
       edge_reader.py         reads edges.parquet; lrm_catalogue(), edge_color_values(), edge_detail()
       layer_reader.py        generic parquet reader
     tiling/
@@ -71,7 +102,7 @@ frontend/
       Viewer.jsx             Main component: OSD + deck.gl + all layer logic
       LayerPanel.jsx         Right-side panel: toggles, opacity, color-by, legends,
                              dataset/image picker, transcript species filter
-      CellInfoPanel.jsx      Floating panel on cell click
+      CellInfoPanel.jsx      Floating panel on cell click; shows color-by value highlight
       EdgeInfoPanel.jsx      Floating panel on edge/autocrine click
       AnnotationToolbar.jsx  Region drawing + measurement tools
     hooks/
@@ -103,12 +134,13 @@ docs/
 ## Data Model: edges.parquet (NICHESv2 Format)
 
 One row per **(directed edge) × (LRM)**. This is the long/sparse format from NICHESv2.
+Platform-agnostic — works with any spatial dataset as long as cell barcodes match.
 
 | Column | Type | Notes |
 |---|---|---|
 | `edge` | string | `"SendingCell\|ReceivingCell"` — directed edge ID |
-| `sending_cell` | string | Xenium barcode |
-| `receiving_cell` | string | Xenium barcode |
+| `sending_cell` | string | Cell barcode matching the platform's cell_id |
+| `receiving_cell` | string | Cell barcode |
 | `is_autocrine` | bool | True when sending == receiving |
 | `lrm` | string | `"ligand\|receptor"` mechanism ID |
 | `lrm_id` | int | Integer index (1–N) |
@@ -116,13 +148,13 @@ One row per **(directed edge) × (LRM)**. This is the long/sparse format from NI
 | `receptor` | string | |
 | `score` | float | Raw NICHESv2 score |
 | `score_norm` | float | Score normalized within edge (sums to 1) |
-| `x1`, `y1` | float | Sending cell centroid, Xenium µm coords |
+| `x1`, `y1` | float | Sending cell centroid, native µm coords |
 | `x2`, `y2` | float | Receiving cell centroid |
 | `sending_type` | string | Optional cell type label |
 | `receiving_type` | string | Optional cell type label |
 
-**Important**: Coordinates are in Xenium µm. The backend divides by `pixel_size`
-(from `experiment.xenium`) when serving to the frontend.
+**Important**: Coordinates in edges.parquet are in native µm. The backend divides by
+`pixel_size` (from the reader) when serving to the frontend.
 
 The `sample_data/make_edges.py` script generates synthetic demo data in this format.
 Real data should come from `export_NICHESObject_for_viewer()` in the NICHESv2 R package.
@@ -133,11 +165,12 @@ A draft implementation is in `r/export_NICHESObject_for_viewer.R`.
 ## Supplemental Cell Metadata
 
 User-defined metadata (e.g. from external R analysis) can be loaded without modifying
-the Xenium output by placing files in a `cell-metadata/` subdirectory of the dataset:
+the dataset output by placing files in a `cell-metadata/` subdirectory of the dataset.
+Currently implemented in XeniumReader; the pattern should be ported to other readers.
 
 ```
-xenium_output/
-  experiment.xenium
+dataset_dir/
+  experiment.xenium   (or equivalent platform sentinel)
   cells.parquet
   cell-metadata/          ← create this directory
     my_metadata.csv       ← one or more files here
@@ -156,15 +189,14 @@ are outer-joined on the barcode key.
 
 Standard R export that works out of the box:
 ```r
-write.csv(my_metadata_df, file.path(xenium_dir, "cell-metadata", "metadata.csv"))
+write.csv(my_metadata_df, file.path(dataset_dir, "cell-metadata", "metadata.csv"))
 # row.names=TRUE is R's default; barcodes go in the first unnamed column
 ```
 
-**How it surfaces in the UI**: supplemental columns are merged into `cells.parquet` via
-`XeniumReader._cells_full()`.  They then appear automatically in the "Cell metadata"
-color-by dropdown alongside the native Xenium columns.  Continuous columns get a
-gradient colormap; string or low-cardinality integer columns get discrete colors.
-The cell-click info panel also shows the supplemental fields.
+**How it surfaces in the UI**: supplemental columns are merged into the cells table via
+`XeniumReader._cells_full()`. They appear automatically in the "Cell metadata" color-by
+dropdown. Continuous columns get a gradient colormap; string or low-cardinality integer
+columns get discrete colors. The cell-click info panel also shows the supplemental fields.
 
 `XeniumReader._cells_full()` is cached per reader instance (one Docker request lifecycle).
 `_load_supplemental_metadata()` is also cached, so the CSV is only parsed once regardless
@@ -176,8 +208,8 @@ of how many color-by requests arrive.
 
 All shared state lives in a single Zustand store. Key sections:
 
-- **Dataset / image**: `dataset` (null on init, auto-set from `/xenium/datasets`),
-  `activeImage` (which OME-TIFF to show; auto-set from `/xenium/{dataset}/images`)
+- **Dataset / image**: `dataset` (null on init, auto-set from `/spatial/datasets`),
+  `activeImage` (which OME-TIFF to show; auto-set from `/spatial/{dataset}/images`)
 - **Layer visibility**: `layers` object — each layer has `visible` + `opacity`;
   `cellSegments` also has `outlineOpacity` (independent from fill opacity)
 - **Cell color**: `cellColorEnabled`, `colorBy` (`mode`: off/gene_set/metadata, `field`),
@@ -198,9 +230,9 @@ All shared state lives in a single Zustand store. Key sections:
 ## Dataset & Image Auto-Initialization
 
 `dataset` starts as `null`. `LayerPanel.jsx::DatasetPicker` fetches
-`/xenium/datasets` on mount and calls `setDataset(list[0])` if the current dataset
+`/spatial/datasets` on mount and calls `setDataset(list[0])` if the current dataset
 is null or no longer in the list. Similarly, `activeImage` is auto-set from
-`/xenium/{dataset}/images` (OME-TIFFs in the dataset folder, morphology-first).
+`/spatial/{dataset}/images` (OME-TIFFs in the dataset folder, morphology-first).
 
 `Viewer.jsx` renders a "Loading datasets…" placeholder while `dataset === null` so
 no hooks fire against a null dataset. All data hooks guard against non-ok HTTP
@@ -217,7 +249,7 @@ The gene filter uses an **allowlist** model, not a denylist:
 - `selectedGenes = Set{...}` — only transcripts whose `feature_name` is in the set are rendered
 
 The selection is built from `allGenes` (fetched once per dataset from
-`/xenium/{dataset}/genes`), so it is stable across pan/zoom. The UI in
+`/spatial/{dataset}/genes`), so it is stable across pan/zoom. The UI in
 `LayerPanel.jsx::TranscriptSpeciesSection`:
 
 - **Collapsed / no filter**: shows `all N genes` with a `select ▼` button
@@ -292,6 +324,7 @@ The `cellColorClamp` / `edgeColorClamp` store values are passed into the color h
 and applied as `lo = clamp.low ?? dataMin`, `hi = clamp.high ?? dataMax`.
 
 Categorical data uses `QUAL_PALETTE` (20 visually distinct colors) from `colormap.js`.
+Beyond 20 categories, `geneColor()` provides deterministic hash-based colors.
 
 ---
 
@@ -339,14 +372,10 @@ docker compose down
 
 **Docker — external data directory:**
 ```bash
-DATA_PATH="/absolute/path/to/xenium/datasets" docker compose up --build
+DATA_PATH="/absolute/path/to/datasets" docker compose up --build
 ```
-`DATA_PATH` must be an absolute host path with no colons (macOS Docker Desktop
-resolves symlinks to the real path, so symlinks through colon-containing network
-paths do not help — the data must live under a colon-free path).
-
-The app auto-discovers all Xenium dataset folders under the mounted directory.
-Add new datasets by dropping a standard Xenium output folder into `DATA_PATH`.
+`DATA_PATH` must be an absolute host path with no colons. Drop any supported platform
+output folder under `DATA_PATH` — TissuePlex auto-detects the platform on first access.
 
 ---
 
@@ -376,12 +405,18 @@ Add new datasets by dropping a standard Xenium output folder into `DATA_PATH`.
    `docs/data_format.md` for the column spec.
 
 2. **Cell expression bar chart** — click panel currently shows cell metadata but not a sorted
-   gene expression readout. The `/xenium/{dataset}/cell/{cell_id}/expression` endpoint exists
+   gene expression readout. The `/spatial/{dataset}/expression/{cell_id}` endpoint exists
    but the UI component is not built.
 
-3. **Performance at scale** — large datasets (100K+ cells, 400K+ transcript rows per viewport)
+3. **MERSCOPE cell boundaries** — MERSCOPE stores boundaries as HDF5 polygon data;
+   `MerscopeReader.cell_boundaries()` is a stub returning `[]`.
+
+4. **CosMx gene-set coloring** — requires per-cell expression aggregation from the
+   transcript file; `CosMxReader._color_values_gene_set()` is a stub returning empty.
+
+5. **Performance at scale** — large datasets (100K+ cells, 400K+ transcript rows per viewport)
    can be laggy. Transcripts are already randomly sampled and zoom-skipped. Further
    improvements: LOD for arrowheads at low zoom, server-side edge aggregation, or reducing
    the edge limit in `useEdges.js`.
 
-4. **Authentication** — no auth. Fine for local/lab use, needs work for any public deployment.
+6. **Authentication** — no auth. Fine for local/lab use, needs work for any public deployment.

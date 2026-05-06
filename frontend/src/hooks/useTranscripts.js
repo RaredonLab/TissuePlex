@@ -19,7 +19,7 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
       setLoading(true);
       setError(null);
       try {
-        let url = `${apiBase}/xenium/${dataset}/transcripts?limit=50000`;
+        let url = `${apiBase}/spatial/${dataset}/transcripts?limit=50000`;
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
           const fracW = (xmax - xmin) / imageSize.w;

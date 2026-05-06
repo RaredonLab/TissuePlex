@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import tiles, xenium, edges, layers
+from app.routers import tiles, spatial, edges, layers
 
 app = FastAPI(title="TissuePlex API")
 
@@ -13,7 +13,7 @@ app.add_middleware(
 )
 
 app.include_router(tiles.router, prefix="/tiles", tags=["tiles"])
-app.include_router(xenium.router, prefix="/xenium", tags=["xenium"])
+app.include_router(spatial.router, prefix="/spatial", tags=["spatial"])
 app.include_router(edges.router, prefix="/edges", tags=["edges"])
 app.include_router(layers.router, prefix="/layers", tags=["layers"])
 

@@ -111,7 +111,7 @@ export default function Viewer() {
 
   // Fetch pixel_size once so measurements can be displayed in µm
   useEffect(() => {
-    fetch(`${apiBase}/xenium/${dataset}/info`)
+    fetch(`${apiBase}/spatial/${dataset}/info`)
       .then((r) => r.json())
       .then((info) => { if (info?.pixel_size) setPixelSize(parseFloat(info.pixel_size)); })
       .catch(() => {});
