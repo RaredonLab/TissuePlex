@@ -15,7 +15,7 @@ class ErrorBoundary extends React.Component {
     if (this.state.error) {
       return (
         <div style={{ padding: 32, color: "#f66", fontFamily: "monospace", fontSize: 13, background: "#1a1a1a", height: "100%" }}>
-          <div style={{ marginBottom: 8, color: "#aaa" }}>ConnectivityExplorer — render error</div>
+          <div style={{ marginBottom: 8, color: "#aaa" }}>TissuePlex — render error</div>
           <div>{String(this.state.error)}</div>
           <button
             style={{ marginTop: 16, padding: "6px 12px", background: "#333", color: "#ccc", border: "1px solid #555", borderRadius: 3, cursor: "pointer", fontFamily: "monospace" }}

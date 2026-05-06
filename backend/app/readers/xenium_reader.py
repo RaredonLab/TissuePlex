@@ -11,10 +11,15 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 
+_UNSET = object()  # sentinel to distinguish "not yet loaded" from "loaded, no data"
+
+
 class XeniumReader:
     def __init__(self, dataset_path: Path):
         self.path = dataset_path
         self._pixel_size: Optional[float] = None
+        self._supp_meta = _UNSET   # supplemental metadata cache
+        self._cells_full_cache = _UNSET  # merged cells + supp cache
 
     # ------------------------------------------------------------------
     # Experiment metadata
@@ -188,7 +193,7 @@ class XeniumReader:
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
 
     def _color_values_meta(self, field: str) -> dict:
-        df = self._read_parquet("cells.parquet")
+        df = self._cells_full()
         if df is None or field not in df.columns:
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
         col = df[field]
@@ -210,8 +215,12 @@ class XeniumReader:
                     "min": float(filled.min()), "max": float(filled.max())}
 
     def cells_schema(self) -> dict:
-        """Return column names and dtypes for cells.parquet."""
-        df = self._read_parquet("cells.parquet")
+        """Return column names and dtypes for cells.parquet + supplemental metadata."""
+        try:
+            df = self._cells_full()
+        except Exception as exc:
+            print(f"[xenium_reader] cells_schema: error building full cells df: {exc}")
+            df = self._read_parquet("cells.parquet")
         if df is None:
             return {"columns": {}}
         skip = {"cell_id"}
@@ -246,8 +255,8 @@ class XeniumReader:
             return {}
 
     def cell_detail(self, cell_id: str) -> Optional[dict]:
-        """Return merged cell metadata + expression for one cell."""
-        df = self._read_parquet("cells.parquet")
+        """Return merged cell metadata (incl. supplemental) + expression for one cell."""
+        df = self._cells_full()
         if df is None:
             return None
         row = df[df["cell_id"] == cell_id]
@@ -261,6 +270,159 @@ class XeniumReader:
                 record[col] = record[col] / ps
         record["expression"] = self.cell_expression(cell_id)
         return record
+
+    # ------------------------------------------------------------------
+    # Supplemental metadata (cell-metadata/ directory)
+    # ------------------------------------------------------------------
+
+    # Plain-CSV filenames in the dataset root that are standard Xenium outputs,
+    # not user metadata.  .csv.gz files are ALWAYS skipped in the root (they are
+    # exclusively Xenium data files; user exports are never gzip-compressed).
+    _XENIUM_ROOT_SKIP = frozenset({
+        "cells.csv", "transcripts.csv", "metrics_summary.csv",
+        "analysis_summary.csv", "gene_panel.csv",
+    })
+
+    def _load_supplemental_metadata(self) -> Optional[pd.DataFrame]:
+        """
+        Discover user-defined cell metadata and merge it into a single DataFrame.
+        Scans two locations (files found in both are merged, earlier takes precedence):
+
+          1. {dataset}/cell-metadata/  — dedicated subdirectory (any CSV / parquet)
+          2. {dataset}/               — dataset root, CSV / CSV.GZ only, skipping
+                                        known Xenium filenames
+
+        Barcode column resolution for CSV files (in order):
+          • Column explicitly named 'cell_id'
+          • First column read as index (covers data.table::fwrite(row.names=TRUE)
+            and base R write.csv — both write barcodes as an unnamed first column)
+          • First string-typed unique column as fallback
+
+        Parquet files must have an explicit 'cell_id' column.
+
+        Multiple files are outer-joined on 'cell_id'.  Columns already present in
+        an earlier file are not overwritten.  cells.parquet takes final precedence
+        in _cells_full().  Result is cached for the reader lifetime.
+        """
+        if self._supp_meta is not _UNSET:
+            return self._supp_meta  # type: ignore[return-value]
+
+        candidate_files: list[Path] = []
+
+        # 1. cell-metadata/ subdirectory (all CSV + parquet)
+        meta_dir = self.path / "cell-metadata"
+        if meta_dir.is_dir():
+            candidate_files.extend(sorted(meta_dir.iterdir()))
+
+        # 2. Dataset root — plain .csv only (never .csv.gz, which are always
+        #    Xenium data files), skipping known Xenium output filenames.
+        for f in sorted(self.path.iterdir()):
+            if not f.is_file():
+                continue
+            nl = f.name.lower()
+            if not nl.endswith(".csv"):          # skip .csv.gz and everything else
+                continue
+            if nl in self._XENIUM_ROOT_SKIP:
+                continue
+            candidate_files.append(f)
+
+        frames: list[pd.DataFrame] = []
+        for f in candidate_files:
+            try:
+                nl = f.name.lower()
+                if nl.endswith(".parquet"):
+                    df = pd.read_parquet(f)
+                    if "cell_id" not in df.columns:
+                        print(f"[xenium_reader] skip {f.name}: no 'cell_id' column")
+                        continue
+                elif nl.endswith(".csv.gz") or nl.endswith(".csv"):
+                    df = self._read_csv_with_barcodes(f)
+                    if df is None:
+                        continue
+                else:
+                    continue
+
+                df["cell_id"] = df["cell_id"].astype(str)
+                frames.append(df)
+                print(f"[xenium_reader] loaded supplemental metadata: {f.name} "
+                      f"({len(df)} rows, {len(df.columns)-1} extra columns)")
+            except Exception as exc:
+                print(f"[xenium_reader] warning: could not load {f.name}: {exc}")
+
+        if not frames:
+            self._supp_meta = None
+            return None
+
+        merged = frames[0]
+        for frame in frames[1:]:
+            new_cols = ["cell_id"] + [c for c in frame.columns if c not in merged.columns]
+            merged = merged.merge(frame[new_cols], on="cell_id", how="outer")
+
+        self._supp_meta = merged
+        return merged
+
+    def _read_csv_with_barcodes(self, path: Path) -> Optional[pd.DataFrame]:
+        """
+        Read a CSV and promote the barcode column to 'cell_id'.
+
+        Strategy: read with index_col=0 so the first column — whether named ""
+        (base R write.csv), an empty header (data.table fwrite row.names=TRUE),
+        or any explicit name — becomes the DataFrame index.  We then rename it
+        to 'cell_id' and reset.  Explicit 'cell_id' column is also accepted.
+        """
+        try:
+            df = pd.read_csv(path, index_col=0)
+            df.index.name = "cell_id"
+            return df.reset_index()
+        except Exception:
+            pass
+
+        # Fallback without index_col in case the file has no sensible first column
+        df = pd.read_csv(path)
+        if "cell_id" in df.columns:
+            return df
+        if "Unnamed: 0" in df.columns:
+            return df.rename(columns={"Unnamed: 0": "cell_id"})
+        first = df.columns[0]
+        if df[first].dtype == object and df[first].is_unique:
+            return df.rename(columns={first: "cell_id"})
+
+        print(f"[xenium_reader] skip {path.name}: cannot identify barcode column")
+        return None
+
+    def _cells_full(self) -> Optional[pd.DataFrame]:
+        """
+        Return cells.parquet merged with any supplemental metadata.
+        Supplemental columns are appended on the right; cells.parquet values
+        take precedence for any overlapping column names.
+        Result is cached.
+        """
+        if self._cells_full_cache is not _UNSET:
+            return self._cells_full_cache  # type: ignore[return-value]
+
+        cells = self._read_parquet("cells.parquet")
+        supp  = self._load_supplemental_metadata()
+
+        if cells is None and supp is None:
+            self._cells_full_cache = None
+            return None
+
+        if supp is None:
+            self._cells_full_cache = cells
+            return cells
+
+        if cells is None:
+            self._cells_full_cache = supp
+            return supp
+
+        # Only merge columns not already in cells.parquet
+        new_cols = [c for c in supp.columns if c not in cells.columns]
+        if new_cols:
+            merged = cells.merge(supp[["cell_id"] + new_cols], on="cell_id", how="left")
+        else:
+            merged = cells
+        self._cells_full_cache = merged
+        return merged
 
     # ------------------------------------------------------------------
     # Internal helpers

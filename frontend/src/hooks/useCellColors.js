@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
+import { geneColor } from "../utils/geneColor";
 
 /**
  * Fetches per-cell color values and maps them to RGBA.
@@ -61,10 +62,17 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
+        if (!data?.values) throw new Error("color-values response missing 'values'");
+
         if (data.type === "categorical") {
           const { categories } = data;
           const colorMap = new Map(
-            categories.map((cat, i) => [cat, QUAL_PALETTE[i % QUAL_PALETTE.length]])
+            categories.map((cat, i) => [
+              cat,
+              i < QUAL_PALETTE.length
+                ? QUAL_PALETTE[i]
+                : [...geneColor(cat), 255],  // hash-based for large category sets
+            ])
           );
           const cellColors = new Map(
             Object.entries(data.values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])

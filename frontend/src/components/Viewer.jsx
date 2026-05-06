@@ -204,7 +204,7 @@ export default function Viewer() {
     ctx.drawImage(osdCanvas, 0, 0);
     if (deckCanvas) ctx.drawImage(deckCanvas, 0, 0);
     const link = document.createElement("a");
-    link.download = `connectivity_explorer_${Date.now()}.png`;
+    link.download = `tissueplex_${Date.now()}.png`;
     link.href = out.toDataURL("image/png");
     link.click();
   }, []);

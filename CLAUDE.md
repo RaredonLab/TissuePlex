@@ -1,4 +1,4 @@
-# ConnectivityExplorer — Claude Code Project Brief
+# TissuePlex — Claude Code Project Brief
 
 This file is read automatically by Claude Code at the start of every session.
 It provides full context on the architecture, design decisions, and current state
@@ -54,7 +54,8 @@ backend/
       edges.py               edge query, LRM catalogue, edge color values, edge detail
       layers.py              generic parquet layer router
     readers/
-      xenium_reader.py       reads all standard Xenium output files
+      xenium_reader.py       reads all standard Xenium output files; merges
+                             supplemental metadata from cell-metadata/ directory
       edge_reader.py         reads edges.parquet; lrm_catalogue(), edge_color_values(), edge_detail()
       layer_reader.py        generic parquet reader
     tiling/
@@ -89,6 +90,8 @@ frontend/
 docker-compose.yml           Repo root; mounts DATA_PATH (or sample_data/) as /data:ro
 docker/docker-compose.yml    Legacy path (kept for compatibility)
 sample_data/                 GITIGNORED — default data mount for local dev/demo
+r/
+  export_NICHESObject_for_viewer.R  draft R function for NICHESv2 → edges.parquet export
 docs/
   data_format.md             edges.parquet column spec for NICHESv2 R export
   setup.md                   Docker deployment guide
@@ -122,8 +125,50 @@ One row per **(directed edge) × (LRM)**. This is the long/sparse format from NI
 (from `experiment.xenium`) when serving to the frontend.
 
 The `sample_data/make_edges.py` script generates synthetic demo data in this format.
-Real data should come from `export_NICHESObject_for_viewer()` in the NICHESv2 R package
-(**this function does not yet exist — it is the next major work item**).
+Real data should come from `export_NICHESObject_for_viewer()` in the NICHESv2 R package.
+A draft implementation is in `r/export_NICHESObject_for_viewer.R`.
+
+---
+
+## Supplemental Cell Metadata
+
+User-defined metadata (e.g. from external R analysis) can be loaded without modifying
+the Xenium output by placing files in a `cell-metadata/` subdirectory of the dataset:
+
+```
+xenium_output/
+  experiment.xenium
+  cells.parquet
+  cell-metadata/          ← create this directory
+    my_metadata.csv       ← one or more files here
+    clusters.csv
+    pseudotime.parquet
+```
+
+**Supported formats**: `.csv`, `.csv.gz`, `.parquet`.  Multiple files are allowed and
+are outer-joined on the barcode key.
+
+**Barcode column resolution** (in order of precedence):
+1. A column explicitly named `cell_id`
+2. `Unnamed: 0` — pandas' name for R's unnamed rowname column from `write.csv(row.names=TRUE)`
+3. The first column if it contains unique strings (generic fallback)
+4. Parquet files: `cell_id` column required
+
+Standard R export that works out of the box:
+```r
+write.csv(my_metadata_df, file.path(xenium_dir, "cell-metadata", "metadata.csv"))
+# row.names=TRUE is R's default; barcodes go in the first unnamed column
+```
+
+**How it surfaces in the UI**: supplemental columns are merged into `cells.parquet` via
+`XeniumReader._cells_full()`.  They then appear automatically in the "Cell metadata"
+color-by dropdown alongside the native Xenium columns.  Continuous columns get a
+gradient colormap; string or low-cardinality integer columns get discrete colors.
+The cell-click info panel also shows the supplemental fields.
+
+`XeniumReader._cells_full()` is cached per reader instance (one Docker request lifecycle).
+`_load_supplemental_metadata()` is also cached, so the CSV is only parsed once regardless
+of how many color-by requests arrive.
 
 ---
 
@@ -325,9 +370,10 @@ Add new datasets by dropping a standard Xenium output folder into `DATA_PATH`.
 
 ## What's Not Built Yet
 
-1. **R export function** — `export_NICHESObject_for_viewer()` to convert a NICHESv2 R object
-   to `edges.parquet`. This is the critical bridge to real data. See `docs/data_format.md`
-   for the column spec it must produce.
+1. **R export function** — `export_NICHESObject_for_viewer()` draft is in
+   `r/export_NICHESObject_for_viewer.R`. Needs validation against the actual NICHESv2
+   object structure (edge separator, meta.data column names, barcode format). See
+   `docs/data_format.md` for the column spec.
 
 2. **Cell expression bar chart** — click panel currently shows cell metadata but not a sorted
    gene expression readout. The `/xenium/{dataset}/cell/{cell_id}/expression` endpoint exists

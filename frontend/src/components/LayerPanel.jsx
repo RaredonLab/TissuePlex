@@ -232,7 +232,7 @@ function ColorBySection() {
                 style={{ ...SELECT_STYLE, marginTop: 4 }}
               >
                 <option value="">— select column —</option>
-                {cellSchema && Object.keys(cellSchema.columns).map((c) => (
+                {cellSchema?.columns && Object.keys(cellSchema.columns).map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
