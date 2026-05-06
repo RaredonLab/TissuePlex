@@ -10,7 +10,7 @@ const KEY = { color: "#666" };
 const VAL = { color: "#ccc", textAlign: "right", marginLeft: 8, wordBreak: "break-all" };
 
 export default function CellInfoPanel() {
-  const { apiBase, dataset, selectedCell, colorBy, cellColorEnabled, selectedGenes } = useStore();
+  const { apiBase, dataset, selectedCell, colorBy, cellColorEnabled, selectedGenes, platformCapabilities } = useStore();
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -41,10 +41,15 @@ export default function CellInfoPanel() {
       overflowY: "auto",
       background: "#1a1a1a",
     }}>
-      <div style={{ fontWeight: "bold", marginBottom: 8, fontSize: 12, color: "#fff" }}>Cell Info</div>
+      <div style={{ fontWeight: "bold", marginBottom: 8, fontSize: 12, color: "#fff" }}>
+        {(platformCapabilities?.unit_label ?? "Cell").charAt(0).toUpperCase() +
+         (platformCapabilities?.unit_label ?? "Cell").slice(1)} Info
+      </div>
 
       {!selectedCell && (
-        <div style={{ color: "#444" }}>Click a cell to inspect</div>
+        <div style={{ color: "#444" }}>
+          Click a {platformCapabilities?.unit_label ?? "cell"} to inspect
+        </div>
       )}
 
       {loading && <div style={{ color: "#555" }}>Loading…</div>}

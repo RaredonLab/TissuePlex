@@ -73,6 +73,14 @@ class MerscopeReader(SpatialDatasetReader):
         data["platform"] = self.platform  # ensure platform key not overwritten
         return data
 
+    def capabilities(self) -> dict:
+        return {
+            "has_morphology": True,
+            "has_transcripts": True,
+            "has_boundaries": False,  # HDF5 boundary parsing not yet implemented
+            "unit_label": "cell",
+        }
+
     # ── Gene catalogue ────────────────────────────────────────────────────────
 
     def gene_list(self) -> list[str]:

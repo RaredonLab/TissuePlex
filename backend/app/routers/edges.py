@@ -33,7 +33,14 @@ def _reader(dataset: str, edge_file: str = "edges.parquet") -> EdgeReader:
     edge_path = path / edge_file
     if not edge_path.exists():
         raise HTTPException(404, f"Edge file '{edge_file}' not found in dataset '{dataset}'")
-    return EdgeReader(edge_path)
+    # Resolve pixel_size from the spatial reader so coordinate conversion is
+    # correct for any platform (Xenium, MERSCOPE, CosMx, Visium HD, etc.)
+    try:
+        from app.readers.reader_factory import ReaderFactory
+        pixel_size = ReaderFactory.detect(path).pixel_size
+    except Exception:
+        pixel_size = 1.0
+    return EdgeReader(edge_path, pixel_size=pixel_size)
 
 
 @router.get("/{dataset}/schema")

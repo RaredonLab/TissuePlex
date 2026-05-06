@@ -5,9 +5,9 @@
  * rendering all data layers (transcripts, cell segments, edges).
  *
  * Coordinate systems:
- *   Xenium pixel space  — what all data uses (x: 0–img_w, y: 0–img_h)
+ *   Image pixel space   — what all data uses (x: 0–img_w, y: 0–img_h)
  *   OSD normalised      — [0,1]² image space (x / img_w, y / img_h)
- *   deck.gl             — OrthographicView in Xenium pixel space
+ *   deck.gl             — OrthographicView in image pixel space
  *   Screen              — display pixels (handled by deck.gl internally)
  *
  * Click picking: OSD receives all pointer events (pan/zoom). After each click
@@ -51,6 +51,7 @@ export default function Viewer() {
     imageSize, setImageSize,
     setViewport,
     layers: layerState,
+    platformCapabilities, setPlatformCapabilities,
     cellColorEnabled, colorBy, cellColorPalette,
     allGenes, selectedGenes,
     selectedCell, setSelectedCell,
@@ -109,13 +110,18 @@ export default function Viewer() {
   useEffect(() => { syncRef.current = syncDeckFromOSD; }, [syncDeckFromOSD]);
   useEffect(() => { deckViewStateRef.current = deckViewState; }, [deckViewState]);
 
-  // Fetch pixel_size once so measurements can be displayed in µm
+  // Fetch platform info + capabilities once per dataset
   useEffect(() => {
+    if (!dataset) return;
     fetch(`${apiBase}/spatial/${dataset}/info`)
-      .then((r) => r.json())
-      .then((info) => { if (info?.pixel_size) setPixelSize(parseFloat(info.pixel_size)); })
+      .then((r) => r.ok ? r.json() : null)
+      .then((info) => {
+        if (!info) return;
+        if (info.pixel_size) setPixelSize(parseFloat(info.pixel_size));
+        if (info.capabilities) setPlatformCapabilities(info.capabilities);
+      })
       .catch(() => {});
-  }, [apiBase, dataset, setPixelSize]);
+  }, [apiBase, dataset, setPixelSize, setPlatformCapabilities]);
 
   // ── OpenSeadragon init ────────────────────────────────────────────────────
   const dziUrl = `${apiBase}/tiles/${dataset}/dzi/${activeImage}.dzi`;
@@ -331,11 +337,16 @@ export default function Viewer() {
   const tissueGraphVisible = layerState.tissueGraph?.visible ?? true;
   const tissueGraphOpacity = layerState.tissueGraph?.opacity ?? 0.25;
 
+  // Capability flags — default to true while loading so layers are shown for
+  // platforms that support them (Xenium, MERSCOPE, CosMx).
+  const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
+  const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
+
   const { transcripts } = useTranscripts(
-    apiBase, dataset, viewport, imageSize, transcriptsVisible
+    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts
   );
   const { cells: cellPolygons } = useCellBoundaries(
-    apiBase, dataset, viewport, imageSize, cellSegmentsVisible
+    apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
   );
   // Keep ref in sync for annotation point-in-polygon tests (avoids stale closures)
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);

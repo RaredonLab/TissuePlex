@@ -55,8 +55,9 @@ function DatasetPicker() {
   // Fetch dataset list; auto-initialize to first entry if store has no valid dataset
   useEffect(() => {
     fetch(`${apiBase}/spatial/datasets`)
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : [])
       .then((list) => {
+        if (!Array.isArray(list)) return;
         setDatasets(list);
         if (list.length > 0) {
           const cur = useStore.getState().dataset;
@@ -70,8 +71,9 @@ function DatasetPicker() {
   useEffect(() => {
     if (!dataset) return;
     fetch(`${apiBase}/spatial/${dataset}/images`)
-      .then((r) => r.json())
+      .then((r) => r.ok ? r.json() : [])
       .then((list) => {
+        if (!Array.isArray(list)) return;
         setImages(list);
         if (list.length > 0 && !list.includes(activeImage)) {
           setActiveImage(list[0]);
@@ -119,6 +121,12 @@ function DatasetPicker() {
 }
 
 export default function LayerPanel() {
+  const { platformCapabilities } = useStore();
+  const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
+  const hasBoundaries  = platformCapabilities?.has_boundaries  ?? true;
+  const unitLabel      = platformCapabilities?.unit_label ?? "cell";
+  const unitTitle      = unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1);
+
   return (
     <div style={{
       flex: 1,
@@ -134,14 +142,18 @@ export default function LayerPanel() {
 
       <div style={SECTION_HEADER}>Core</div>
       <MorphologyRow />
-      <LayerRow id="transcripts" label="Transcripts" color="#e88" />
-      <CellSegmentsRow />
+      {hasTranscripts && <LayerRow id="transcripts" label="Transcripts" color="#e88" />}
+      {hasBoundaries  && <CellSegmentsRow unitTitle={unitTitle} />}
 
-      <div style={SECTION_HEADER}>Cell Color</div>
-      <ColorBySection />
+      <div style={SECTION_HEADER}>{unitTitle} Color</div>
+      <ColorBySection unitLabel={unitLabel} />
 
-      <div style={SECTION_HEADER}>Transcript Species</div>
-      <TranscriptSpeciesSection />
+      {hasTranscripts && (
+        <>
+          <div style={SECTION_HEADER}>Transcript Species</div>
+          <TranscriptSpeciesSection />
+        </>
+      )}
 
       <div style={SECTION_HEADER}>Tissue Graph</div>
       <TissueGraphSection />
@@ -155,7 +167,7 @@ export default function LayerPanel() {
 }
 
 // ── Color By section ──────────────────────────────────────────────────────────
-function ColorBySection() {
+function ColorBySection({ unitLabel = "cell" }) {
   const {
     apiBase, dataset,
     cellColorEnabled, setCellColorEnabled,
@@ -172,12 +184,12 @@ function ColorBySection() {
   // Fetch full gene list and cell schema once per dataset
   useEffect(() => {
     fetch(`${apiBase}/spatial/${dataset}/genes`)
-      .then((r) => r.json())
-      .then(setAllGenes)
+      .then((r) => r.ok ? r.json() : [])
+      .then((g) => { if (Array.isArray(g)) setAllGenes(g); })
       .catch(() => {});
     fetch(`${apiBase}/spatial/${dataset}/cells/schema`)
-      .then((r) => r.json())
-      .then(setCellSchema)
+      .then((r) => r.ok ? r.json() : null)
+      .then((s) => { if (s) setCellSchema(s); })
       .catch(() => {});
   }, [apiBase, dataset]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -199,7 +211,7 @@ function ColorBySection() {
           onChange={(e) => setCellColorEnabled(e.target.checked)}
           style={{ accentColor: "#6cf" }}
         />
-        Color cells
+        Color {unitLabel}s
       </label>
 
       {cellColorEnabled && (
@@ -408,7 +420,7 @@ function LayerRowBase({ label, color, visible, opacity, onToggle, onOpacity }) {
   );
 }
 
-function CellSegmentsRow() {
+function CellSegmentsRow({ unitTitle = "Cell" }) {
   const { layers, setLayerProp } = useStore();
   const state = layers.cellSegments ?? { visible: true, opacity: 0.6, outlineOpacity: 0.8 };
   return (
@@ -421,7 +433,7 @@ function CellSegmentsRow() {
           display: "inline-block", width: 10, height: 10, borderRadius: 2,
           background: "#6cf", flexShrink: 0, opacity: state.visible ? 1 : 0.3,
         }} />
-        <span style={{ color: state.visible ? "#ddd" : "#555" }}>Cell Segments</span>
+        <span style={{ color: state.visible ? "#ddd" : "#555" }}>{unitTitle} Segments</span>
       </label>
       {state.visible && (
         <div style={{ paddingLeft: 26, marginTop: 3 }}>

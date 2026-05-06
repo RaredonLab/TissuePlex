@@ -53,8 +53,9 @@ def list_platforms():
 
 @router.get("/{dataset}/info")
 def dataset_info(dataset: str):
-    """Experiment metadata including platform identifier."""
-    return _reader(dataset).info()
+    """Experiment metadata, platform identifier, and capability flags."""
+    r = _reader(dataset)
+    return {**r.info(), "capabilities": r.capabilities()}
 
 
 @router.get("/{dataset}/images")
