@@ -54,7 +54,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
           ? { mode: "gene_set", genes: genesToSend }
           : { mode: "metadata", field };
 
-        const res = await fetch(`${apiBase}/xenium/${dataset}/color-values`, {
+        const res = await fetch(`${apiBase}/spatial/${dataset}/color-values`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),

@@ -19,7 +19,7 @@ export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled
       setLoading(true);
       setError(null);
       try {
-        let url = `${apiBase}/xenium/${dataset}/cell-boundaries`;
+        let url = `${apiBase}/spatial/${dataset}/cell-boundaries`;
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
           const fracW = (xmax - xmin) / imageSize.w;
