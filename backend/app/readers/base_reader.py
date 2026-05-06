@@ -117,6 +117,29 @@ class SpatialDatasetReader(ABC):
         """
         ...
 
+    # ── Platform capabilities ─────────────────────────────────────────────────
+
+    def capabilities(self) -> dict:
+        """Platform capability flags consumed by the frontend to show/hide layers.
+
+        Defaults represent a fully-featured imaging-based platform.  Override in
+        readers that lack specific capabilities (e.g. spot-based platforms with
+        no per-molecule transcript coordinates or no polygon boundaries).
+
+        Keys
+        ----
+        has_morphology  : bool  — dataset includes a tile-able morphology image
+        has_transcripts : bool  — individual molecule/transcript detections are available
+        has_boundaries  : bool  — polygon cell/spot boundary vertices are available
+        unit_label      : str   — display name for spatial units ("cell", "spot", "bin")
+        """
+        return {
+            "has_morphology": True,
+            "has_transcripts": True,
+            "has_boundaries": True,
+            "unit_label": "cell",
+        }
+
     # ── Shared utilities ──────────────────────────────────────────────────────
 
     def _to_px(self, val: float) -> float:

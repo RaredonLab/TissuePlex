@@ -5,17 +5,22 @@ const API = import.meta.env.VITE_API_URL ?? "/api";
 export const useStore = create((set, get) => ({
   // ── Dataset ────────────────────────────────────────────────────────────────
   apiBase: API,
-  dataset: null,             // initialized from /xenium/datasets on first load
+  dataset: null,             // initialized from /spatial/datasets on first load
   activeImage: "morphology", // which OME-TIFF is loaded as the background
 
-  setDataset: (dataset) => set({ dataset, selectedGenes: null, allGenes: [] }),
+  setDataset: (dataset) => set({ dataset, selectedGenes: null, allGenes: [], platformCapabilities: null }),
   setActiveImage: (activeImage) => set({ activeImage }),
+
+  // ── Platform capabilities (fetched from /spatial/{dataset}/info) ──────────
+  // null = not yet loaded; object = { has_morphology, has_transcripts, has_boundaries, unit_label }
+  platformCapabilities: null,
+  setPlatformCapabilities: (caps) => set({ platformCapabilities: caps }),
 
   // ── Image dimensions (from DZI descriptor, set when OSD opens) ───────────
   imageSize: { w: null, h: null },
   setImageSize: (w, h) => set({ imageSize: { w, h } }),
 
-  // ── Viewport (Xenium pixel coords, kept in sync with OpenSeadragon) ───────
+  // ── Viewport (image pixel coords, kept in sync with OpenSeadragon) ────────
   viewport: null, // { xmin, ymin, xmax, ymax }
   setViewport: (viewport) => set({ viewport }),
 
@@ -122,7 +127,7 @@ export const useStore = create((set, get) => ({
   setSelectedCell: (cell) => set({ selectedCell: cell }),
 
   // ── Annotations ───────────────────────────────────────────────────────────
-  // pixelSize: µm per image pixel, fetched from experiment.xenium
+  // pixelSize: µm per image pixel, fetched from /spatial/{dataset}/info
   pixelSize: 1.0,
   setPixelSize: (v) => set({ pixelSize: v }),
 

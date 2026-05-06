@@ -1,13 +1,12 @@
 """
 Reads edge-list Parquet files.
 
-Required columns: x1, y1, x2, y2  (Xenium µm coordinates)
+Required columns: x1, y1, x2, y2  (native coordinate space, e.g. µm)
 All other columns are open metadata (layer type, strength, p-value, etc.)
 
 Coordinates are returned in image pixel space (divided by pixel_size).
 BBox query parameters are also expected in image pixel space.
 """
-import json
 import math
 from pathlib import Path
 from typing import Optional
@@ -16,21 +15,14 @@ import pyarrow.parquet as pq
 
 
 class EdgeReader:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, pixel_size: float = 1.0):
         self.path = path
         self._schema_cache = None
-        self._pixel_size_cache: Optional[float] = None
+        self._pixel_size = pixel_size
 
     @property
     def pixel_size(self) -> float:
-        if self._pixel_size_cache is None:
-            meta = self.path.parent / "experiment.xenium"
-            if meta.exists():
-                with open(meta) as f:
-                    self._pixel_size_cache = float(json.load(f).get("pixel_size", 1.0))
-            else:
-                self._pixel_size_cache = 1.0
-        return self._pixel_size_cache
+        return self._pixel_size
 
     def _parquet_schema(self):
         if self._schema_cache is None:
@@ -170,7 +162,7 @@ class EdgeReader:
         df = pd.read_parquet(self.path)
         ps = self.pixel_size
 
-        # BBox is in image pixel coords; convert to Xenium µm for filtering
+        # BBox is in image pixel coords; convert to native units for filtering
         if bbox:
             xmin, ymin, xmax, ymax = bbox
             if None not in (xmin, ymin, xmax, ymax):

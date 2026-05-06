@@ -55,6 +55,14 @@ class CosMxReader(SpatialDatasetReader):
             "path": str(self.path),
         }
 
+    def capabilities(self) -> dict:
+        return {
+            "has_morphology": True,
+            "has_transcripts": True,
+            "has_boundaries": False,  # label TIFF boundary parsing not yet implemented
+            "unit_label": "cell",
+        }
+
     # ── Gene catalogue ────────────────────────────────────────────────────────
 
     def gene_list(self) -> list[str]:
