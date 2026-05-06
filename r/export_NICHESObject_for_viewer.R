@@ -1,7 +1,7 @@
 # export_NICHESObject_for_viewer.R
 #
 # Converts a NICHESv2 cell-cell communication result to the edges.parquet
-# schema expected by ConnectivityExplorer.  Place the output file in the root
+# schema expected by TissuePlex.  Place the output file in the root
 # of the Xenium output directory alongside experiment.xenium.
 #
 # Intended to become part of the NICHESv2 R package.  Until then, source()
@@ -12,7 +12,7 @@
 #               pixel_size validation)
 
 
-#' Export a NICHESv2 result to edges.parquet for ConnectivityExplorer
+#' Export a NICHESv2 result to edges.parquet for TissuePlex
 #'
 #' @param niches_obj  A Seurat object produced by NICHESv2 where columns are
 #'   directed edges ("SendingBarcode--ReceivingBarcode") and rows are LRMs

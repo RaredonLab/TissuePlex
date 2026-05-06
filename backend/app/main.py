@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import tiles, xenium, edges, layers
 
-app = FastAPI(title="ConnectivityExplorer API")
+app = FastAPI(title="TissuePlex API")
 
 app.add_middleware(
     CORSMiddleware,

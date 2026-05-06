@@ -1,4 +1,4 @@
-# ConnectivityExplorer
+# TissuePlex
 
 A spatial transcriptomics viewer for Xenium data with support for cell-cell connectivity layers produced by NICHESv2.
 
@@ -14,8 +14,8 @@ Built on OpenSeadragon (deep zoom) + deck.gl (WebGL layers) + FastAPI.
 ### Run with sample data
 
 ```bash
-git clone https://github.com/your-lab/ConnectivityExplorer.git
-cd ConnectivityExplorer
+git clone https://github.com/your-lab/TissuePlex.git
+cd TissuePlex
 docker compose up --build
 ```
 

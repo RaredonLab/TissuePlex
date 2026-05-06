@@ -1,4 +1,4 @@
-# ConnectivityExplorer — Claude Code Project Brief
+# TissuePlex — Claude Code Project Brief
 
 This file is read automatically by Claude Code at the start of every session.
 It provides full context on the architecture, design decisions, and current state
