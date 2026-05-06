@@ -48,8 +48,7 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-# ConnectivityExplorer
-sample_data/
+# TissuePlex — sample_data is tracked; per-file exclusions in sample_data/.gitignore
 frontend/node_modules/
 frontend/dist/
 backend/__pycache__/
