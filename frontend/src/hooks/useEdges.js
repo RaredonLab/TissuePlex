@@ -15,9 +15,15 @@ export function useEdges(apiBase, dataset, viewport, imageSize, enabled, minStre
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       const { xmin, ymin, xmax, ymax } = viewport;
+      const fracW = (xmax - xmin) / imageSize.w;
+      // Scale limit with zoom: more zoomed in → fewer edges in view → raise ceiling.
+      const limit =
+        fracW < 0.05 ? 500_000 :
+        fracW < 0.15 ? 200_000 :
+        fracW < 0.35 ? 100_000 : 50_000;
       const params = new URLSearchParams({
         xmin, ymin, xmax, ymax,
-        limit: 50000,
+        limit,
       });
       if (minStrength != null && minStrength > 0) {
         params.set("min_strength", minStrength);

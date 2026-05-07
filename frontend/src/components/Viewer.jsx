@@ -59,10 +59,11 @@ export default function Viewer() {
     edgeColorBy, edgeColorPalette, edgeDirectional, showAutocrine,
     edgeWidth, showArrowheads, arrowStyle, arrowheadScale,
     edgeOffset,
+    autocrineRadius, autocrineLineWidth,
     hiddenLrms, lrmCatalogue,
     selectedEdge, setSelectedEdge,
     setCellColorRange, setEdgeColorRange,
-    cellColorClamp, edgeColorClamp,
+    cellColorClamp, edgeColorClamp, edgeColorHiCutFraction,
     annotationMode,
     pixelSize, setPixelSize,
     activeRegion, addRegionPoint, cancelActiveRegion, commitRegion,
@@ -193,8 +194,14 @@ export default function Viewer() {
   const morphologyOpacity = layerState.morphology?.opacity ?? 1.0;
   useEffect(() => {
     const item = viewerRef.current?.world?.getItemAt(0);
-    if (item) item.setOpacity(morphologyVisible ? morphologyOpacity : 0);
-  }, [morphologyVisible, morphologyOpacity]);
+    if (!item) return;
+    item.setOpacity(morphologyVisible ? morphologyOpacity : 0);
+    // OSD's navigator syncs item opacity via matchOpacity (synchronous, fires inside
+    // setOpacity above). Override it immediately so the navigator always shows a faint
+    // morphology for spatial orientation regardless of the main-view toggle.
+    const navItem = viewerRef.current?.navigator?.world?.getItemAt(0);
+    if (navItem) navItem.setOpacity(0.35);
+  }, [morphologyVisible, morphologyOpacity, imageSize.w]); // imageSize.w re-fires on tile open
 
   // ── Screenshot ───────────────────────────────────────────────────────────
   const handleScreenshot = useCallback(() => {
@@ -368,7 +375,7 @@ export default function Viewer() {
   // ── Edge colors from backend ──────────────────────────────────────────────
   const edgeColorEnabled = edgeColorBy.mode !== "default";
   const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax } = useEdgeColors(
-    apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp
+    apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp, edgeColorHiCutFraction
   );
   useEffect(() => { setEdgeColorRange(edgeVmin, edgeVmax); }, [edgeVmin, edgeVmax]); // eslint-disable-line
 
@@ -633,13 +640,13 @@ export default function Viewer() {
     visible: edgesVisible && showAutocrine,
     opacity: edgesOpacity,
     getPosition: (d) => [d.x, d.y],
-    getRadius: 14,
+    getRadius: autocrineRadius,
     radiusMinPixels: 5,
-    radiusMaxPixels: 22,
+    radiusMaxPixels: 60,
     filled: false,
     stroked: true,
     getLineColor: getAutocrineCellColor,
-    getLineWidth: edgeWidth,
+    getLineWidth: autocrineLineWidth,
     lineWidthMinPixels: 1,
     pickable: true,
     autoHighlight: true,
