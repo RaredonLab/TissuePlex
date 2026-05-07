@@ -39,8 +39,10 @@ export function useEdgeColors(
 
     const entries = directed.map((e) => [e.edge, e.visible_score_sum ?? 0]);
     const scores = entries.map(([, v]) => v);
-    const min = Math.min(...scores);
-    const max = Math.max(...scores);
+    let min = Infinity, max = -Infinity;
+    for (const v of scores) { if (v < min) min = v; if (v > max) max = v; }
+    if (!isFinite(min)) min = 0;
+    if (!isFinite(max)) max = 0;
     const sorted = [...scores].sort((a, b) => a - b);
     const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? max;
     const lo = clamp?.low ?? min;
