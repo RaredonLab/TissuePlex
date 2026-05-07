@@ -25,8 +25,15 @@ router = APIRouter()
 
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data"))
 
+# Module-level cache: (dataset, edge_file) → EdgeReader instance.
+# Keeps instance-level caches (_schema_cache, _lrm_catalogue_cache) alive across requests.
+_reader_cache: dict[tuple, EdgeReader] = {}
+
 
 def _reader(dataset: str, edge_file: str = "edges.parquet") -> EdgeReader:
+    key = (dataset, edge_file)
+    if key in _reader_cache:
+        return _reader_cache[key]
     path = DATA_ROOT / dataset
     if not path.exists():
         raise HTTPException(404, f"Dataset '{dataset}' not found")
@@ -40,7 +47,9 @@ def _reader(dataset: str, edge_file: str = "edges.parquet") -> EdgeReader:
         pixel_size = ReaderFactory.detect(path).pixel_size
     except Exception:
         pixel_size = 1.0
-    return EdgeReader(edge_path, pixel_size=pixel_size)
+    reader = EdgeReader(edge_path, pixel_size=pixel_size)
+    _reader_cache[key] = reader
+    return reader
 
 
 @router.get("/{dataset}/schema")
@@ -98,6 +107,35 @@ def list_edge_files(dataset: str):
         raise HTTPException(404, f"Dataset '{dataset}' not found")
     parquet_files = [f.name for f in path.glob("*.parquet")]
     return {"files": parquet_files}
+
+
+class EdgeGroupedQueryRequest(BaseModel):
+    xmin: Optional[float] = None
+    ymin: Optional[float] = None
+    xmax: Optional[float] = None
+    ymax: Optional[float] = None
+    excluded_lrms: Optional[List[Optional[str]]] = None
+    min_strength: Optional[float] = None
+    limit: int = 50_000
+
+
+@router.post("/{dataset}/query-grouped")
+def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
+                        edge_file: str = Query("edges.parquet")):
+    """
+    Return one row per directed edge (pre-aggregated by edge).
+    ~500x fewer rows than /query for LRM-rich parquet files.
+    Accepts excluded_lrms list so visible_lrm_count reflects only visible mechanisms.
+    """
+    bbox = (body.xmin, body.ymin, body.xmax, body.ymax) \
+        if body.xmin is not None else None
+    # Strip any null entries that can arise from null lrm values in the parquet
+    excluded = [x for x in (body.excluded_lrms or []) if x is not None]
+    return _reader(dataset, edge_file).query_grouped(
+        bbox=bbox,
+        excluded_lrms=excluded,
+        limit=body.limit,
+    )
 
 
 class EdgeColorRequest(BaseModel):

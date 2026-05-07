@@ -63,7 +63,7 @@ export default function Viewer() {
     hiddenLrms, lrmCatalogue,
     selectedEdge, setSelectedEdge,
     setCellColorRange, setEdgeColorRange,
-    cellColorClamp, edgeColorClamp, edgeColorHiCutFraction,
+    cellColorClamp, edgeColorClamp, setEdgeColorClamp,
     annotationMode,
     pixelSize, setPixelSize,
     activeRegion, addRegionPoint, cancelActiveRegion, commitRegion,
@@ -226,13 +226,33 @@ export default function Viewer() {
   // OSD captures all pointer events; after each click we also query deck.gl.
   // We only set the cell if a drag did NOT occur (OSD fires a canvas-click
   // event with isClick=true for genuine taps).
+  // Shift+click: edge-priority mode — skips cell pick and selects edges first.
   const handleViewerClick = useCallback((e) => {
     if (!deckRef.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Cell pick takes priority
+    if (e.shiftKey) {
+      // Edge-priority: try directed edges first, then tissue graph, fall through to cells
+      const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
+      if (edgeInfo?.object) {
+        setSelectedEdge(edgeInfo.object.edge);
+        setSelectedCell(null);
+        return;
+      }
+      const cellInfo = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["cell-segments-fill"] });
+      if (cellInfo?.object) {
+        setSelectedCell(cellInfo.object);
+        setSelectedEdge(null);
+      } else {
+        setSelectedCell(null);
+        setSelectedEdge(null);
+      }
+      return;
+    }
+
+    // Default: cell-priority
     const cellInfo = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["cell-segments-fill"] });
     if (cellInfo?.object) {
       setSelectedCell(cellInfo.object);
@@ -241,8 +261,8 @@ export default function Viewer() {
     }
     setSelectedCell(null);
 
-    // Edge pick — try directed lines then autocrine rings
-    const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine"] });
+    // Edge pick — try directed lines, autocrine rings, then tissue graph
+    const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
     if (edgeInfo?.object) {
       setSelectedEdge(edgeInfo.object.edge);
     } else {
@@ -359,7 +379,7 @@ export default function Viewer() {
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
 
   const { edges } = useEdges(
-    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength
+    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms
   );
 
   // Apply per-gene visibility filter (null = no filter, show all)
@@ -374,10 +394,16 @@ export default function Viewer() {
 
   // ── Edge colors from backend ──────────────────────────────────────────────
   const edgeColorEnabled = edgeColorBy.mode !== "default";
-  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax } = useEdgeColors(
-    apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp, edgeColorHiCutFraction
+  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95 } = useEdgeColors(
+    apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp, edges
   );
   useEffect(() => { setEdgeColorRange(edgeVmin, edgeVmax); }, [edgeVmin, edgeVmax]); // eslint-disable-line
+  // Auto-calibrate hi clamp to 95th percentile whenever lrm_set data arrives
+  useEffect(() => {
+    if (edgeColorBy?.mode === "lrm_set" && edgeP95 != null) {
+      setEdgeColorClamp(edgeColorClamp?.low ?? null, edgeP95);
+    }
+  }, [edgeP95]); // eslint-disable-line
 
   // Clear selected edge when dataset changes
   useEffect(() => { setSelectedEdge(null); }, [dataset]); // eslint-disable-line
@@ -455,13 +481,12 @@ export default function Viewer() {
     updateTriggers: { getFillColor: [] },
   });
 
-  // ── Tissue graph: all unique undirected cell pairs, LRM-agnostic ────────
+  // ── Tissue graph: unique undirected cell pairs (backend already returns 1 row/edge)
   const allDirectedEdges = useMemo(() => {
     const seenPairs = new Set();
     const result = [];
     for (const row of edges) {
       if (row.is_autocrine) continue;
-      // Deduplicate as undirected pair: sort the two barcodes so A|B === B|A
       const pair = [row.sending_cell, row.receiving_cell].sort().join("\0");
       if (!seenPairs.has(pair)) {
         seenPairs.add(pair);
@@ -471,55 +496,13 @@ export default function Viewer() {
     return result;
   }, [edges]);
 
-  // ── Aggregate raw edge rows → one feature per directed edge ─────────────
-  // Groups by `edge` string, sums score for visible LRMs, computes positions.
-  const { directedEdges, autocrineCells } = useMemo(() => {
-    const edgeMap = new Map();
-    const autocrineMap = new Map();
-
-    for (const row of edges) {
-      const lrmVisible = !hiddenLrms.has(row.lrm ?? `${row.ligand}|${row.receptor}`);
-
-      if (row.is_autocrine) {
-        if (!autocrineMap.has(row.edge)) {
-          autocrineMap.set(row.edge, {
-            edge: row.edge,
-            sending_cell: row.sending_cell,
-            x: row.x1, y: row.y1,
-            sending_type: row.sending_type,
-            lrmScoreSum: 0, lrmCount: 0,
-          });
-        }
-        if (lrmVisible) {
-          const f = autocrineMap.get(row.edge);
-          f.lrmScoreSum += row.score ?? 0;
-          f.lrmCount++;
-        }
-      } else {
-        if (!edgeMap.has(row.edge)) {
-          edgeMap.set(row.edge, {
-            edge: row.edge,
-            sending_cell: row.sending_cell,
-            receiving_cell: row.receiving_cell,
-            sending_type: row.sending_type,
-            receiving_type: row.receiving_type,
-            x1: row.x1, y1: row.y1,
-            x2: row.x2, y2: row.y2,
-            lrmScoreSum: 0, lrmCount: 0,
-          });
-        }
-        if (lrmVisible) {
-          const f = edgeMap.get(row.edge);
-          f.lrmScoreSum += row.score ?? 0;
-          f.lrmCount++;
-        }
-      }
-    }
-
-    const directed = Array.from(edgeMap.values()).filter((f) => f.lrmCount > 0);
-    const autocrine = Array.from(autocrineMap.values());
-    return { directedEdges: directed, autocrineCells: autocrine };
-  }, [edges, hiddenLrms]);
+  // ── Backend already groups by edge; just split autocrine vs directed ──────
+  const { directedEdges, autocrineCells } = useMemo(() => ({
+    directedEdges: edges.filter((r) => !r.is_autocrine && (r.visible_lrm_count ?? r.lrm_count ?? 0) > 0),
+    autocrineCells: edges
+      .filter((r) => r.is_autocrine)
+      .map((r) => ({ ...r, x: r.x1, y: r.y1 })),
+  }), [edges]);
 
   // ── Perpendicular offset: shift A→B left so it doesn't overlap B→A ──────
   const directedEdgesWithOffset = useMemo(() => {
@@ -591,7 +574,7 @@ export default function Viewer() {
     getWidth: edgeWidth,
     widthMinPixels: 0.5,
     widthMaxPixels: 5,
-    pickable: false,
+    pickable: true,
   });
 
   const edgeDirectedLayer = new LineLayer({

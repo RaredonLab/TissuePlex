@@ -1,50 +1,68 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
 
 /**
- * Fetches per-directed-edge color values from the backend.
+ * Computes per-directed-edge color values.
  *
- * Modes:
- *   lrm_set  — POST with selected LRM strings; backend sums score per edge
- *   metadata — POST with field name; backend auto-detects continuous vs categorical
+ * lrm_set mode: computed client-side from visible_score_sum in the edges array
+ *               (no server call — eliminates the 13.8s global scan).
+ * metadata mode: fetched from the backend (requires server-side GROUP BY + field lookup).
  *
  * Returns:
  *   colorValues   Map<edge_id, [r,g,b,a]> or null when mode is "default"
  *   type          "continuous" | "categorical"
  *   vmin, vmax    for continuous legend
+ *   p95           95th-percentile value (used for auto-calibration)
  *   categories    string[] for categorical legend
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading
  */
-export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, palette, enabled, clamp, hiCutFraction) {
+export function useEdgeColors(
+  apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue,
+  palette, enabled, clamp,
+  edges   // array from useEdges — used for client-side lrm_set coloring
+) {
   const [result, setResult] = useState({
-    colorValues: null, type: "continuous", vmin: 0, vmax: 0,
+    colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null,
     categories: [], categoryColors: new Map(),
   });
   const [loading, setLoading] = useState(false);
   const timerRef = useRef(null);
 
+  // ── lrm_set: compute synchronously from edges.visible_score_sum ──────────
+  const lrmSetResult = useMemo(() => {
+    if (!enabled || edgeColorBy?.mode !== "lrm_set" || !edges || edges.length === 0) {
+      return null;
+    }
+    const directed = edges.filter((e) => !e.is_autocrine);
+    if (directed.length === 0) return null;
+
+    const entries = directed.map((e) => [e.edge, e.visible_score_sum ?? 0]);
+    const scores = entries.map(([, v]) => v);
+    const min = Math.min(...scores);
+    const max = Math.max(...scores);
+    const sorted = [...scores].sort((a, b) => a - b);
+    const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? max;
+    const lo = clamp?.low ?? min;
+    const hi = clamp?.high ?? p95;
+    const colorMap = new Map(
+      entries.map(([id, v]) => [id, valueToColor(v, lo, hi, palette)])
+    );
+    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() };
+  }, [enabled, edgeColorBy?.mode, edges, palette, clamp?.low, clamp?.high]);
+
+  // ── metadata: fetch from backend ─────────────────────────────────────────
   useEffect(() => {
-    if (!enabled || !edgeColorBy || edgeColorBy.mode === "default") {
-      setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+    if (!enabled || !edgeColorBy || edgeColorBy.mode !== "metadata") {
+      if (edgeColorBy?.mode !== "lrm_set") {
+        setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
+      }
       return;
     }
 
-    const { mode, field } = edgeColorBy;
-
-    // lrm_set: compute selected LRMs (all catalogue minus hidden)
-    const selectedLrms = mode === "lrm_set"
-      ? lrmCatalogue
-          .map((e) => e.lrm ?? `${e.ligand}|${e.receptor}`)
-          .filter((lrm) => !hiddenLrms.has(lrm))
-      : null;
-
-    if (mode === "lrm_set" && (!selectedLrms || selectedLrms.length === 0)) {
-      setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
-      return;
-    }
-    if (mode === "metadata" && !field) {
-      setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+    const { field } = edgeColorBy;
+    if (!field) {
+      setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
       return;
     }
 
@@ -52,14 +70,10 @@ export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCata
     timerRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const body = mode === "lrm_set"
-          ? { mode: "lrm_set", lrms: selectedLrms }
-          : { mode: "metadata", field };
-
         const res = await fetch(`${apiBase}/edges/${dataset}/edge-color-values`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ mode: "metadata", field }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -72,24 +86,30 @@ export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCata
           const edgeColors = new Map(
             Object.entries(data.values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])
           );
-          setResult({ colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap });
+          setResult({ colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, p95: null, categories, categoryColors: colorMap });
         } else {
           const { min, max } = data;
+          const sorted = Object.values(data.values).sort((a, b) => a - b);
+          const p95 = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.95)] : max;
           const lo = clamp?.low ?? min;
-          const hi = clamp?.high ?? (hiCutFraction != null ? hiCutFraction * max : max);
+          const hi = clamp?.high ?? p95;
           const colorMap = new Map(
             Object.entries(data.values).map(([id, v]) => [id, valueToColor(v, lo, hi, palette)])
           );
-          setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() });
+          setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() });
         }
       } catch {
-        setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+        setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
       } finally {
         setLoading(false);
       }
     }, 150);
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, edgeColorBy?.mode, edgeColorBy?.field, hiddenLrms, lrmCatalogue, palette, enabled, clamp?.low, clamp?.high, hiCutFraction]);
+  }, [apiBase, dataset, edgeColorBy?.mode, edgeColorBy?.field, palette, enabled, clamp?.low, clamp?.high]);
 
+  // Return lrm_set result immediately (synchronous), or the fetched metadata result
+  if (edgeColorBy?.mode === "lrm_set") {
+    return { ...(lrmSetResult ?? result), loading: false };
+  }
   return { ...result, loading };
 }
