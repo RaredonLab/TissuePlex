@@ -55,7 +55,7 @@ export default function Viewer() {
     cellColorEnabled, colorBy, cellColorPalette,
     allGenes, selectedGenes,
     selectedCell, setSelectedCell,
-    edgeMinStrength,
+    edgeMinStrength, edgeDensity,
     edgeColorBy, edgeColorPalette, edgeDirectional, showAutocrine,
     edgeWidth, showArrowheads, arrowStyle, arrowheadScale,
     edgeOffset,
@@ -379,7 +379,7 @@ export default function Viewer() {
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
 
   const { edges } = useEdges(
-    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms
+    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity
   );
 
   // Apply per-gene visibility filter (null = no filter, show all)
