@@ -116,7 +116,7 @@ class EdgeGroupedQueryRequest(BaseModel):
     ymax: Optional[float] = None
     excluded_lrms: Optional[List[Optional[str]]] = None
     min_strength: Optional[float] = None
-    limit: int = 50_000
+    density: float = 1.0   # fraction of viewport edges to return (0.01–1.0)
 
 
 @router.post("/{dataset}/query-grouped")
@@ -131,10 +131,11 @@ def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
         if body.xmin is not None else None
     # Strip any null entries that can arise from null lrm values in the parquet
     excluded = [x for x in (body.excluded_lrms or []) if x is not None]
+    density = max(0.001, min(1.0, body.density))
     return _reader(dataset, edge_file).query_grouped(
         bbox=bbox,
         excluded_lrms=excluded,
-        limit=body.limit,
+        density=density,
     )
 
 

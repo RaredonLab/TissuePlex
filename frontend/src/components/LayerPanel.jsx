@@ -623,6 +623,7 @@ function EdgeSection() {
     hiddenLrms, toggleLrm, setAllLrmsVisible, hideAllLrms,
     edgeColorRange,
     edgeColorClamp, setEdgeColorClamp,
+    edgeDensity, setEdgeDensity,
   } = useStore();
   const state = layers.edges ?? { visible: true, opacity: 0.9 };
   const [localStrength, setLocalStrength] = useState(edgeMinStrength ?? 0);
@@ -785,6 +786,18 @@ function EdgeSection() {
               </div>
             </div>
           )}
+
+          {/* Density */}
+          <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
+            density: {Math.round(edgeDensity * 100)}%
+            {edgeDensity >= 1.0 && <span style={{ color: "#777" }}> (all)</span>}
+          </div>
+          <input
+            type="range" min={0.01} max={1} step={0.01}
+            value={edgeDensity}
+            onChange={(e) => setEdgeDensity(parseFloat(e.target.value))}
+            style={{ width: "100%", accentColor: "#f90", cursor: "pointer", marginBottom: 8 }}
+          />
 
           {/* Strength filter */}
           <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
