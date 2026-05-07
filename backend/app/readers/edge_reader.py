@@ -6,17 +6,22 @@ All other columns are open metadata (layer type, strength, p-value, etc.)
 
 Coordinates are returned in image pixel space (divided by pixel_size).
 BBox query parameters are also expected in image pixel space.
+
+Uses DuckDB for all parquet queries so large files (1+ GB) are processed in
+streaming chunks without loading the full dataset into RAM.
 """
 import math
 from pathlib import Path
 from typing import Optional
-import pandas as pd
+import duckdb
 import pyarrow.parquet as pq
 
 
 class EdgeReader:
     def __init__(self, path: Path, pixel_size: float = 1.0):
         self.path = path
+        # SQL-safe path string (escape single quotes)
+        self._sql_path = str(path).replace("'", "''")
         self._schema_cache = None
         self._pixel_size = pixel_size
 
@@ -28,6 +33,14 @@ class EdgeReader:
         if self._schema_cache is None:
             self._schema_cache = pq.read_schema(self.path)
         return self._schema_cache
+
+    def _from(self) -> str:
+        return f"read_parquet('{self._sql_path}')"
+
+    def _conn(self):
+        # Each call gets a fresh, isolated connection — duckdb's default connection
+        # is not thread-safe and causes empty/corrupt results under FastAPI concurrency.
+        return duckdb.connect()
 
     def schema(self) -> dict:
         schema = self._parquet_schema()
@@ -42,13 +55,16 @@ class EdgeReader:
         """Return unique LRM rows sorted by lrm_id. Includes string 'lrm' field if present."""
         want = [c for c in ("lrm_id", "lrm", "ligand", "receptor")
                 if c in self._parquet_schema().names]
-        df = pd.read_parquet(self.path, columns=want)
-        df = df.drop_duplicates().copy()
-        # Synthesise string 'lrm' from ligand|receptor if the column is absent
+        if not want:
+            return []
+        cols = ", ".join(f'"{c}"' for c in want)
+        order = "ORDER BY lrm_id" if "lrm_id" in want else ""
+        with self._conn() as conn:
+            df = conn.execute(
+                f"SELECT DISTINCT {cols} FROM {self._from()} {order}"
+            ).df()
         if "lrm" not in df.columns and "ligand" in df.columns and "receptor" in df.columns:
             df["lrm"] = df["ligand"] + "|" + df["receptor"]
-        if "lrm_id" in df.columns:
-            df = df.sort_values("lrm_id")
         return df.to_dict(orient="records")
 
     def edge_color_values(self, mode: str, lrms: list[str] | None = None,
@@ -60,33 +76,39 @@ class EdgeReader:
         mode='metadata' — group by edge, take first value of `field` per edge;
                           auto-detect categorical vs continuous
         """
-        schema = self._parquet_schema()
-        col_names = set(schema.names)
+        col_names = set(self._parquet_schema().names)
 
         if mode == "lrm_set":
-            need = ["edge", "lrm", "score"]
-            if not all(c in col_names for c in need):
+            if not all(c in col_names for c in ("edge", "lrm", "score")):
                 return {"type": "continuous", "values": {}, "min": 0, "max": 0}
-            df = pd.read_parquet(self.path, columns=need)
-            if lrms:
-                df = df[df["lrm"].isin(set(lrms))]
-            grouped = df.groupby("edge", sort=False)["score"].sum()
-            if grouped.empty:
+            with self._conn() as conn:
+                if lrms:
+                    placeholders = ", ".join(["?" for _ in lrms])
+                    sql = (f"SELECT edge, SUM(score) AS total FROM {self._from()} "
+                           f"WHERE lrm IN ({placeholders}) GROUP BY edge")
+                    df = conn.execute(sql, lrms).df()
+                else:
+                    df = conn.execute(
+                        f"SELECT edge, SUM(score) AS total FROM {self._from()} GROUP BY edge"
+                    ).df()
+            if df.empty:
                 return {"type": "continuous", "values": {}, "min": 0, "max": 0}
-            vmin, vmax = float(grouped.min()), float(grouped.max())
+            grouped = df.set_index("edge")["total"]
             return {
                 "type": "continuous",
                 "values": grouped.to_dict(),
-                "min": vmin,
-                "max": vmax,
+                "min": float(grouped.min()),
+                "max": float(grouped.max()),
             }
 
         if mode == "metadata":
             if not field or field not in col_names:
                 return {"type": "continuous", "values": {}, "min": 0, "max": 0}
-            df = pd.read_parquet(self.path, columns=["edge", field])
-            grouped = df.groupby("edge", sort=False)[field].first()
-            col = grouped
+            with self._conn() as conn:
+                df = conn.execute(
+                    f'SELECT edge, FIRST("{field}") AS val FROM {self._from()} GROUP BY edge'
+                ).df()
+            col = df.set_index("edge")["val"]
             dtype = str(col.dtype)
             n_unique = col.nunique()
             is_cat = (
@@ -100,26 +122,26 @@ class EdgeReader:
                     "values": col.to_dict(),
                     "categories": categories,
                 }
-            vmin, vmax = float(col.min()), float(col.max())
             return {
                 "type": "continuous",
                 "values": col.to_dict(),
-                "min": vmin,
-                "max": vmax,
+                "min": float(col.min()),
+                "max": float(col.max()),
             }
 
         return {"type": "continuous", "values": {}, "min": 0, "max": 0}
 
     def edge_detail(self, edge_id: str) -> dict | None:
         """Return all LRM rows for a single directed edge, structured for the info panel."""
-        col_names = set(self._parquet_schema().names)
-        df = pd.read_parquet(self.path)
-        rows = df[df["edge"] == edge_id] if "edge" in col_names else pd.DataFrame()
-        if rows.empty:
+        with self._conn() as conn:
+            df = conn.execute(
+                f"SELECT * FROM {self._from()} WHERE edge = ?", [edge_id]
+            ).df()
+        if df.empty:
             return None
-        first = rows.iloc[0]
+        first = df.iloc[0]
         lrm_rows = []
-        for _, r in rows.iterrows():
+        for _, r in df.iterrows():
             entry: dict = {}
             for c in ("lrm", "lrm_id", "ligand", "receptor", "score", "score_norm"):
                 if c in r.index:
@@ -136,21 +158,31 @@ class EdgeReader:
         return result
 
     def column_summary(self, column: str) -> dict:
-        df = pd.read_parquet(self.path, columns=[column])
-        col = df[column]
-        if pd.api.types.is_numeric_dtype(col):
-            return {
-                "type": "numeric",
-                "min": float(col.min()),
-                "max": float(col.max()),
-                "mean": float(col.mean()),
-            }
-        else:
-            return {
-                "type": "categorical",
-                "values": col.dropna().unique().tolist(),
-                "count": int(col.nunique()),
-            }
+        col_names = set(self._parquet_schema().names)
+        if column not in col_names:
+            return {"type": "categorical", "values": [], "count": 0}
+        quoted = f'"{column}"'
+        try:
+            with self._conn() as conn:
+                row = conn.execute(
+                    f"SELECT MIN({quoted}), MAX({quoted}), AVG({quoted}) "
+                    f"FROM {self._from()}"
+                ).fetchone()
+            vmin, vmax, vmean = row
+            if isinstance(vmin, (int, float)) and not isinstance(vmin, bool):
+                return {
+                    "type": "numeric",
+                    "min": float(vmin),
+                    "max": float(vmax),
+                    "mean": float(vmean),
+                }
+        except Exception:
+            pass
+        with self._conn() as conn:
+            vals = conn.execute(
+                f"SELECT DISTINCT {quoted} FROM {self._from()} WHERE {quoted} IS NOT NULL"
+            ).df().iloc[:, 0].tolist()
+        return {"type": "categorical", "values": vals, "count": len(vals)}
 
     def query(
         self,
@@ -159,45 +191,84 @@ class EdgeReader:
         min_strength: Optional[float] = None,
         limit: int = 200_000,
     ) -> list[dict]:
-        df = pd.read_parquet(self.path)
         ps = self.pixel_size
+        schema_names = set(self._parquet_schema().names)
 
-        # BBox is in image pixel coords; convert to native units for filtering
+        conditions: list[str] = []
+        params: list = []
+
         if bbox:
             xmin, ymin, xmax, ymax = bbox
             if None not in (xmin, ymin, xmax, ymax):
                 xmin_u, ymin_u = xmin * ps, ymin * ps
                 xmax_u, ymax_u = xmax * ps, ymax * ps
-                src_in = (
-                    (df["x1"] >= xmin_u) & (df["x1"] <= xmax_u) &
-                    (df["y1"] >= ymin_u) & (df["y1"] <= ymax_u)
+                conditions.append(
+                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
+                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
                 )
-                tgt_in = (
-                    (df["x2"] >= xmin_u) & (df["x2"] <= xmax_u) &
-                    (df["y2"] >= ymin_u) & (df["y2"] <= ymax_u)
-                )
-                df = df[src_in | tgt_in]
+                params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
+                                xmin_u, xmax_u, ymin_u, ymax_u])
 
         if filters:
             for col, val in filters.items():
-                if col not in df.columns:
+                if col not in schema_names:
                     continue
                 if isinstance(val, list):
-                    df = df[df[col].isin(val)]
+                    placeholders = ", ".join(["?" for _ in val])
+                    conditions.append(f'"{col}" IN ({placeholders})')
+                    params.extend(val)
                 else:
-                    df = df[df[col] == val]
+                    conditions.append(f'"{col}" = ?')
+                    params.append(val)
 
-        if min_strength is not None and "strength" in df.columns:
-            df = df[df["strength"] >= min_strength]
+        if min_strength is not None and "strength" in schema_names:
+            conditions.append("strength >= ?")
+            params.append(min_strength)
 
-        df = df.head(limit).copy()
-        # Scale spatial columns to image pixel coords
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        can_stratify = "sending_cell" in schema_names
+
+        with self._conn() as conn:
+            if can_stratify:
+                # Two-stage cell-stratified sampling:
+                #   1. Reservoir-sample the bbox-filtered rows down to PRE_LIMIT (fast,
+                #      single pass over parquet; USING SAMPLE must go on the inner subquery
+                #      so the WHERE filter runs first).
+                #   2. Apply per-cell ROW_NUMBER window on the small pre-sample, keeping
+                #      at most K edges per cell, then shuffle and cap at limit.
+                # This distributes the budget evenly across all visible cells rather than
+                # over-representing high-degree hub cells that appear first in the file.
+                PRE_LIMIT = min(limit * 5, 500_000)
+                K = max(1, limit // 50)  # per-cell cap (assumes ≥50 cells in view)
+                df = conn.execute(
+                    f"""
+                    SELECT * EXCLUDE (_rn) FROM (
+                        SELECT *,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY sending_cell ORDER BY RANDOM()
+                            ) AS _rn
+                        FROM (
+                            SELECT * FROM (
+                                SELECT * FROM {self._from()} {where}
+                            ) USING SAMPLE reservoir({PRE_LIMIT} ROWS)
+                        )
+                    ) WHERE _rn <= {K}
+                    ORDER BY RANDOM()
+                    LIMIT {limit}
+                    """,
+                    params,
+                ).df()
+            else:
+                df = conn.execute(
+                    f"SELECT * FROM {self._from()} {where} LIMIT {limit}", params
+                ).df()
+
         for col in ("x1", "y1", "x2", "y2"):
             if col in df.columns:
                 df[col] = df[col] / ps
 
         return [
-            {k: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for k, v in row.items()}
+            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
+             for c, v in row.items()}
             for row in df.to_dict(orient="records")
         ]

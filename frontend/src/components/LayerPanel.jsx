@@ -613,6 +613,8 @@ function EdgeSection() {
     edgeDirectional, setEdgeDirectional,
     edgeOffset, setEdgeOffset,
     showAutocrine, setShowAutocrine,
+    autocrineRadius, setAutocrineRadius,
+    autocrineLineWidth, setAutocrineLineWidth,
     edgeWidth, setEdgeWidth,
     showArrowheads, setShowArrowheads,
     arrowStyle, setArrowStyle,
@@ -720,6 +722,34 @@ function EdgeSection() {
                 onChange={(e) => setEdgeOffset(parseFloat(e.target.value))}
                 style={{ flex: 1, accentColor: "#f90", cursor: "pointer" }}
               />
+            </div>
+          )}
+
+          {/* Autocrine controls */}
+          {showAutocrine && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: "#555", whiteSpace: "nowrap", width: 72 }}>
+                  ring r: {autocrineRadius}
+                </span>
+                <input
+                  type="range" min={4} max={40} step={1}
+                  value={autocrineRadius}
+                  onChange={(e) => setAutocrineRadius(parseInt(e.target.value, 10))}
+                  style={{ flex: 1, accentColor: "#f90", cursor: "pointer" }}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: "#555", whiteSpace: "nowrap", width: 72 }}>
+                  ring w: {autocrineLineWidth.toFixed(1)}
+                </span>
+                <input
+                  type="range" min={0.5} max={8} step={0.5}
+                  value={autocrineLineWidth}
+                  onChange={(e) => setAutocrineLineWidth(parseFloat(e.target.value))}
+                  style={{ flex: 1, accentColor: "#f90", cursor: "pointer" }}
+                />
+              </div>
             </div>
           )}
 

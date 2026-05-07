@@ -26,12 +26,11 @@ export const useStore = create((set, get) => ({
 
   // ── Layer visibility ───────────────────────────────────────────────────────
   layers: {
-    morphology:   { visible: true, opacity: 1.0 },
-    transcripts:  { visible: true, opacity: 0.8 },
-    // cellSegments: opacity = fill alpha; outlineOpacity = outline alpha (independent)
-    cellSegments: { visible: true, opacity: 0.6, outlineOpacity: 0.8 },
-    tissueGraph:  { visible: true, opacity: 0.25 },
-    edges:        { visible: true, opacity: 0.9 },
+    morphology:   { visible: false, opacity: 1.0 },
+    transcripts:  { visible: false, opacity: 0.8 },
+    cellSegments: { visible: true,  opacity: 1.0, outlineOpacity: 0.0 },
+    tissueGraph:  { visible: true,  opacity: 0.05 },
+    edges:        { visible: false, opacity: 0.25 },
   },
 
   // ── Color range cache (updated from Viewer hooks for legend display) ──────
@@ -45,6 +44,11 @@ export const useStore = create((set, get) => ({
   setCellColorClamp: (low, high) => set({ cellColorClamp: { low, high } }),
   edgeColorClamp: { low: null, high: null },
   setEdgeColorClamp: (low, high) => set({ edgeColorClamp: { low, high } }),
+  // Fraction of data max used as the default hi-clamp when no absolute value is set.
+  // Keeps vivid colour contrast by cutting off the long tail of high-scoring edges.
+  // null = disabled (use full range); user moving the hi slider sets an absolute override.
+  edgeColorHiCutFraction: 0.25,
+  setEdgeColorHiCutFraction: (v) => set({ edgeColorHiCutFraction: v }),
 
   // ── Edge style ────────────────────────────────────────────────────────────
   edgeWidth: 2,
@@ -52,7 +56,7 @@ export const useStore = create((set, get) => ({
   showArrowheads: true,
   setShowArrowheads: (v) => set({ showArrowheads: v }),
   // arrowStyle: "full" = filled chevron both sides; "half" = harpoon (outer barb only)
-  arrowStyle: "full",
+  arrowStyle: "half",
   setArrowStyle: (v) => set({ arrowStyle: v }),
   // arrowheadScale: multiplier on base arrowLen (edgeWidth * 4)
   arrowheadScale: 1.0,
@@ -64,7 +68,7 @@ export const useStore = create((set, get) => ({
 
   // mode: 'default' | 'lrm_set' | 'metadata'
   // field: for metadata = column name; unused for other modes
-  edgeColorBy: { mode: "default", field: null },
+  edgeColorBy: { mode: "lrm_set", field: null },
   setEdgeColorBy: (mode, field) => set({ edgeColorBy: { mode, field } }),
 
   // Edge palette (for continuous metadata coloring)
@@ -75,12 +79,17 @@ export const useStore = create((set, get) => ({
   edgeDirectional: true,
   setEdgeDirectional: (v) => set({ edgeDirectional: v }),
   // edgeOffset: perpendicular separation in image-pixels between A→B and B→A
-  edgeOffset: 4,
+  edgeOffset: 0,
   setEdgeOffset: (v) => set({ edgeOffset: v }),
 
   // Show autocrine self-loop rings
-  showAutocrine: true,
+  showAutocrine: false,
   setShowAutocrine: (v) => set({ showAutocrine: v }),
+  // Autocrine circle geometry — independent from directed-edge line width
+  autocrineRadius: 14,
+  setAutocrineRadius: (v) => set({ autocrineRadius: v }),
+  autocrineLineWidth: 2,
+  setAutocrineLineWidth: (v) => set({ autocrineLineWidth: v }),
 
   // Selected edge (for info panel): "SendingCell|ReceivingCell" string or null
   selectedEdge: null,

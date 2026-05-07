@@ -16,7 +16,7 @@ import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading
  */
-export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, palette, enabled, clamp) {
+export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, palette, enabled, clamp, hiCutFraction) {
   const [result, setResult] = useState({
     colorValues: null, type: "continuous", vmin: 0, vmax: 0,
     categories: [], categoryColors: new Map(),
@@ -76,7 +76,7 @@ export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCata
         } else {
           const { min, max } = data;
           const lo = clamp?.low ?? min;
-          const hi = clamp?.high ?? max;
+          const hi = clamp?.high ?? (hiCutFraction != null ? hiCutFraction * max : max);
           const colorMap = new Map(
             Object.entries(data.values).map(([id, v]) => [id, valueToColor(v, lo, hi, palette)])
           );
@@ -89,7 +89,7 @@ export function useEdgeColors(apiBase, dataset, edgeColorBy, hiddenLrms, lrmCata
       }
     }, 150);
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, edgeColorBy?.mode, edgeColorBy?.field, hiddenLrms, lrmCatalogue, palette, enabled, clamp?.low, clamp?.high]);
+  }, [apiBase, dataset, edgeColorBy?.mode, edgeColorBy?.field, hiddenLrms, lrmCatalogue, palette, enabled, clamp?.low, clamp?.high, hiCutFraction]);
 
   return { ...result, loading };
 }
