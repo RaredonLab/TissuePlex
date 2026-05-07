@@ -87,7 +87,7 @@ backend/
       xenium_reader.py       Xenium implementation (inherits SpatialDatasetReader)
       merscope_reader.py     MERSCOPE implementation (inherits SpatialDatasetReader)
       cosmx_reader.py        CosMx implementation (inherits SpatialDatasetReader)
-      edge_reader.py         reads edges.parquet; lrm_catalogue(), edge_color_values(), edge_detail()
+      edge_reader.py         reads edges.parquet; query_grouped(), lrm_catalogue(), edge_color_values(), edge_detail()
       layer_reader.py        generic parquet reader
     tiling/
       pyramid.py             OME-TIFF → DZI; pyvips streaming primary, tifffile+Pillow fallback
@@ -109,8 +109,8 @@ frontend/
       useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
       useCellBoundaries.js   Viewport-bounded cell boundary fetch (skip when fracW >= 0.5)
       useCellColors.js       POST color-values; maps cell_id → RGBA; supports clamp
-      useEdgeColors.js       POST edge-color-values; maps edge_id → RGBA; supports clamp
-      useEdges.js            Viewport-bounded edge fetch
+      useEdgeColors.js       lrm_set: client-side from visible_score_sum; metadata: POST edge-color-values
+      useEdges.js            Viewport-bounded edge fetch; POSTs to /query-grouped
     utils/
       colormap.js            Palette definitions (viridis/plasma/magma/inferno) + valueToColor()
       geneColor.js           Deterministic gene → color mapping
@@ -284,14 +284,21 @@ Layers rendered in order (bottom to top):
 at all, regardless of LRM). Edge data = quantitative/categorical overlay on top. Analogous to
 cell segment outlines (structure) vs cell fill color (expression).
 
+**Two LRM count fields** in `query_grouped` response:
+- `lrm_count` — total LRM rows for this edge (used by tissue graph — show all structural pairs regardless of LRM filter)
+- `visible_lrm_count` — LRMs not in `hiddenLrms` (used by directed edges — hide edge when 0)
+- `visible_score_sum` — SUM(score) for non-excluded LRMs (used for client-side lrm_set color mapping)
+
 **Directional rendering**: A→B and B→A are offset perpendicular to the edge axis so they
 appear as two distinct parallel lines. Offset amount is tunable (`edgeOffset`, default 4px).
 Both are offset to their own LEFT, so harpoon arrowheads on the outer side naturally form
 the chemistry ⇌ notation.
 
 **Picking**: OSD consumes pointer events. After each click, `deck.pickObject()` is called
-manually at the click coordinates. Cell fill layer is checked first; if no hit, edge layers
-are checked. Results set `selectedCell` or `selectedEdge` in the store.
+manually at the click coordinates. Normal click: cell fill checked first, then edge layers.
+Shift+click: edge layers checked first (useful when edges and cells overlap). The
+`tissue-graph` layer is also pickable (selecting it opens the EdgeInfoPanel).
+Results set `selectedCell` or `selectedEdge` in the store.
 
 ---
 
@@ -304,13 +311,19 @@ that would be wasted at the current zoom level:
 |---|---|---|---|
 | `useTranscripts` | `fracW >= 0.7` | Always sent when viewport available | 50K (random sample) |
 | `useCellBoundaries` | `fracW >= 0.5` | Always sent | 20K cells |
-| `useEdges` | no viewport | Always sent | 50K |
+| `useEdges` | no viewport | Always sent | 10K–50K edges (grouped) |
 
 `fracW = (xmax - xmin) / imageSize.w` — fraction of image width visible.
 
 **Transcript sampling**: the backend uses `df.sample(n=limit)` (random, not `head`)
 so the 50K returned transcripts are spatially uniform across the viewport rather than
 biased toward whatever region appears first in the parquet row order.
+
+**Edge aggregation**: `useEdges` POSTs to `/edges/{dataset}/query-grouped` which returns
+one row per directed edge (GROUP BY edge, ORDER BY RANDOM()). For a 168M-row parquet
+(~300K edges × 559 LRMs) this is ~500× fewer rows than the raw query. The `excluded_lrms`
+list is sent in the request body so `visible_lrm_count` and `visible_score_sum` are
+pre-computed server-side.
 
 ---
 
@@ -322,6 +335,12 @@ biased toward whatever region appears first in the parquet row order.
 
 The `cellColorClamp` / `edgeColorClamp` store values are passed into the color hooks
 and applied as `lo = clamp.low ?? dataMin`, `hi = clamp.high ?? dataMax`.
+
+**Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
+synchronously from `visible_score_sum` in the already-fetched edges array. No server
+call is made for `lrm_set` mode. The p95 of `visible_score_sum` across the current
+viewport is auto-set as `edgeColorClamp.high` so the color range adapts to the data
+rather than being dominated by outlier edges.
 
 Categorical data uses `QUAL_PALETTE` (20 visually distinct colors) from `colormap.js`.
 Beyond 20 categories, `geneColor()` provides deterministic hash-based colors.
@@ -394,6 +413,19 @@ output folder under `DATA_PATH` — TissuePlex auto-detects the platform on firs
 - All data hooks must guard against non-ok HTTP responses (return `[]` on error);
   storing a `{"detail": "..."}` error object as the edges/transcripts/cells array
   causes deck.gl to throw "not iterable" errors in minified code
+- `query_grouped` response rows must be sanitized (NaN/inf → None) before JSON
+  serialization — `visible_score_sum` can be NaN when score column contains NaN values
+- Reader instances are cached at router level (`_reader_cache` dicts in `edges.py` and
+  `spatial.py`) so instance-level caches (`_cells_full_cache`, `_schema_cache`,
+  `_lrm_catalogue_cache`) survive across requests. The LRM catalogue scan (1s on 168M rows)
+  is cached per `EdgeReader` instance in `_lrm_catalogue_cache`.
+- DuckDB binds `?` parameters in SQL text order, not logical clause order. In
+  `query_grouped`, the SELECT CASE WHEN clauses appear before the WHERE clause, so
+  `excl_params` must come before `where_params` in `all_params`.
+- Real parquet files can have completely null LRM rows (lrm=null, ligand=null, receptor=null).
+  The catalogue query filters these with `WHERE lrm IS NOT NULL`; the endpoint strips
+  null entries from `excluded_lrms` with `[x for x in lst if x is not None]`; the
+  Pydantic model uses `List[Optional[str]]` to accept them without 422 errors.
 
 ---
 
@@ -414,9 +446,8 @@ output folder under `DATA_PATH` — TissuePlex auto-detects the platform on firs
 4. **CosMx gene-set coloring** — requires per-cell expression aggregation from the
    transcript file; `CosMxReader._color_values_gene_set()` is a stub returning empty.
 
-5. **Performance at scale** — large datasets (100K+ cells, 400K+ transcript rows per viewport)
-   can be laggy. Transcripts are already randomly sampled and zoom-skipped. Further
-   improvements: LOD for arrowheads at low zoom, server-side edge aggregation, or reducing
-   the edge limit in `useEdges.js`.
+5. **Performance at scale** — edge rendering is now fast (query-grouped returns ~300K
+   edges as 300K rows instead of 168M rows; colors computed client-side). Remaining
+   bottlenecks: LOD for arrowheads at low zoom, transcript rendering at very high density.
 
 6. **Authentication** — no auth. Fine for local/lab use, needs work for any public deployment.

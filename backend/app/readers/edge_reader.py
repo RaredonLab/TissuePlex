@@ -23,6 +23,7 @@ class EdgeReader:
         # SQL-safe path string (escape single quotes)
         self._sql_path = str(path).replace("'", "''")
         self._schema_cache = None
+        self._lrm_catalogue_cache = None
         self._pixel_size = pixel_size
 
     @property
@@ -53,19 +54,26 @@ class EdgeReader:
 
     def lrm_catalogue(self) -> list[dict]:
         """Return unique LRM rows sorted by lrm_id. Includes string 'lrm' field if present."""
+        if self._lrm_catalogue_cache is not None:
+            return self._lrm_catalogue_cache
         want = [c for c in ("lrm_id", "lrm", "ligand", "receptor")
                 if c in self._parquet_schema().names]
         if not want:
+            self._lrm_catalogue_cache = []
             return []
         cols = ", ".join(f'"{c}"' for c in want)
         order = "ORDER BY lrm_id" if "lrm_id" in want else ""
         with self._conn() as conn:
             df = conn.execute(
-                f"SELECT DISTINCT {cols} FROM {self._from()} {order}"
+                f"SELECT DISTINCT {cols} FROM {self._from()} WHERE lrm IS NOT NULL {order}"
+                if "lrm" in want else
+                f"SELECT DISTINCT {cols} FROM {self._from()} WHERE ligand IS NOT NULL AND receptor IS NOT NULL {order}"
             ).df()
         if "lrm" not in df.columns and "ligand" in df.columns and "receptor" in df.columns:
             df["lrm"] = df["ligand"] + "|" + df["receptor"]
-        return df.to_dict(orient="records")
+        df = df.dropna(subset=["lrm"] if "lrm" in df.columns else [])
+        self._lrm_catalogue_cache = df.to_dict(orient="records")
+        return self._lrm_catalogue_cache
 
     def edge_color_values(self, mode: str, lrms: list[str] | None = None,
                           field: str | None = None) -> dict:
@@ -183,6 +191,108 @@ class EdgeReader:
                 f"SELECT DISTINCT {quoted} FROM {self._from()} WHERE {quoted} IS NOT NULL"
             ).df().iloc[:, 0].tolist()
         return {"type": "categorical", "values": vals, "count": len(vals)}
+
+    def query_grouped(
+        self,
+        bbox: Optional[tuple] = None,
+        excluded_lrms: Optional[list] = None,
+        min_lrm_count: int = 1,
+        limit: int = 50_000,
+    ) -> list[dict]:
+        """
+        Return one row per directed edge (GROUP BY edge), pre-aggregated.
+        ~500x fewer rows than query() for typical LRM-rich parquet files.
+
+        Returns lrm_count = number of non-excluded LRMs for each edge,
+        which the frontend uses to decide whether to render the edge.
+        """
+        ps = self.pixel_size
+        schema_names = set(self._parquet_schema().names)
+        has_lrm   = "lrm"   in schema_names
+        has_score = "score" in schema_names
+
+        where_conditions: list[str] = []
+        where_params: list = []
+
+        if bbox:
+            xmin, ymin, xmax, ymax = bbox
+            if None not in (xmin, ymin, xmax, ymax):
+                xmin_u, ymin_u = xmin * ps, ymin * ps
+                xmax_u, ymax_u = xmax * ps, ymax * ps
+                where_conditions.append(
+                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
+                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
+                )
+                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
+                                      xmin_u, xmax_u, ymin_u, ymax_u])
+
+        where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+        # Build SELECT columns
+        agg_cols = ["edge"]
+        for col in ("sending_cell", "receiving_cell", "is_autocrine",
+                    "sending_type", "receiving_type"):
+            if col in schema_names:
+                agg_cols.append(f'FIRST("{col}") AS "{col}"')
+        for coord in ("x1", "y1", "x2", "y2"):
+            if coord in schema_names:
+                agg_cols.append(f'FIRST("{coord}") AS "{coord}"')
+
+        # lrm_count         = total LRMs for this edge (tissue graph — show all pairs)
+        # visible_lrm_count = LRMs not excluded (directed edges — hide when 0)
+        # visible_score_sum = SUM(score) for non-excluded LRMs (client-side lrm_set coloring)
+        excl_params: list = []
+        if has_lrm and excluded_lrms:
+            ph = ", ".join("?" for _ in excluded_lrms)
+            agg_cols.append("COUNT(*) AS lrm_count")
+            agg_cols.append(
+                f"SUM(CASE WHEN lrm NOT IN ({ph}) THEN 1 ELSE 0 END) AS visible_lrm_count"
+            )
+            if has_score:
+                agg_cols.append(
+                    f"SUM(CASE WHEN lrm NOT IN ({ph}) THEN score ELSE 0 END) AS visible_score_sum"
+                )
+            excl_params = list(excluded_lrms) * (2 if has_score else 1)
+        elif has_lrm:
+            agg_cols.append("COUNT(*) AS lrm_count")
+            agg_cols.append("COUNT(*) AS visible_lrm_count")
+            if has_score:
+                agg_cols.append("SUM(score) AS visible_score_sum")
+        else:
+            agg_cols.append("1 AS lrm_count")
+            agg_cols.append("1 AS visible_lrm_count")
+
+        select = ", ".join(agg_cols)
+        # SELECT clause (lrm NOT IN ...) comes before WHERE in the SQL,
+        # so excl_params must be bound first, then where_params.
+        all_params = excl_params + where_params
+
+        sql = f"""
+            SELECT * FROM (
+                SELECT {select}
+                FROM {self._from()}
+                {where}
+                GROUP BY edge
+                HAVING lrm_count >= 1
+            ) ORDER BY RANDOM()
+            LIMIT {limit}
+        """
+
+        with self._conn() as conn:
+            df = conn.execute(sql, all_params).df()
+
+        for col in ("x1", "y1", "x2", "y2"):
+            if col in df.columns:
+                df[col] = df[col] / ps
+
+        if "is_autocrine" in df.columns:
+            df["is_autocrine"] = df["is_autocrine"].astype(bool)
+
+        return [
+            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
+             for c, v in row.items()}
+            for row in df.to_dict(orient="records")
+        ]
 
     def query(
         self,

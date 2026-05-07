@@ -44,11 +44,6 @@ export const useStore = create((set, get) => ({
   setCellColorClamp: (low, high) => set({ cellColorClamp: { low, high } }),
   edgeColorClamp: { low: null, high: null },
   setEdgeColorClamp: (low, high) => set({ edgeColorClamp: { low, high } }),
-  // Fraction of data max used as the default hi-clamp when no absolute value is set.
-  // Keeps vivid colour contrast by cutting off the long tail of high-scoring edges.
-  // null = disabled (use full range); user moving the hi slider sets an absolute override.
-  edgeColorHiCutFraction: 0.25,
-  setEdgeColorHiCutFraction: (v) => set({ edgeColorHiCutFraction: v }),
 
   // ── Edge style ────────────────────────────────────────────────────────────
   edgeWidth: 2,

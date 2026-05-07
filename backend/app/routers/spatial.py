@@ -19,15 +19,23 @@ router = APIRouter()
 
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data"))
 
+# Module-level cache: dataset name → reader instance.
+# Keeps instance-level caches (_cells_full_cache, etc.) alive across requests.
+_reader_cache: dict[str, object] = {}
+
 
 def _reader(dataset: str):
+    if dataset in _reader_cache:
+        return _reader_cache[dataset]
     path = DATA_ROOT / dataset
     if not path.exists():
         raise HTTPException(404, f"Dataset '{dataset}' not found")
     try:
-        return ReaderFactory.detect(path)
+        reader = ReaderFactory.detect(path)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
+    _reader_cache[dataset] = reader
+    return reader
 
 
 # ── Dataset discovery ─────────────────────────────────────────────────────────
