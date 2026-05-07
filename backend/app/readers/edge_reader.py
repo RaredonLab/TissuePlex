@@ -197,14 +197,16 @@ class EdgeReader:
         bbox: Optional[tuple] = None,
         excluded_lrms: Optional[list] = None,
         min_lrm_count: int = 1,
-        limit: int = 50_000,
+        density: float = 1.0,
+        max_limit: int = 500_000,
     ) -> list[dict]:
         """
         Return one row per directed edge (GROUP BY edge), pre-aggregated.
         ~500x fewer rows than query() for typical LRM-rich parquet files.
 
-        Returns lrm_count = number of non-excluded LRMs for each edge,
-        which the frontend uses to decide whether to render the edge.
+        density=1.0 returns all edges in the viewport (up to max_limit).
+        density<1.0 uses bernoulli sampling so each edge is independently
+        included with probability `density` — spatially uniform.
         """
         ps = self.pixel_size
         schema_names = set(self._parquet_schema().names)
@@ -267,6 +269,14 @@ class EdgeReader:
         # so excl_params must be bound first, then where_params.
         all_params = excl_params + where_params
 
+        # Bernoulli sampling: each grouped edge row is included independently
+        # at probability `density`. At density=1.0 no sampling clause is added
+        # and all viewport edges are returned (up to max_limit safety cap).
+        sample_clause = (
+            f"USING SAMPLE {density * 100:.4f} PERCENT (bernoulli)"
+            if density < 1.0 else ""
+        )
+
         sql = f"""
             SELECT * FROM (
                 SELECT {select}
@@ -274,8 +284,8 @@ class EdgeReader:
                 {where}
                 GROUP BY edge
                 HAVING lrm_count >= 1
-            ) ORDER BY RANDOM()
-            LIMIT {limit}
+            ) {sample_clause}
+            LIMIT {max_limit}
         """
 
         with self._conn() as conn:

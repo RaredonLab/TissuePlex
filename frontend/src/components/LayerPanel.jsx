@@ -790,9 +790,10 @@ function EdgeSection() {
           {/* Density */}
           <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
             density: {Math.round(edgeDensity * 100)}%
+            {edgeDensity >= 1.0 && <span style={{ color: "#777" }}> (all)</span>}
           </div>
           <input
-            type="range" min={0.1} max={5} step={0.1}
+            type="range" min={0.01} max={1} step={0.01}
             value={edgeDensity}
             onChange={(e) => setEdgeDensity(parseFloat(e.target.value))}
             style={{ width: "100%", accentColor: "#f90", cursor: "pointer", marginBottom: 8 }}

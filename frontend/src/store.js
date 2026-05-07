@@ -58,7 +58,7 @@ export const useStore = create((set, get) => ({
   setArrowheadScale: (v) => set({ arrowheadScale: v }),
 
   // ── Edge filter + color state ─────────────────────────────────────────────
-  // edgeDensity: multiplier on zoom-tiered base limits (0.1 = sparse, 5.0 = dense)
+  // edgeDensity: fraction of available viewport edges to show (0.01–1.0)
   edgeDensity: 1.0,
   setEdgeDensity: (v) => set({ edgeDensity: v }),
   edgeMinStrength: 0,
