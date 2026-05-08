@@ -59,7 +59,7 @@ export const useStore = create((set, get) => ({
 
   // ── Edge filter + color state ─────────────────────────────────────────────
   // edgeDensity: fraction of available viewport edges to show (0.01–1.0)
-  edgeDensity: 1.0,
+  edgeDensity: 0.1,
   setEdgeDensity: (v) => set({ edgeDensity: v }),
   edgeMinStrength: 0,
   setEdgeMinStrength: (v) => set({ edgeMinStrength: v }),
