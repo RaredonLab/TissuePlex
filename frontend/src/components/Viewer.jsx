@@ -4,14 +4,15 @@
  * A deck.gl OrthographicView canvas sits on top, coordinate-synced to OSD,
  * rendering all data layers (transcripts, cell segments, edges).
  *
+ * Split-screen: Viewer renders one or two ViewerPanel instances side-by-side.
+ * All layer settings are shared (global store); each panel has its own OSD
+ * instance, deck.gl canvas, and viewport-bounded data fetches.
+ *
  * Coordinate systems:
  *   Image pixel space   — what all data uses (x: 0–img_w, y: 0–img_h)
  *   OSD normalised      — [0,1]² image space (x / img_w, y / img_h)
  *   deck.gl             — OrthographicView in image pixel space
  *   Screen              — display pixels (handled by deck.gl internally)
- *
- * Click picking: OSD receives all pointer events (pan/zoom). After each click
- * we call deck.pickObject() on the pickable cell-fill layer to detect cell hits.
  */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import OpenSeadragon from "openseadragon";
@@ -35,16 +36,23 @@ const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
 
 const VIEW_ID = "main";
 
-export default function Viewer() {
+// ── ViewerPanel ───────────────────────────────────────────────────────────────
+// One instance per visible panel. Each has its own OSD + deck.gl + viewport.
+// All layer/color/filter settings come from the shared Zustand store.
+
+function ViewerPanel({ panelIndex }) {
   const containerRef = useRef(null);
   const viewerRef = useRef(null);
   const deckRef = useRef(null);
-  const syncRef = useRef(null);           // always points to latest syncDeckFromOSD
-  const deckViewStateRef = useRef(null);  // latest deckViewState for event handlers
-  const measureFirstRef = useRef(null);   // first point of an in-progress measurement
-  const clickTimerRef = useRef(null);     // debounce single-click vs double-click
-  const cellPolygonsRef = useRef([]);     // latest cell polygons for point-in-polygon tests
-  const [cursorPos, setCursorPos] = useState(null); // image-px cursor while drawing
+  const syncRef = useRef(null);
+  const deckViewStateRef = useRef(null);
+  const measureFirstRef = useRef(null);
+  const clickTimerRef = useRef(null);
+  const cellPolygonsRef = useRef([]);
+  const [cursorPos, setCursorPos] = useState(null);
+  // Incremented every time this panel's OSD fires "open" — used to reliably
+  // re-apply morphology visibility after each OSD (re)initialization.
+  const [osdOpenCount, setOsdOpenCount] = useState(0);
 
   const {
     apiBase, dataset, activeImage,
@@ -66,11 +74,19 @@ export default function Viewer() {
     cellColorClamp, edgeColorClamp, setEdgeColorClamp,
     annotationMode,
     pixelSize, setPixelSize,
+    clearZoomMatch,
     activeRegion, addRegionPoint, cancelActiveRegion, commitRegion,
     regions, removeRegion,
     measurements, addMeasurement,
     clearAnnotations,
+    panelCount,
   } = useStore();
+
+  // Per-panel viewport from store
+  const viewport = useStore((s) => s.viewports[panelIndex]);
+
+  // Zoom-match signal — fired when the Match button is clicked in either panel
+  const pendingZoomMatch = useStore((s) => s.pendingZoomMatch);
 
   // ── deck.gl view state (synced from OSD) ─────────────────────────────────
   const [deckViewState, setDeckViewState] = useState({
@@ -80,9 +96,6 @@ export default function Viewer() {
     maxZoom: 20,
   });
 
-  // ── Compute OSD → deck.gl view state ─────────────────────────────────────
-  // Keep syncRef current so OSD's stale animation handlers always call the
-  // latest version (avoids stale closure when imageSize populates after open).
   const syncDeckFromOSD = useCallback(
     (osd) => {
       const imgW = imageSize.w;
@@ -92,7 +105,6 @@ export default function Viewer() {
       const bounds = osd.viewport.getBoundsNoRotate();
       const cW = containerRef.current.offsetWidth;
 
-      // OSD uses square normalisation: 1 unit = imgW pixels on both axes.
       const cx = (bounds.x + bounds.width / 2) * imgW;
       const cy = (bounds.y + bounds.height / 2) * imgW;
       const zoom = Math.log2(cW / (bounds.width * imgW));
@@ -104,16 +116,16 @@ export default function Viewer() {
         ymin: bounds.y * imgW,
         xmax: (bounds.x + bounds.width) * imgW,
         ymax: (bounds.y + bounds.height) * imgW,
-      });
+      }, panelIndex);
     },
-    [imageSize, setViewport]
+    [imageSize, setViewport, panelIndex]
   );
   useEffect(() => { syncRef.current = syncDeckFromOSD; }, [syncDeckFromOSD]);
   useEffect(() => { deckViewStateRef.current = deckViewState; }, [deckViewState]);
 
-  // Fetch platform info + capabilities once per dataset
+  // Fetch platform info + capabilities once per dataset, only from panel 0
   useEffect(() => {
-    if (!dataset) return;
+    if (panelIndex !== 0 || !dataset) return;
     fetch(`${apiBase}/spatial/${dataset}/info`)
       .then((r) => r.ok ? r.json() : null)
       .then((info) => {
@@ -122,7 +134,7 @@ export default function Viewer() {
         if (info.capabilities) setPlatformCapabilities(info.capabilities);
       })
       .catch(() => {});
-  }, [apiBase, dataset, setPixelSize, setPlatformCapabilities]);
+  }, [apiBase, dataset, panelIndex, setPixelSize, setPlatformCapabilities]);
 
   // ── OpenSeadragon init ────────────────────────────────────────────────────
   const dziUrl = `${apiBase}/tiles/${dataset}/dzi/${activeImage}.dzi`;
@@ -163,26 +175,26 @@ export default function Viewer() {
       if (src) {
         const sz = src.getContentSize();
         setImageSize(sz.x, sz.y);
+        setOsdOpenCount((c) => c + 1); // always triggers morphology opacity effect
       }
     });
 
     viewer.addHandler("open-failed", (e) =>
-      console.error("OSD open failed:", e.message)
+      console.error(`OSD panel ${panelIndex} open failed:`, e.message)
     );
 
     viewer.addHandler("animation", () => syncRef.current?.(viewer));
     viewer.addHandler("animation-finish", () => syncRef.current?.(viewer));
 
     viewerRef.current = viewer;
-    if (import.meta.env.DEV) window.__osd = viewer;
+    if (import.meta.env.DEV) window[`__osd${panelIndex}`] = viewer;
     return () => {
       viewer.destroy();
       viewerRef.current = null;
-      if (import.meta.env.DEV) window.__osd = null;
+      if (import.meta.env.DEV) delete window[`__osd${panelIndex}`];
     };
   }, [dziUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-sync when imageSize is populated after open
   useEffect(() => {
     if (viewerRef.current && imageSize.w) {
       syncDeckFromOSD(viewerRef.current);
@@ -196,12 +208,38 @@ export default function Viewer() {
     const item = viewerRef.current?.world?.getItemAt(0);
     if (!item) return;
     item.setOpacity(morphologyVisible ? morphologyOpacity : 0);
-    // OSD's navigator syncs item opacity via matchOpacity (synchronous, fires inside
-    // setOpacity above). Override it immediately so the navigator always shows a faint
-    // morphology for spatial orientation regardless of the main-view toggle.
     const navItem = viewerRef.current?.navigator?.world?.getItemAt(0);
     if (navItem) navItem.setOpacity(0.35);
-  }, [morphologyVisible, morphologyOpacity, imageSize.w]); // imageSize.w re-fires on tile open
+  }, [morphologyVisible, morphologyOpacity, osdOpenCount]);
+
+  // ── Match zoom (from "⇔ Match" button) ───────────────────────────────────
+  // The source panel sets pendingZoomMatch = { fromPanel }. The target panel
+  // (fromPanel !== panelIndex) keeps its own center but adopts the source's zoom.
+  useEffect(() => {
+    if (!pendingZoomMatch) return;
+    const { fromPanel } = pendingZoomMatch;
+    if (fromPanel === panelIndex) return; // I'm the source — ignore
+    if (!viewerRef.current || !imageSize.w) return;
+
+    const srcVp = useStore.getState().viewports[fromPanel];
+    if (!srcVp) return;
+
+    const imgW = imageSize.w;
+    // Source visible dimensions in OSD-normalised units (OSD normalises by imgW)
+    const srcW = (srcVp.xmax - srcVp.xmin) / imgW;
+    const srcH = (srcVp.ymax - srcVp.ymin) / imgW;
+
+    // Keep my current center, apply source zoom
+    const center = viewerRef.current.viewport.getCenter(true);
+    const newBounds = new OpenSeadragon.Rect(
+      center.x - srcW / 2,
+      center.y - srcH / 2,
+      srcW,
+      srcH,
+    );
+    viewerRef.current.viewport.fitBounds(newBounds, false); // animated
+    clearZoomMatch();
+  }, [pendingZoomMatch]); // eslint-disable-line
 
   // ── Screenshot ───────────────────────────────────────────────────────────
   const handleScreenshot = useCallback(() => {
@@ -217,16 +255,12 @@ export default function Viewer() {
     ctx.drawImage(osdCanvas, 0, 0);
     if (deckCanvas) ctx.drawImage(deckCanvas, 0, 0);
     const link = document.createElement("a");
-    link.download = `tissueplex_${Date.now()}.png`;
+    link.download = `tissueplex_${panelCount > 1 ? `panel${panelIndex + 1}_` : ""}${Date.now()}.png`;
     link.href = out.toDataURL("image/png");
     link.click();
-  }, []);
+  }, [panelIndex, panelCount]);
 
   // ── Cell click picking ────────────────────────────────────────────────────
-  // OSD captures all pointer events; after each click we also query deck.gl.
-  // We only set the cell if a drag did NOT occur (OSD fires a canvas-click
-  // event with isClick=true for genuine taps).
-  // Shift+click: edge-priority mode — skips cell pick and selects edges first.
   const handleViewerClick = useCallback((e) => {
     if (!deckRef.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
@@ -234,7 +268,6 @@ export default function Viewer() {
     const y = e.clientY - rect.top;
 
     if (e.shiftKey) {
-      // Edge-priority: try directed edges first, then tissue graph, fall through to cells
       const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
       if (edgeInfo?.object) {
         setSelectedEdge(edgeInfo.object.edge);
@@ -252,7 +285,6 @@ export default function Viewer() {
       return;
     }
 
-    // Default: cell-priority
     const cellInfo = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["cell-segments-fill"] });
     if (cellInfo?.object) {
       setSelectedCell(cellInfo.object);
@@ -261,7 +293,6 @@ export default function Viewer() {
     }
     setSelectedCell(null);
 
-    // Edge pick — try directed lines, autocrine rings, then tissue graph
     const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
     if (edgeInfo?.object) {
       setSelectedEdge(edgeInfo.object.edge);
@@ -316,7 +347,6 @@ export default function Viewer() {
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     clearTimeout(clickTimerRef.current);
-    // Delay to let double-click cancel this
     clickTimerRef.current = setTimeout(() => handleOverlaySingleClick(sx, sy), 220);
   }, [annotationMode, handleOverlaySingleClick]);
 
@@ -327,11 +357,10 @@ export default function Viewer() {
       cancelActiveRegion();
       return;
     }
-    // Find cells whose centroids fall inside the polygon (ray-casting)
     const poly = activeRegion;
     const selectedCellIds = cellPolygonsRef.current
       .filter((cell) => {
-        const [px, py] = cell.polygon[0]; // use first vertex as centroid proxy
+        const [px, py] = cell.polygon[0];
         let inside = false;
         for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
           const [xi, yi] = poly[i], [xj, yj] = poly[j];
@@ -351,21 +380,17 @@ export default function Viewer() {
     commitRegion({ id: Date.now(), points: poly, selectedCellIds, color });
   }, [annotationMode, activeRegion, cancelActiveRegion, commitRegion, regions]);
 
-  // ── Transcript / cell-segment data ───────────────────────────────────────
-  const viewport = useStore((s) => s.viewport);
+  // ── Data fetching ─────────────────────────────────────────────────────────
   const transcriptsVisible = layerState.transcripts?.visible ?? true;
   const transcriptsOpacity = layerState.transcripts?.opacity ?? 0.8;
   const cellSegmentsVisible = layerState.cellSegments?.visible ?? true;
   const cellSegmentsOpacity = layerState.cellSegments?.opacity ?? 0.6;
   const cellOutlineOpacity = layerState.cellSegments?.outlineOpacity ?? 0.8;
-
   const edgesVisible = layerState.edges?.visible ?? true;
   const edgesOpacity = layerState.edges?.opacity ?? 0.9;
   const tissueGraphVisible = layerState.tissueGraph?.visible ?? true;
   const tissueGraphOpacity = layerState.tissueGraph?.opacity ?? 0.25;
 
-  // Capability flags — default to true while loading so layers are shown for
-  // platforms that support them (Xenium, MERSCOPE, CosMx).
   const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
@@ -375,14 +400,12 @@ export default function Viewer() {
   const { cells: cellPolygons } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
   );
-  // Keep ref in sync for annotation point-in-polygon tests (avoids stale closures)
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
 
   const { edges } = useEdges(
     apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity
   );
 
-  // Apply per-gene visibility filter (null = no filter, show all)
   const visibleTranscripts = selectedGenes === null
     ? transcripts
     : transcripts.filter((t) => selectedGenes.has(t.feature_name));
@@ -390,28 +413,30 @@ export default function Viewer() {
   const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
     apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp
   );
-  useEffect(() => { setCellColorRange(cellVmin, cellVmax); }, [cellVmin, cellVmax]); // eslint-disable-line
+  // Only update shared store ranges from panel 0 to avoid redundant updates
+  useEffect(() => {
+    if (panelIndex === 0) setCellColorRange(cellVmin, cellVmax);
+  }, [cellVmin, cellVmax]); // eslint-disable-line
 
-  // ── Edge colors from backend ──────────────────────────────────────────────
   const edgeColorEnabled = edgeColorBy.mode !== "default";
   const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95 } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp, edges
   );
-  useEffect(() => { setEdgeColorRange(edgeVmin, edgeVmax); }, [edgeVmin, edgeVmax]); // eslint-disable-line
-  // Auto-calibrate hi clamp to 95th percentile whenever lrm_set data arrives
   useEffect(() => {
-    if (edgeColorBy?.mode === "lrm_set" && edgeP95 != null) {
+    if (panelIndex === 0) setEdgeColorRange(edgeVmin, edgeVmax);
+  }, [edgeVmin, edgeVmax]); // eslint-disable-line
+
+  useEffect(() => {
+    if (panelIndex === 0 && edgeColorBy?.mode === "lrm_set" && edgeP95 != null) {
       setEdgeColorClamp(edgeColorClamp?.low ?? null, edgeP95);
     }
   }, [edgeP95]); // eslint-disable-line
 
-  // Clear selected edge when dataset changes
   useEffect(() => { setSelectedEdge(null); }, [dataset]); // eslint-disable-line
 
   // ── deck.gl layers ────────────────────────────────────────────────────────
   const selectedId = selectedCell?.cell_id ?? null;
 
-  // Build a fast lookup: cell_id → region color (for region-selected cells)
   const regionCellColors = useMemo(() => {
     const map = new Map();
     for (const region of regions) {
@@ -422,7 +447,6 @@ export default function Viewer() {
     return map;
   }, [regions]);
 
-  // Resolve per-cell fill color: selected → yellow, region → region color, colorBy → mapped
   const getCellFillColor = (d) => {
     if (d.cell_id === selectedId) return [255, 220, 0, 80];
     const rc = regionCellColors.get(d.cell_id);
@@ -430,7 +454,7 @@ export default function Viewer() {
     if (colorValues) {
       const c = colorValues.get(d.cell_id);
       if (c) return [c[0], c[1], c[2], 180];
-      return [20, 11, 53, 120]; // dark purple for zero-expression cells
+      return [20, 11, 53, 120];
     }
     return [100, 200, 255, 25];
   };
@@ -449,7 +473,6 @@ export default function Viewer() {
     updateTriggers: { getFillColor: [selectedId, colorValues, regionCellColors, cellColorEnabled] },
   });
 
-  // Outline layer — selected cell gets a brighter yellow ring
   const cellOutlineLayer = new PathLayer({
     id: "cell-segments-outline",
     data: cellPolygons,
@@ -481,7 +504,6 @@ export default function Viewer() {
     updateTriggers: { getFillColor: [] },
   });
 
-  // ── Tissue graph: unique undirected cell pairs (backend already returns 1 row/edge)
   const allDirectedEdges = useMemo(() => {
     const seenPairs = new Set();
     const result = [];
@@ -496,7 +518,6 @@ export default function Viewer() {
     return result;
   }, [edges]);
 
-  // ── Backend already groups by edge; just split autocrine vs directed ──────
   const { directedEdges, autocrineCells } = useMemo(() => ({
     directedEdges: edges.filter((r) => !r.is_autocrine && (r.visible_lrm_count ?? r.lrm_count ?? 0) > 0),
     autocrineCells: edges
@@ -504,7 +525,6 @@ export default function Viewer() {
       .map((r) => ({ ...r, x: r.x1, y: r.y1 })),
   }), [edges]);
 
-  // ── Perpendicular offset: shift A→B left so it doesn't overlap B→A ──────
   const directedEdgesWithOffset = useMemo(() => {
     if (!edgeDirectional) return directedEdges;
     return directedEdges.map((f) => {
@@ -532,37 +552,28 @@ export default function Viewer() {
     return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_AUTOCRINE_COLOR;
   }, [edgeColorValues, selectedEdge]);
 
-  // ── Arrowhead triangles (filled SolidPolygonLayer) ───────────────────────
-  // full:  chevron triangle — tip + left base + right base
-  // half:  harpoon triangle — tip + outer (left) base + center-back
-  //        both A→B and B→A are offset to their own LEFT, so "outer" = left barb only
   const arrowheadTriangles = useMemo(() => {
     if (!showArrowheads || !edgeDirectional) return [];
     const arrowLen = Math.max(4, edgeWidth * 4 * arrowheadScale);
-    const cos150 = Math.cos((5 * Math.PI) / 6); // ≈ -0.866
-    const sin150 = Math.sin((5 * Math.PI) / 6); // 0.5
+    const cos150 = Math.cos((5 * Math.PI) / 6);
+    const sin150 = Math.sin((5 * Math.PI) / 6);
     return directedEdgesWithOffset.map((f) => {
       const dx = f.tx - f.sx, dy = f.ty - f.sy;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
       const ux = dx / len, uy = dy / len;
-      // Rotate fwd by +150° (CCW) → outer/left barb
       const lx = ux * cos150 - uy * sin150, ly = ux * sin150 + uy * cos150;
       const tip = [f.tx, f.ty];
       const outerBase = [f.tx + lx * arrowLen, f.ty + ly * arrowLen];
       if (arrowStyle === "half") {
-        // Harpoon: tip + outer barb + center-back point
         const backBase = [f.tx - ux * arrowLen, f.ty - uy * arrowLen];
         return { polygon: [tip, outerBase, backBase], edge: f.edge };
       }
-      // Full chevron: tip + left base + right base
-      // Rotate fwd by -150° (CW) → inner/right barb
       const rx = ux * cos150 + uy * sin150, ry = -ux * sin150 + uy * cos150;
       const innerBase = [f.tx + rx * arrowLen, f.ty + ry * arrowLen];
       return { polygon: [tip, outerBase, innerBase], edge: f.edge };
     });
   }, [directedEdgesWithOffset, showArrowheads, edgeDirectional, edgeWidth, arrowheadScale, arrowStyle]);
 
-  // ── Tissue graph (structural background, LRM-agnostic) ──────────────────
   const tissueGraphLayer = new LineLayer({
     id: "tissue-graph",
     data: allDirectedEdges,
@@ -638,7 +649,6 @@ export default function Viewer() {
   });
 
   // ── Annotation layers ─────────────────────────────────────────────────────
-  // Completed region fills
   const regionFillLayers = regions.map((r) =>
     new SolidPolygonLayer({
       id: `region-fill-${r.id}`,
@@ -650,7 +660,6 @@ export default function Viewer() {
       pickable: false,
     })
   );
-  // Completed region outlines
   const regionOutlineLayers = regions.map((r) =>
     new PathLayer({
       id: `region-outline-${r.id}`,
@@ -662,7 +671,6 @@ export default function Viewer() {
       pickable: false,
     })
   );
-  // Active region being drawn (preview path + cursor line)
   const activePts = cursorPos && activeRegion.length > 0
     ? [...activeRegion, cursorPos]
     : activeRegion;
@@ -686,7 +694,6 @@ export default function Viewer() {
     getFillColor: [255, 255, 255, 220],
     pickable: false,
   });
-  // Measurement layers
   const measureLineLayer = new LineLayer({
     id: "measure-lines",
     data: measurements,
@@ -706,7 +713,6 @@ export default function Viewer() {
     getFillColor: [255, 220, 60, 220],
     pickable: false,
   });
-  // In-progress measurement: first point waiting for second click
   const measureFirstLayer = new ScatterplotLayer({
     id: "measure-first",
     data: measureFirstRef.current ? [measureFirstRef.current] : [],
@@ -740,21 +746,12 @@ export default function Viewer() {
   }).filter(Boolean);
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (!dataset) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
-                    width: "100%", height: "100%", color: "#555", fontFamily: "monospace", fontSize: 13 }}>
-        Loading datasets…
-      </div>
-    );
-  }
-
   const inAnnotationMode = annotationMode !== "pan";
   const cursor = annotationMode === "region" ? "crosshair"
     : annotationMode === "measure" ? "cell" : "default";
 
   return (
-    <div style={{ width: "100%", height: "100%", position: "relative", background: "#1a1a1a" }}>
+    <div style={{ flex: 1, height: "100%", position: "relative", overflow: "hidden", minWidth: 0 }}>
       {/* OpenSeadragon tile canvas */}
       <div
         ref={containerRef}
@@ -777,7 +774,7 @@ export default function Viewer() {
         )}
       </div>
 
-      {/* Annotation event capture overlay — active only in draw/measure modes */}
+      {/* Annotation event capture overlay */}
       {inAnnotationMode && (
         <div
           style={{
@@ -810,11 +807,11 @@ export default function Viewer() {
         </div>
       ))}
 
-      {/* Annotation toolbar */}
-      <AnnotationToolbar onScreenshot={handleScreenshot} />
+      {/* Annotation toolbar — split toggle only shown on panel 0 */}
+      <AnnotationToolbar onScreenshot={handleScreenshot} panelIndex={panelIndex} />
 
-      {/* Edge info panel — appears on edge click */}
-      {selectedEdge && (
+      {/* Edge info panel — only rendered in panel 0 to avoid duplication */}
+      {panelIndex === 0 && selectedEdge && (
         <EdgeInfoPanel
           apiBase={apiBase}
           dataset={dataset}
@@ -823,7 +820,7 @@ export default function Viewer() {
         />
       )}
 
-      {/* Dataset / transcript count label */}
+      {/* Dataset / panel / transcript label */}
       <div
         style={{
           position: "absolute", top: 8, left: 8,
@@ -833,12 +830,43 @@ export default function Viewer() {
         }}
       >
         {dataset} / {activeImage}
+        {panelCount >= 2 && (
+          <span style={{ marginLeft: 6, color: "#555" }}>· panel {panelIndex + 1}</span>
+        )}
         {transcripts.length > 0 && (
           <span style={{ marginLeft: 8, color: "#777" }}>
             {transcripts.length} transcripts
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Viewer ────────────────────────────────────────────────────────────────────
+// Thin wrapper: renders one or two ViewerPanels side by side.
+
+export default function Viewer() {
+  const { panelCount, dataset } = useStore();
+
+  if (!dataset) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "100%", height: "100%", color: "#555", fontFamily: "monospace", fontSize: 13 }}>
+        Loading datasets…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", width: "100%", height: "100%", background: "#1a1a1a" }}>
+      <ViewerPanel panelIndex={0} />
+      {panelCount >= 2 && (
+        <>
+          <div style={{ width: 1, background: "#2a2a2a", flexShrink: 0 }} />
+          <ViewerPanel panelIndex={1} />
+        </>
+      )}
     </div>
   );
 }
