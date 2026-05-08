@@ -99,12 +99,12 @@ frontend/
     store.js                 Zustand store — ALL shared state lives here
     components/
       App.jsx                Root component; wraps everything in a React ErrorBoundary
-      Viewer.jsx             Main component: OSD + deck.gl + all layer logic
+      Viewer.jsx             Split-screen wrapper (Viewer) + per-panel logic (ViewerPanel)
       LayerPanel.jsx         Right-side panel: toggles, opacity, color-by, legends,
                              dataset/image picker, transcript species filter
       CellInfoPanel.jsx      Floating panel on cell click; shows color-by value highlight
       EdgeInfoPanel.jsx      Floating panel on edge/autocrine click
-      AnnotationToolbar.jsx  Region drawing + measurement tools
+      AnnotationToolbar.jsx  Region drawing + measurement tools; ⊞ Split / □ Single toggle; ⇔ Match zoom
     hooks/
       useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
       useCellBoundaries.js   Viewport-bounded cell boundary fetch (skip when fracW >= 0.5)
@@ -157,8 +157,7 @@ Platform-agnostic — works with any spatial dataset as long as cell barcodes ma
 `pixel_size` (from the reader) when serving to the frontend.
 
 The `sample_data/make_edges.py` script generates synthetic demo data in this format.
-Real data should come from `export_NICHESObject_for_viewer()` in the NICHESv2 R package.
-A draft implementation is in `r/export_NICHESObject_for_viewer.R`.
+Real data comes from `export_for_TissuePlex()` in the NICHESv2 R package.
 
 ---
 
@@ -217,6 +216,9 @@ All shared state lives in a single Zustand store. Key sections:
 - **Transcript gene filter**: `selectedGenes` — `null` = no filter (show all);
   `Set<string>` = allowlist (show only those genes). Dataset-scoped; resets on
   dataset change. See Gene Filter section below.
+- **Edge density**: `edgeDensity` — fraction of available viewport edges to render
+  (0.01–1.0, default **0.1**). Applies to both the tissue graph layer and the directed
+  edges layer. Slider is top-level in LayerPanel, between the two sections.
 - **Edge style**: `edgeWidth`, `showArrowheads`, `arrowStyle` (full/half-harpoon),
   `arrowheadScale`, `edgeDirectional`, `edgeOffset` (perpendicular separation), `showAutocrine`
 - **Edge color**: `edgeColorBy` (`mode`: default/lrm_set/metadata), `edgeColorPalette`,
@@ -224,6 +226,11 @@ All shared state lives in a single Zustand store. Key sections:
 - **LRM filter**: `hiddenLrms` (Set of "ligand|receptor" strings), `lrmCatalogue`
 - **Selection**: `selectedCell`, `selectedEdge`
 - **Annotations**: `regions`, `measurements`, `activeRegion`, `annotationMode`
+- **Split-screen**: `panelCount` (1 or 2), `viewports` (array of two viewport objects,
+  one per panel — `{xmin,ymin,xmax,ymax}` in image pixels), `pendingZoomMatch`
+  (`null` or `{ fromPanel }` — consumed by the target panel to match zoom while
+  keeping its own center). `requestZoomMatch(fromPanel)` / `clearZoomMatch()` are the
+  corresponding actions.
 
 ---
 
@@ -299,6 +306,45 @@ manually at the click coordinates. Normal click: cell fill checked first, then e
 Shift+click: edge layers checked first (useful when edges and cells overlap). The
 `tissue-graph` layer is also pickable (selecting it opens the EdgeInfoPanel).
 Results set `selectedCell` or `selectedEdge` in the store.
+
+---
+
+## Split-Screen Architecture
+
+`Viewer.jsx` exports two components:
+- **`ViewerPanel({ panelIndex })`** — contains all viewer logic: its own OSD instance,
+  deck.gl canvas, data hook calls, click handlers, annotation overlay, and toolbar.
+  Reads `viewports[panelIndex]` from the store for its own viewport-bounded fetches.
+- **`Viewer`** (default export) — thin wrapper; renders `<ViewerPanel panelIndex={0} />`
+  always, plus `<ViewerPanel panelIndex={1} />` when `panelCount >= 2`.
+
+**What is per-panel (local state / per-instance):**
+- OSD viewer instance (`viewerRef`)
+- deck.gl ref (`deckRef`)
+- deck.gl view state (`deckViewState`)
+- Per-panel viewport in store (`viewports[panelIndex]`)
+- `osdOpenCount` — local counter incremented on each OSD `open` event; used as dep
+  for the morphology opacity effect to ensure it fires regardless of whether
+  `imageSize.w` changed (fixes the bug where morphology stayed visible after
+  dataset switches with same-dimension images, and in panel 2 on first open)
+
+**What is shared (global store):**
+- All layer toggles, opacities, color-by settings, LRM filter, edge density, etc.
+- `selectedCell`, `selectedEdge` (global — EdgeInfoPanel only renders in panel 0)
+- `imageSize` (both panels open the same DZI; panel 0 sets it, panel 1 may also set
+  the same values redundantly — harmless)
+
+**Guarded to panel 0 only** (to avoid double-writes):
+- Platform info fetch (`/spatial/{dataset}/info`)
+- `setCellColorRange`, `setEdgeColorRange`, `setEdgeColorClamp` updates
+- EdgeInfoPanel rendering
+
+**⇔ Match zoom flow:**
+`requestZoomMatch(fromPanel)` → both panels' effects fire → source panel early-returns
+(`fromPanel === panelIndex`) → target panel reads `viewports[fromPanel]` via
+`useStore.getState()`, computes OSD-normalised width/height, gets its own current center
+via `viewport.getCenter(true)`, constructs new bounds at same size centered on its own
+center, calls `viewport.fitBounds(newBounds, false)` (animated), then `clearZoomMatch()`.
 
 ---
 
@@ -379,8 +425,11 @@ DATA_ROOT=../sample_data uvicorn app.main:app --reload
 # Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev   # → http://localhost:3000, proxies /api → :8000
+npm run dev   # → http://localhost:5173, proxies /api → :8000
 ```
+
+Note: dev server runs on port **5173** (not 3000) to avoid conflicting with Docker,
+which binds port 3000. This is configured in `.claude/launch.json`.
 
 **Docker — demo data (sample_data/):**
 ```bash
@@ -426,15 +475,24 @@ output folder under `DATA_PATH` — TissuePlex auto-detects the platform on firs
   The catalogue query filters these with `WHERE lrm IS NOT NULL`; the endpoint strips
   null entries from `excluded_lrms` with `[x for x in lst if x is not None]`; the
   Pydantic model uses `List[Optional[str]]` to accept them without 422 errors.
+- **Morphology layer always-visible bug (fixed)**: The morphology opacity effect used
+  `imageSize.w` as a dep to detect OSD open, but this fails when the new image has the
+  same dimensions as the previous one (dep doesn't change → effect doesn't re-run →
+  layer stays at OSD default full opacity). Fixed with `osdOpenCount` — a local
+  `useState` counter incremented on every OSD `open` event, used as the effect dep
+  instead. Also fixes panel 2 in split mode, where `imageSize.w` was already set by
+  panel 0 before panel 2's OSD opened.
+- **`Math.min/max` spread on large arrays** (fixed in `useEdgeColors.js`): spreading
+  100K+ element arrays causes `RangeError: Maximum call stack size exceeded`. Use a
+  `for` loop to find min/max instead of `Math.min(...arr)`.
 
 ---
 
 ## What's Not Built Yet
 
-1. **R export function** — `export_NICHESObject_for_viewer()` draft is in
-   `r/export_NICHESObject_for_viewer.R`. Needs validation against the actual NICHESv2
-   object structure (edge separator, meta.data column names, barcode format). See
-   `docs/data_format.md` for the column spec.
+1. **R export function** — `export_for_TissuePlex()` is implemented in the NICHESv2 R
+   package (separate repo). The draft in `r/export_NICHESObject_for_viewer.R` is
+   superseded. See `docs/data_format.md` for the column spec.
 
 2. **Cell expression bar chart** — click panel currently shows cell metadata but not a sorted
    gene expression readout. The `/spatial/{dataset}/expression/{cell_id}` endpoint exists
