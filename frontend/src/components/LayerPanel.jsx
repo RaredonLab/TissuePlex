@@ -158,6 +158,8 @@ export default function LayerPanel() {
       <div style={SECTION_HEADER}>Tissue Graph</div>
       <TissueGraphSection />
 
+      <DensityRow />
+
       <div style={SECTION_HEADER}>Edge Data</div>
       <EdgeSection />
 
@@ -581,6 +583,25 @@ const CHIP_STYLE = {
   cursor: "pointer",
 };
 
+// ── Density row (top-level — applies to tissue graph + edge data) ─────────────
+function DensityRow() {
+  const { edgeDensity, setEdgeDensity } = useStore();
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#555", marginBottom: 2 }}>
+        <span>density: {Math.round(edgeDensity * 100)}%{edgeDensity >= 1.0 ? " (all)" : ""}</span>
+        <span style={{ color: "#3a3a3a" }}>tissue graph + edges</span>
+      </div>
+      <input
+        type="range" min={0.01} max={1} step={0.01}
+        value={edgeDensity}
+        onChange={(e) => setEdgeDensity(parseFloat(e.target.value))}
+        style={{ width: "100%", accentColor: "#888", cursor: "pointer" }}
+      />
+    </div>
+  );
+}
+
 // ── Tissue graph section ──────────────────────────────────────────────────────
 function TissueGraphSection() {
   const { layers, setLayerProp } = useStore();
@@ -623,7 +644,6 @@ function EdgeSection() {
     hiddenLrms, toggleLrm, setAllLrmsVisible, hideAllLrms,
     edgeColorRange,
     edgeColorClamp, setEdgeColorClamp,
-    edgeDensity, setEdgeDensity,
   } = useStore();
   const state = layers.edges ?? { visible: true, opacity: 0.9 };
   const [localStrength, setLocalStrength] = useState(edgeMinStrength ?? 0);
@@ -786,18 +806,6 @@ function EdgeSection() {
               </div>
             </div>
           )}
-
-          {/* Density */}
-          <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
-            density: {Math.round(edgeDensity * 100)}%
-            {edgeDensity >= 1.0 && <span style={{ color: "#777" }}> (all)</span>}
-          </div>
-          <input
-            type="range" min={0.01} max={1} step={0.01}
-            value={edgeDensity}
-            onChange={(e) => setEdgeDensity(parseFloat(e.target.value))}
-            style={{ width: "100%", accentColor: "#f90", cursor: "pointer", marginBottom: 8 }}
-          />
 
           {/* Strength filter */}
           <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
