@@ -49,6 +49,8 @@ po/*~
 rsconnect/
 
 # TissuePlex — sample_data is tracked; per-file exclusions in sample_data/.gitignore
+*.mov
+*.mp4
 frontend/node_modules/
 frontend/dist/
 backend/__pycache__/
