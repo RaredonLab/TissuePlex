@@ -1,0 +1,63 @@
+# TissuePlex — docker-compose
+#
+# USAGE
+#   # Minimal — uses sample_data/ in the repo:
+#   docker compose up --build
+#
+#   # Point at your own Xenium output folder (parent of one or more dataset dirs):
+#   DATA_PATH=/absolute/path/to/xenium_data docker compose up --build
+#
+# The data folder is mounted read-only — the tool never modifies source data.
+# DZI tile pyramids are cached in the named volume `dzi_cache` so they survive
+# container restarts without being rebuilt.
+
+services:
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ${DATA_PATH:-./sample_data}:/data:ro
+      - dzi_cache:/cache
+    environment:
+      DATA_ROOT: /data
+      CACHE_DIR: /cache
+      # DuckDB memory cap — prevents a large parquet scan from consuming all
+      # available RAM and making the container (and Docker Desktop VM) unresponsive.
+      DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-8GB}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # Give the backend enough time to finish any in-progress tile pyramid build
+    # before Docker force-kills it. Pyramid builds can take up to 5 min for large
+    # OME-TIFFs; without this, docker stop cuts them off after 10s and leaves a
+    # corrupt partial cache that blocks future builds.
+    stop_grace_period: 5m
+    deploy:
+      resources:
+        limits:
+          # Hard memory cap: if DuckDB or pyvips exceeds this, the container is
+          # OOM-killed cleanly by Docker rather than hanging the whole VM.
+          # Raise this if your datasets are very large. Default: 12 GB.
+          memory: ${BACKEND_MEMORY_LIMIT:-12g}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  dzi_cache:

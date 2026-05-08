@@ -1,0 +1,31 @@
+# ── Large datasets not committed to the repo ─────────────────────────────────
+# These must be downloaded separately (see fetch_samples.py or README.md).
+xenium_human_breast_2fov/
+merscope-*/
+cosmx-*/
+
+# ── Xenium files present in the repo but not needed by TissuePlex ────────────
+# Xenium Explorer analysis outputs
+analysis_summary.html
+aux_outputs.tar.gz
+analysis.tar.gz
+analysis.zarr.zip
+gene_panel.json
+metrics_summary.csv
+
+# Zarr / legacy matrix formats (TissuePlex reads parquet + HDF5, not zarr)
+*.zarr.zip
+cell_feature_matrix.tar.gz
+
+# CSV.gz fallbacks — parquet takes precedence; these are redundant
+cells.csv.gz
+cell_boundaries.csv.gz
+nucleus_boundaries.csv.gz
+transcripts.csv.gz
+
+# Xenium cell layers (not yet used by TissuePlex)
+cell_layers.parquet
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc

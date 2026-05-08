@@ -39,11 +39,22 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# pkgdown site
-docs/
 
 # translation temp files
 po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# TissuePlex — sample_data is tracked; per-file exclusions in sample_data/.gitignore
+*.mov
+*.mp4
+frontend/node_modules/
+frontend/dist/
+backend/__pycache__/
+backend/app/**/__pycache__/
+**/*.pyc
+backend/.dzi_cache/
+.env
+.claude/
+
