@@ -11,10 +11,13 @@ Uses DuckDB for all parquet queries so large files (1+ GB) are processed in
 streaming chunks without loading the full dataset into RAM.
 """
 import math
+import os
 from pathlib import Path
 from typing import Optional
 import duckdb
 import pyarrow.parquet as pq
+
+_DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", "8GB")
 
 
 class EdgeReader:
@@ -41,7 +44,10 @@ class EdgeReader:
     def _conn(self):
         # Each call gets a fresh, isolated connection — duckdb's default connection
         # is not thread-safe and causes empty/corrupt results under FastAPI concurrency.
-        return duckdb.connect()
+        conn = duckdb.connect()
+        conn.execute(f"SET memory_limit='{_DUCKDB_MEMORY_LIMIT}'")
+        conn.execute("SET threads=4")
+        return conn
 
     def schema(self) -> dict:
         schema = self._parquet_schema()
