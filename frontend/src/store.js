@@ -21,8 +21,24 @@ export const useStore = create((set, get) => ({
   setImageSize: (w, h) => set({ imageSize: { w, h } }),
 
   // ── Viewport (image pixel coords, kept in sync with OpenSeadragon) ────────
-  viewport: null, // { xmin, ymin, xmax, ymax }
-  setViewport: (viewport) => set({ viewport }),
+  // One entry per panel; panel 1 is only used in split-screen mode.
+  viewports: [null, null],
+  setViewport: (viewport, panelIndex = 0) => set((s) => {
+    const next = [...s.viewports];
+    next[panelIndex] = viewport;
+    return { viewports: next };
+  }),
+
+  // ── Split-screen ──────────────────────────────────────────────────────────
+  panelCount: 1,
+  setPanelCount: (n) => set({ panelCount: n }),
+
+  // Zoom-match request: set to { fromPanel } to tell the OTHER panel to adopt
+  // the same zoom level (visible image area) while keeping its own center.
+  // Consumed and cleared by the target ViewerPanel's useEffect.
+  pendingZoomMatch: null,
+  requestZoomMatch: (fromPanel) => set({ pendingZoomMatch: { fromPanel } }),
+  clearZoomMatch: () => set({ pendingZoomMatch: null }),
 
   // ── Layer visibility ───────────────────────────────────────────────────────
   layers: {
