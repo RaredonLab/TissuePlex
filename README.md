@@ -2,7 +2,7 @@
 
 An interactive spatial transcriptomics viewer for exploring cell-cell communication from [NICHESv2](https://github.com/your-lab/NICHESv2) directly on the tissue image.
 
-<!-- TODO: add a GIF or screenshot here showing edge toggling / LRM filtering -->
+![TissuePlex demo](docs/demo.gif)
 
 ---
 
