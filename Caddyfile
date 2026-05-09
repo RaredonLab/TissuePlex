@@ -1,0 +1,25 @@
+# TissuePlex — Caddyfile
+#
+# Replace "tissuplex.yourdomain.com" with your actual domain before deploying.
+# deploy.sh writes this file automatically with the domain you enter.
+#
+# Caddy automatically obtains and renews a free TLS certificate from Let's Encrypt.
+# No manual certificate management needed.
+
+tissuplex.yourdomain.com {
+
+    reverse_proxy frontend:80
+
+    # ── Optional: password-protect the viewer ─────────────────────────────────
+    # Recommended if you want to limit access to your lab and collaborators.
+    #
+    # Step 1 — generate a hashed password (run this on the server):
+    #   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'yourpassword'
+    #
+    # Step 2 — uncomment and fill in the block below, then restart:
+    #   docker compose -f docker-compose.prod.yml restart caddy
+    #
+    # basicauth {
+    #     labuser $2a$14$PASTE_THE_HASH_OUTPUT_HERE
+    # }
+}
