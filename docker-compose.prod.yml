@@ -1,0 +1,66 @@
+# TissuePlex — production docker-compose
+#
+# Differences from docker-compose.yml:
+#   - Caddy service added: handles HTTPS and automatic TLS certificates
+#   - frontend and backend ports are NOT exposed to the host directly;
+#     all external traffic goes through Caddy on ports 80/443
+#
+# Usage (on the server, after running deploy.sh):
+#   DATA_PATH=/mnt/tissuplex-data docker compose -f docker-compose.prod.yml up -d --build
+#
+# Or with an env file:
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+services:
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ${DATA_PATH:-./sample_data}:/data:ro
+      - dzi_cache:/cache
+    environment:
+      DATA_ROOT: /data
+      CACHE_DIR: /cache
+      DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-8GB}
+    restart: unless-stopped
+    stop_grace_period: 5m
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKEND_MEMORY_LIMIT:-12g}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  dzi_cache:
+  caddy_data:
+  caddy_config:
