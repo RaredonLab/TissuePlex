@@ -245,20 +245,28 @@ class XeniumReader(SpatialDatasetReader):
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
         col = df[field]
         cell_ids = df["cell_id"].astype(str).tolist()
+        has_value = col.notna()
         is_categorical = (
             pd.api.types.is_string_dtype(col) or
             pd.api.types.is_object_dtype(col) or
             (pd.api.types.is_integer_dtype(col) and col.nunique() <= 30)
         )
         if is_categorical:
-            labels = col.fillna("").astype(str).tolist()
-            categories = sorted(col.dropna().astype(str).unique().tolist())
-            values = {cell_ids[i]: labels[i] for i in range(len(cell_ids))}
+            categories = sorted(col[has_value].astype(str).unique().tolist())
+            values = {
+                cell_ids[i]: str(col.iloc[i])
+                for i in range(len(cell_ids)) if has_value.iloc[i]
+            }
             return {"type": "categorical", "values": values, "categories": categories}
-        filled = col.fillna(0)
-        values = {cell_ids[i]: float(filled.iloc[i]) for i in range(len(cell_ids))}
+        valid = col[has_value]
+        if valid.empty:
+            return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
+        values = {
+            cell_ids[i]: float(col.iloc[i])
+            for i in range(len(cell_ids)) if has_value.iloc[i]
+        }
         return {"type": "continuous", "values": values,
-                "min": float(filled.min()), "max": float(filled.max())}
+                "min": float(valid.min()), "max": float(valid.max())}
 
     # ── Supplemental metadata ─────────────────────────────────────────────────
 
