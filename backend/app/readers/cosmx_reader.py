@@ -167,9 +167,9 @@ class CosMxReader(SpatialDatasetReader):
 
     # ── Cell boundaries ───────────────────────────────────────────────────────
 
-    def cell_boundaries(self, bbox: Optional[tuple] = None, limit: int = 20_000) -> list[dict]:
+    def cell_boundaries(self, bbox: Optional[tuple] = None, fraction: float = 1.0) -> dict:
         # CosMx boundaries are per-FOV label TIFFs — not yet implemented
-        return []
+        return {"boundaries": [], "total": 0}
 
     # ── Expression ────────────────────────────────────────────────────────────
 

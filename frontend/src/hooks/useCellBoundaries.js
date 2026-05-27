@@ -2,40 +2,71 @@ import { useState, useEffect, useRef } from "react";
 
 /**
  * Fetches cell boundary vertices and groups them into polygon objects.
- * Returns { cells: [{cell_id, polygon: [[x,y],...]}], loading, error }.
- * Debounced like useTranscripts to avoid hammering the API on every pan frame.
+ * Returns { cells, total, effectiveFraction, loading, error }.
+ *
+ * fraction param:
+ *   null   → auto mode: hook targets ~TARGET_CELLS rendered cells, adapting the
+ *            fraction to the actual density seen in the last fetch.
+ *   number → user override: send exactly this fraction (0–1).
+ *
+ * prevTotalRef seeds to a conservative estimate (50k) so the very first probe
+ * is 10% rather than 100%.  After the first response the estimate self-corrects.
  */
-export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled = true) {
-  const [cells, setCells] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const timerRef = useRef(null);
+
+const TARGET_CELLS = 5_000;
+const SEED_TOTAL   = 50_000; // conservative first-probe estimate
+
+export function useCellBoundaries(
+  apiBase, dataset, viewport, imageSize, enabled = true, fraction = null
+) {
+  const [cells, setCells]                     = useState([]);
+  const [total, setTotal]                     = useState(0);
+  const [effectiveFraction, setEffective]     = useState(TARGET_CELLS / SEED_TOTAL);
+  const [loading, setLoading]                 = useState(false);
+  const [error, setError]                     = useState(null);
+  const timerRef    = useRef(null);
+  const prevTotalRef = useRef(SEED_TOTAL);   // running estimate of cells in viewport
 
   useEffect(() => {
     if (!enabled || !dataset) return;
 
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
+      // Compute the fraction we'll actually send this round
+      const autoFrac = Math.min(1.0, TARGET_CELLS / Math.max(1, prevTotalRef.current));
+      const eff = fraction !== null
+        ? Math.max(0.0001, Math.min(1.0, fraction))
+        : autoFrac;
+      setEffective(eff);
+
       setLoading(true);
       setError(null);
       try {
-        // Always send bbox + limit so the backend can filter and cap the result.
-        // No zoom-out skip — the 20k limit handles data volume at any zoom level.
         let url = `${apiBase}/spatial/${dataset}/cell-boundaries`;
+        const fracParam = `fraction=${eff}`;
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
-          url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}&limit=20000`;
+          url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}&${fracParam}`;
         } else {
-          url += `?limit=20000`;
+          url += `?${fracParam}`;
         }
         const res = await fetch(url);
-        if (!res.ok) { setCells([]); return; }
+        if (!res.ok) { setCells([]); setTotal(0); return; }
         const data = await res.json();
-        if (!Array.isArray(data)) { setCells([]); return; }
+
+        // Expect { boundaries: [...], total: N }
+        const rows = Array.isArray(data) ? data : (data.boundaries ?? []);
+        const totalCells = typeof data.total === "number" ? data.total : rows.length;
+
+        // Update the running estimate so the next auto fraction is better calibrated
+        if (totalCells > 0) prevTotalRef.current = totalCells;
+        setTotal(totalCells);
+
+        if (!Array.isArray(rows)) { setCells([]); return; }
 
         // Group flat vertex list by cell_id → polygon arrays
         const byCell = new Map();
-        for (const row of data) {
+        for (const row of rows) {
           if (!byCell.has(row.cell_id)) byCell.set(row.cell_id, []);
           byCell.get(row.cell_id).push([row.vertex_x, row.vertex_y]);
         }
@@ -50,7 +81,7 @@ export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled
     }, 200);
 
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled]);
+  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction]);
 
-  return { cells, loading, error };
+  return { cells, total, effectiveFraction, loading, error };
 }

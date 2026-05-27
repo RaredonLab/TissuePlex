@@ -632,9 +632,28 @@ function TranscriptLayerRow() {
   );
 }
 
+const BOUNDARY_TARGET = 5_000;
+const BOUNDARY_SEED   = 50_000;
+
 function CellSegmentsRow({ unitTitle = "Cell" }) {
-  const { layers, setLayerProp } = useStore();
+  const {
+    layers, setLayerProp,
+    cellBoundaryFraction, setCellBoundaryFraction,
+    cellBoundaryStats,
+  } = useStore();
   const state = layers.cellSegments ?? { visible: true, opacity: 0.6, outlineOpacity: 0.8 };
+  const { shown, total } = cellBoundaryStats;
+  const pctShown = total > 0 ? (shown / total * 100) : null;
+  const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+
+  // When in auto mode, mirror what the hook computes so the slider stays in sync.
+  const isAuto = cellBoundaryFraction === null;
+  const autoFrac = total > 0
+    ? Math.min(1.0, BOUNDARY_TARGET / total)
+    : Math.min(1.0, BOUNDARY_TARGET / BOUNDARY_SEED);
+  const sliderValue = isAuto ? autoFrac : cellBoundaryFraction;
+  const isAt100 = sliderValue >= 0.995;
+
   return (
     <div style={{ marginBottom: 8 }}>
       <label style={LABEL_STYLE}>
@@ -645,7 +664,13 @@ function CellSegmentsRow({ unitTitle = "Cell" }) {
           display: "inline-block", width: 10, height: 10, borderRadius: 2,
           background: "#6cf", flexShrink: 0, opacity: state.visible ? 1 : 0.3,
         }} />
-        <span style={{ color: state.visible ? "#ddd" : "#555" }}>{unitTitle} Segments</span>
+        <span style={{ color: state.visible ? "#ddd" : "#555", flex: 1 }}>{unitTitle} Segments</span>
+        {/* Live shown / total stat */}
+        {state.visible && total > 0 && (
+          <span style={{ fontSize: 9, color: pctShown >= 99.5 ? "#6c6" : "#666", fontFamily: "monospace" }}>
+            {fmt(shown)}/{fmt(total)} ({pctShown < 1 ? "<1" : Math.round(pctShown)}%)
+          </span>
+        )}
       </label>
       {state.visible && (
         <div style={{ paddingLeft: 26, marginTop: 3 }}>
@@ -658,7 +683,7 @@ function CellSegmentsRow({ unitTitle = "Cell" }) {
               {Math.round(state.opacity * 100)}%
             </span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
             <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>outline</span>
             <input type="range" min={0} max={1} step={0.01}
               value={state.outlineOpacity ?? 0.8}
@@ -667,6 +692,34 @@ function CellSegmentsRow({ unitTitle = "Cell" }) {
             <span style={{ color: "#555", width: 28, textAlign: "right" }}>
               {Math.round((state.outlineOpacity ?? 0.8) * 100)}%
             </span>
+          </div>
+          {/* Sample fraction — slider + auto/manual indicator */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>sample</span>
+            <input type="range" min={0.01} max={1} step={0.01} value={sliderValue}
+              onChange={(e) => setCellBoundaryFraction(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: "#6cf", cursor: "pointer" }} />
+            <span style={{
+              color: isAt100 ? "#6c6" : "#555", width: 28, textAlign: "right", flexShrink: 0,
+            }}>
+              {isAt100 ? "100%" : `${Math.round(sliderValue * 100)}%`}
+            </span>
+            {/* Auto tag / reset button */}
+            {isAuto ? (
+              <span style={{
+                fontSize: 9, color: "#4a8", background: "#162b1e", border: "1px solid #4a8",
+                borderRadius: 3, padding: "1px 4px", flexShrink: 0, cursor: "default",
+              }}>auto</span>
+            ) : (
+              <button
+                onClick={() => setCellBoundaryFraction(null)}
+                title="Reset to auto"
+                style={{
+                  fontSize: 10, color: "#666", background: "none", border: "1px solid #444",
+                  borderRadius: 3, padding: "1px 4px", cursor: "pointer", flexShrink: 0,
+                  lineHeight: 1,
+                }}>↺</button>
+            )}
           </div>
         </div>
       )}
