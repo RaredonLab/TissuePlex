@@ -19,18 +19,14 @@ export function useCellBoundaries(apiBase, dataset, viewport, imageSize, enabled
       setLoading(true);
       setError(null);
       try {
+        // Always send bbox + limit so the backend can filter and cap the result.
+        // No zoom-out skip — the 20k limit handles data volume at any zoom level.
         let url = `${apiBase}/spatial/${dataset}/cell-boundaries`;
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
-          const fracW = (xmax - xmin) / imageSize.w;
-          if (fracW >= 0.5) {
-            // Zoomed too far out — cells are sub-pixel; skip to avoid OOM on
-            // large datasets.
-            setCells([]);
-            setLoading(false);
-            return;
-          }
           url += `?xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}&limit=20000`;
+        } else {
+          url += `?limit=20000`;
         }
         const res = await fetch(url);
         if (!res.ok) { setCells([]); return; }
