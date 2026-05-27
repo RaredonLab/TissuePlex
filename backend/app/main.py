@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import tiles, spatial, edges, layers
 
-app = FastAPI(title="TissuePlex API")
+APP_VERSION = "0.2.0"
+
+app = FastAPI(title="TissuePlex API", version=APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,4 +22,4 @@ app.include_router(layers.router, prefix="/layers", tags=["layers"])
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}

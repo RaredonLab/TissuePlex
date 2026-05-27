@@ -86,11 +86,11 @@ class CosMxReader(SpatialDatasetReader):
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
-        limit: int = 50_000,
-    ) -> list[dict]:
+        fraction: float = 1.0,
+    ) -> dict:
         tx_file = self._find_file("*_tx_file.csv")
         if tx_file is None:
-            return []
+            return {"transcripts": [], "total": 0}
         try:
             df = pd.read_csv(
                 tx_file,
@@ -110,11 +110,14 @@ class CosMxReader(SpatialDatasetReader):
                 ]
             if genes:
                 df = df[df["feature_name"].isin(genes)]
-            df = (df.sample(n=min(limit, len(df)), random_state=42).copy()
-                  if len(df) > limit else df.copy())
-            return self._to_records(df)
+            total = len(df)
+            fraction = max(0.0001, min(1.0, fraction))
+            sample_n = round(fraction * total)
+            df = (df.sample(n=sample_n, random_state=42).copy()
+                  if sample_n < total else df.copy())
+            return {"transcripts": self._to_records(df), "total": total}
         except Exception:
-            return []
+            return {"transcripts": [], "total": 0}
 
     # ── Cells ─────────────────────────────────────────────────────────────────
 

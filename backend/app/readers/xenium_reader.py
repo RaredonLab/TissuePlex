@@ -51,18 +51,35 @@ class XeniumReader(SpatialDatasetReader):
     # ── Gene catalogue ────────────────────────────────────────────────────────
 
     def gene_list(self) -> list[str]:
+        skip = ("Blank", "NegControl", "Unassigned", "DEPRECATED",
+                "NegControlCodeword", "NegControlProbe", "antisense")
+
+        # Primary: read gene names from cell_feature_matrix.h5
         h5 = self.path / "cell_feature_matrix.h5"
-        if not h5.exists():
-            return []
-        try:
-            import h5py
-            with h5py.File(h5, "r") as f:
-                names = f["matrix/features/name"][()].astype(str).tolist()
-            skip = ("Blank", "NegControl", "Unassigned", "DEPRECATED",
-                    "NegControlCodeword", "NegControlProbe", "antisense")
-            return [g for g in names if not any(g.startswith(p) for p in skip)]
-        except Exception:
-            return []
+        if h5.exists():
+            try:
+                import h5py
+                with h5py.File(h5, "r") as f:
+                    names = f["matrix/features/name"][()].astype(str).tolist()
+                filtered = [g for g in names if not any(g.startswith(p) for p in skip)]
+                if filtered:
+                    return filtered
+            except Exception:
+                pass
+
+        # Fallback: extract unique feature_name values from transcripts.parquet.
+        # This handles datasets exported without the cell feature matrix H5.
+        tx = self.path / "transcripts.parquet"
+        if tx.exists():
+            try:
+                import pyarrow.parquet as pq
+                col = pq.read_table(tx, columns=["feature_name"])["feature_name"]
+                names = sorted({v.as_py() for v in col if v.is_valid})
+                return [g for g in names if not any(g.startswith(p) for p in skip)]
+            except Exception:
+                pass
+
+        return []
 
     # ── Transcripts ───────────────────────────────────────────────────────────
 
@@ -70,14 +87,14 @@ class XeniumReader(SpatialDatasetReader):
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
-        limit: int = 50_000,
-    ) -> list[dict]:
+        fraction: float = 1.0,
+    ) -> dict:
         df = self._read_parquet(
             "transcripts.parquet",
             columns=["x_location", "y_location", "feature_name", "qv"],
         )
         if df is None:
-            return []
+            return {"transcripts": [], "total": 0}
         if bbox:
             xmin, ymin, xmax, ymax = self._bbox_to_native(bbox)
             if None not in (xmin, ymin, xmax, ymax):
@@ -87,11 +104,14 @@ class XeniumReader(SpatialDatasetReader):
                 ]
         if genes:
             df = df[df["feature_name"].isin(genes)]
-        df = (df.sample(n=min(limit, len(df)), random_state=42).copy()
-              if len(df) > limit else df.copy())
+        total = len(df)
+        fraction = max(0.0001, min(1.0, fraction))
+        sample_n = round(fraction * total)
+        df = (df.sample(n=sample_n, random_state=42).copy()
+              if sample_n < total else df.copy())
         df["x_location"] = df["x_location"] / self.pixel_size
         df["y_location"] = df["y_location"] / self.pixel_size
-        return self._to_records(df)
+        return {"transcripts": self._to_records(df), "total": total}
 
     # ── Cells ─────────────────────────────────────────────────────────────────
 
