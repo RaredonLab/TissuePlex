@@ -48,8 +48,10 @@ function ViewerPanel({ panelIndex }) {
   const deckViewStateRef = useRef(null);
   const measureFirstRef = useRef(null);
   const clickTimerRef = useRef(null);
+  const hoverTimerRef = useRef(null);
   const cellPolygonsRef = useRef([]);
   const [cursorPos, setCursorPos] = useState(null);
+  const [hoveredTranscript, setHoveredTranscript] = useState(null);
   // Incremented every time this panel's OSD fires "open" — used to reliably
   // re-apply morphology visibility after each OSD (re)initialization.
   const [osdOpenCount, setOsdOpenCount] = useState(0);
@@ -302,6 +304,28 @@ function ViewerPanel({ panelIndex }) {
     }
   }, [setSelectedCell, setSelectedEdge]);
 
+  // ── Transcript hover tooltip ──────────────────────────────────────────────
+  const handleTranscriptHoverMove = useCallback((e) => {
+    if (!deckRef.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      const info = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["transcripts"] });
+      if (info?.object?.feature_name) {
+        setHoveredTranscript({ gene: info.object.feature_name, qv: info.object.qv, x, y });
+      } else {
+        setHoveredTranscript(null);
+      }
+    }, 30);
+  }, []);
+
+  const handleTranscriptHoverLeave = useCallback(() => {
+    clearTimeout(hoverTimerRef.current);
+    setHoveredTranscript(null);
+  }, []);
+
   // ── Screen ↔ image-pixel coordinate conversion ───────────────────────────
   const screenToData = useCallback((sx, sy) => {
     const vs = deckViewStateRef.current;
@@ -510,7 +534,7 @@ function ViewerPanel({ panelIndex }) {
     radiusMinPixels: 1,
     radiusMaxPixels: 8,
     getFillColor: (d) => transcriptColorOverrides[d.feature_name] ?? geneColor(d.feature_name),
-    pickable: false,
+    pickable: true,
     updateTriggers: { getFillColor: [transcriptColorOverrides] },
   });
 
@@ -767,6 +791,8 @@ function ViewerPanel({ panelIndex }) {
         ref={containerRef}
         style={{ width: "100%", height: "100%" }}
         onClick={inAnnotationMode ? undefined : handleViewerClick}
+        onMouseMove={transcriptsVisible ? handleTranscriptHoverMove : undefined}
+        onMouseLeave={handleTranscriptHoverLeave}
       />
 
       {/* deck.gl overlay — pointerEvents:none so OSD handles pan/zoom */}
@@ -816,6 +842,32 @@ function ViewerPanel({ panelIndex }) {
           {label}
         </div>
       ))}
+
+      {/* Transcript hover tooltip */}
+      {hoveredTranscript && (
+        <div style={{
+          position: "absolute",
+          left: hoveredTranscript.x + 14,
+          top: hoveredTranscript.y - 10,
+          background: "rgba(0,0,0,0.82)",
+          color: "#fff",
+          fontFamily: "monospace",
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 4,
+          pointerEvents: "none",
+          whiteSpace: "nowrap",
+          zIndex: 20,
+          border: "1px solid rgba(255,255,255,0.12)",
+        }}>
+          {hoveredTranscript.gene}
+          {hoveredTranscript.qv != null && (
+            <span style={{ color: "#777", marginLeft: 7 }}>
+              QV {Number(hoveredTranscript.qv).toFixed(1)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Annotation toolbar — split toggle only shown on panel 0 */}
       <AnnotationToolbar onScreenshot={handleScreenshot} panelIndex={panelIndex} />
