@@ -183,6 +183,17 @@ export default function LayerPanel() {
       <EdgeSection />
 
       <RegionsSection />
+
+      {/* Version badge */}
+      {appVersion && (
+        <div style={{
+          marginTop: "auto", paddingTop: 16,
+          fontSize: 9, color: "#333", textAlign: "right",
+          fontFamily: "monospace", userSelect: "none",
+        }}>
+          TissuePlex v{appVersion}
+        </div>
+      )}
     </div>
   );
 }
@@ -1207,16 +1218,6 @@ function EdgeSection() {
         </div>
       )}
 
-      {/* Version badge — pinned to bottom of panel */}
-      {appVersion && (
-        <div style={{
-          marginTop: "auto", paddingTop: 16,
-          fontSize: 9, color: "#333", textAlign: "right",
-          fontFamily: "monospace", userSelect: "none",
-        }}>
-          TissuePlex v{appVersion}
-        </div>
-      )}
     </div>
   );
 }
