@@ -60,8 +60,8 @@ function ViewerPanel({ panelIndex }) {
     setViewport,
     layers: layerState,
     platformCapabilities, setPlatformCapabilities,
-    cellColorEnabled, colorBy, cellColorPalette,
-    allGenes, selectedGenes,
+    cellColorEnabled, colorBy, cellColorPalette, categoryColorOverrides,
+    allGenes, selectedGenes, transcriptColorOverrides,
     selectedCell, setSelectedCell,
     edgeMinStrength, edgeDensity,
     edgeColorBy, edgeColorPalette, edgeDirectional, showAutocrine,
@@ -80,6 +80,7 @@ function ViewerPanel({ panelIndex }) {
     measurements, addMeasurement,
     clearAnnotations,
     panelCount,
+    transcriptFraction, setTranscriptStats,
   } = useStore();
 
   // Per-panel viewport from store
@@ -394,9 +395,14 @@ function ViewerPanel({ panelIndex }) {
   const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
-  const { transcripts } = useTranscripts(
-    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts
+  const { transcripts, total: transcriptTotal } = useTranscripts(
+    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction
   );
+  // Expose live shown/total counts to the LayerPanel via the store (panel 0 only).
+  useEffect(() => {
+    if (panelIndex === 0) setTranscriptStats(transcripts.length, transcriptTotal);
+  }, [transcripts.length, transcriptTotal]); // eslint-disable-line
+
   const { cells: cellPolygons } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
   );
@@ -411,7 +417,7 @@ function ViewerPanel({ panelIndex }) {
     : transcripts.filter((t) => selectedGenes.has(t.feature_name));
 
   const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
-    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp
+    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp, categoryColorOverrides
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
@@ -499,9 +505,9 @@ function ViewerPanel({ panelIndex }) {
     getRadius: 4,
     radiusMinPixels: 1,
     radiusMaxPixels: 8,
-    getFillColor: (d) => geneColor(d.feature_name),
+    getFillColor: (d) => transcriptColorOverrides[d.feature_name] ?? geneColor(d.feature_name),
     pickable: false,
-    updateTriggers: { getFillColor: [] },
+    updateTriggers: { getFillColor: [transcriptColorOverrides] },
   });
 
   const allDirectedEdges = useMemo(() => {

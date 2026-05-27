@@ -101,11 +101,11 @@ class MerscopeReader(SpatialDatasetReader):
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
-        limit: int = 50_000,
-    ) -> list[dict]:
+        fraction: float = 1.0,
+    ) -> dict:
         tx_file = self.path / "detected_transcripts.csv"
         if not tx_file.exists():
-            return []
+            return {"transcripts": [], "total": 0}
         try:
             df = pd.read_csv(tx_file, usecols=["x", "y", "gene"])
             df = df.rename(columns={"x": "x_location", "y": "y_location",
@@ -118,13 +118,16 @@ class MerscopeReader(SpatialDatasetReader):
                 ]
             if genes:
                 df = df[df["feature_name"].isin(genes)]
-            df = (df.sample(n=min(limit, len(df)), random_state=42).copy()
-                  if len(df) > limit else df.copy())
+            total = len(df)
+            fraction = max(0.0001, min(1.0, fraction))
+            sample_n = round(fraction * total)
+            df = (df.sample(n=sample_n, random_state=42).copy()
+                  if sample_n < total else df.copy())
             df["x_location"] = df["x_location"] / self.pixel_size
             df["y_location"] = df["y_location"] / self.pixel_size
-            return self._to_records(df)
+            return {"transcripts": self._to_records(df), "total": total}
         except Exception:
-            return []
+            return {"transcripts": [], "total": 0}
 
     # ── Cells ─────────────────────────────────────────────────────────────────
 

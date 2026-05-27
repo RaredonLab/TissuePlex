@@ -100,13 +100,14 @@ def transcripts(
     xmax: float = Query(None),
     ymax: float = Query(None),
     genes: list[str] = Query(None),
-    limit: int = Query(50_000),
+    fraction: float = Query(1.0),
 ):
-    """Transcript records filtered by bounding box and/or gene list."""
+    """Transcript records filtered by bounding box and/or gene list.
+    Returns {"transcripts": [...], "total": N} where total is the pre-sample count."""
     return _reader(dataset).transcripts(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
         genes=genes,
-        limit=limit,
+        fraction=fraction,
     )
 
 

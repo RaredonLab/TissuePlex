@@ -4,6 +4,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { legendGradient, QUAL_PALETTE } from "../utils/colormap";
+import { geneColor } from "../utils/geneColor";
+
+// ── Color conversion helpers ──────────────────────────────────────────────────
+function rgbaToHex([r, g, b]) {
+  return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+}
+function hexToRgba(hex) {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16), 255];
+}
 
 const SECTION_HEADER = {
   fontSize: 10,
@@ -121,11 +131,18 @@ function DatasetPicker() {
 }
 
 export default function LayerPanel() {
-  const { platformCapabilities } = useStore();
+  const { platformCapabilities, apiBase } = useStore();
   const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
   const hasBoundaries  = platformCapabilities?.has_boundaries  ?? true;
   const unitLabel      = platformCapabilities?.unit_label ?? "cell";
   const unitTitle      = unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1);
+
+  const [appVersion, setAppVersion] = useState(null);
+  useEffect(() => {
+    fetch(`${apiBase}/health`).then((r) => r.ok ? r.json() : null).then((d) => {
+      if (d?.version) setAppVersion(d.version);
+    }).catch(() => {});
+  }, [apiBase]); // eslint-disable-line
 
   return (
     <div style={{
@@ -136,13 +153,15 @@ export default function LayerPanel() {
       fontFamily: "monospace",
       fontSize: 12,
       background: "#1e1e1e",
+      display: "flex",
+      flexDirection: "column",
     }}>
       <DatasetPicker />
       <div style={{ fontWeight: "bold", marginBottom: 10, fontSize: 13, color: "#fff" }}>Layers</div>
 
       <div style={SECTION_HEADER}>Core</div>
       <MorphologyRow />
-      {hasTranscripts && <LayerRow id="transcripts" label="Transcripts" color="#e88" />}
+      {hasTranscripts && <TranscriptLayerRow />}
       {hasBoundaries  && <CellSegmentsRow unitTitle={unitTitle} />}
 
       <div style={SECTION_HEADER}>{unitTitle} Color</div>
@@ -175,7 +194,7 @@ function ColorBySection({ unitLabel = "cell" }) {
     cellColorEnabled, setCellColorEnabled,
     colorBy, setColorBy,
     cellColorPalette, setCellColorPalette,
-    allGenes, setAllGenes,
+    allGenes, setAllGenes, setGenesLoaded,
     selectedGenes,
     cellColorRange,
     cellColorClamp, setCellColorClamp,
@@ -185,10 +204,12 @@ function ColorBySection({ unitLabel = "cell" }) {
 
   // Fetch full gene list and cell schema once per dataset
   useEffect(() => {
+    setGenesLoaded(false);
     fetch(`${apiBase}/spatial/${dataset}/genes`)
       .then((r) => r.ok ? r.json() : [])
       .then((g) => { if (Array.isArray(g)) setAllGenes(g); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setGenesLoaded(true));
     fetch(`${apiBase}/spatial/${dataset}/cells/schema`)
       .then((r) => r.ok ? r.json() : null)
       .then((s) => { if (s) setCellSchema(s); })
@@ -332,7 +353,15 @@ function ClampableLegend({ label, palette, vmin, vmax, clamp, setClamp, accentCo
 }
 
 function CategoricalLegend({ field, apiBase, dataset }) {
+  const {
+    categoryColorOverrides,
+    setCategoryColorOverride,
+    mergeCategoryColorOverrides,
+    resetCategoryColorOverrides,
+  } = useStore();
+
   const [categories, setCategories] = useState([]);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (!field) return;
@@ -346,19 +375,131 @@ function CategoricalLegend({ field, apiBase, dataset }) {
       .catch(() => {});
   }, [apiBase, dataset, field]);
 
+  // Resolve display color for a category: override → QUAL_PALETTE → hash
+  // Must mirror the logic in useCellColors.js so legend stays in sync.
+  function resolveColor(cat, i) {
+    const override = categoryColorOverrides[`${field}::${cat}`];
+    if (override) return override;
+    return i < QUAL_PALETTE.length ? QUAL_PALETTE[i] : [...geneColor(cat), 255];
+  }
+
+  // Parse imported CSV: two columns — category label, hex color.
+  // Header row is optional and auto-detected.
+  function handleImportCSV(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";          // allow re-importing same file
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const lines = ev.target.result.split(/\r?\n/).filter((l) => l.trim());
+      const map = {};
+      for (const line of lines) {
+        // Support comma or tab separators
+        const sep = line.includes("\t") ? "\t" : ",";
+        const parts = line.split(sep).map((p) => p.trim().replace(/^"|"$/g, ""));
+        if (parts.length < 2) continue;
+        const [label, hex] = parts;
+        if (!hex || !hex.match(/^#?[0-9a-fA-F]{6}$/)) continue; // skip invalid / header
+        const normalHex = hex.startsWith("#") ? hex : `#${hex}`;
+        map[`${field}::${label}`] = hexToRgba(normalHex);
+      }
+      if (Object.keys(map).length > 0) mergeCategoryColorOverrides(map);
+    };
+    reader.readAsText(file);
+  }
+
   if (!categories.length) return null;
+
+  const hasOverrides = categories.some((cat) => categoryColorOverrides[`${field}::${cat}`]);
+
   return (
     <div style={{ marginTop: 6 }}>
+      {/* Category rows */}
       {categories.map((cat, i) => {
-        const [r, g, b] = QUAL_PALETTE[i % QUAL_PALETTE.length];
+        const [r, g, b] = resolveColor(cat, i);
+        const hexVal = rgbaToHex([r, g, b]);
         return (
           <div key={cat} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, flexShrink: 0 }} />
-            <span style={{ fontSize: 10, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            {/* Clickable swatch — wraps a hidden <input type="color"> */}
+            <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, position: "relative", display: "flex" }}>
+              <div style={{
+                width: 10, height: 10, borderRadius: 2,
+                background: `rgb(${r},${g},${b})`,
+                outline: "1px solid rgba(255,255,255,0.15)",
+              }} />
+              <input
+                type="color"
+                value={hexVal}
+                onChange={(e) => setCategoryColorOverride(field, cat, hexToRgba(e.target.value))}
+                style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
+                tabIndex={-1}
+              />
+            </label>
+            <span style={{ fontSize: 10, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
                   title={cat}>{cat}</span>
           </div>
         );
       })}
+
+      {/* Import / export / reset row */}
+      <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          title="Load a CSV with columns: category, #hexcolor"
+          style={{
+            fontSize: 9, fontFamily: "monospace", color: "#6cf",
+            background: "none", border: "1px solid #2a4a5a", borderRadius: 3,
+            padding: "2px 6px", cursor: "pointer",
+          }}
+        >
+          import palette
+        </button>
+        <button
+          onClick={() => {
+            const rows = ["category,color",
+              ...categories.map((cat, i) => {
+                const [r, g, b] = resolveColor(cat, i);
+                return `"${cat.replace(/"/g, '""')}",${rgbaToHex([r, g, b])}`;
+              }),
+            ];
+            const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${field}_palette.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          title="Save current colors as a CSV file"
+          style={{
+            fontSize: 9, fontFamily: "monospace", color: "#6cf",
+            background: "none", border: "1px solid #2a4a5a", borderRadius: 3,
+            padding: "2px 6px", cursor: "pointer",
+          }}
+        >
+          export palette
+        </button>
+        {hasOverrides && (
+          <button
+            onClick={resetCategoryColorOverrides}
+            title="Restore default colors"
+            style={{
+              fontSize: 9, fontFamily: "monospace", color: "#888",
+              background: "none", border: "1px solid #333", borderRadius: 3,
+              padding: "2px 6px", cursor: "pointer",
+            }}
+          >
+            reset
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.tsv,.txt"
+          onChange={handleImportCSV}
+          style={{ display: "none" }}
+        />
+      </div>
     </div>
   );
 }
@@ -422,6 +563,64 @@ function LayerRowBase({ label, color, visible, opacity, onToggle, onOpacity }) {
   );
 }
 
+function TranscriptLayerRow() {
+  const { layers, setLayerProp, transcriptFraction, setTranscriptFraction, transcriptStats } = useStore();
+  const state = layers.transcripts ?? { visible: true, opacity: 0.8 };
+  const { shown, total } = transcriptStats;
+
+  const pctShown = total > 0 ? (shown / total * 100) : null;
+  const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <label style={LABEL_STYLE}>
+        <input
+          type="checkbox"
+          checked={state.visible}
+          onChange={(e) => setLayerProp("transcripts", "visible", e.target.checked)}
+          style={{ accentColor: "#e88", width: 13, height: 13, cursor: "pointer" }}
+        />
+        <span style={{
+          display: "inline-block", width: 10, height: 10, borderRadius: 2,
+          background: "#e88", flexShrink: 0, opacity: state.visible ? 1 : 0.3,
+        }} />
+        <span style={{ color: state.visible ? "#ddd" : "#555", flex: 1 }}>Transcripts</span>
+        {/* Live shown / total stat */}
+        {state.visible && total > 0 && (
+          <span style={{ fontSize: 9, color: pctShown >= 99.5 ? "#6c6" : "#666", fontFamily: "monospace" }}>
+            {fmt(shown)}/{fmt(total)} ({pctShown < 1 ? "<1" : Math.round(pctShown)}%)
+          </span>
+        )}
+      </label>
+
+      {state.visible && (
+        <div style={{ paddingLeft: 26, marginTop: 3 }}>
+          {/* Opacity */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+            <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>opacity</span>
+            <input type="range" min={0} max={1} step={0.01} value={state.opacity}
+              onChange={(e) => setLayerProp("transcripts", "opacity", parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
+            <span style={{ color: "#555", width: 28, textAlign: "right" }}>
+              {Math.round(state.opacity * 100)}%
+            </span>
+          </div>
+          {/* Sample fraction */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>sample</span>
+            <input type="range" min={0.01} max={1} step={0.01} value={transcriptFraction}
+              onChange={(e) => setTranscriptFraction(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
+            <span style={{ color: transcriptFraction >= 0.995 ? "#6c6" : "#555", width: 28, textAlign: "right" }}>
+              {transcriptFraction >= 0.995 ? "100%" : `${Math.round(transcriptFraction * 100)}%`}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CellSegmentsRow({ unitTitle = "Cell" }) {
   const { layers, setLayerProp } = useStore();
   const state = layers.cellSegments ?? { visible: true, opacity: 0.6, outlineOpacity: 0.8 };
@@ -466,9 +665,14 @@ function CellSegmentsRow({ unitTitle = "Cell" }) {
 
 // ── Transcript species section ────────────────────────────────────────────────
 function TranscriptSpeciesSection() {
-  const { allGenes, selectedGenes, setSelectedGenes, toggleSelectedGene } = useStore();
+  const {
+    allGenes, genesLoaded, selectedGenes, setSelectedGenes, toggleSelectedGene,
+    transcriptColorOverrides, setTranscriptColorOverride,
+    mergeTranscriptColorOverrides, resetTranscriptColorOverrides,
+  } = useStore();
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
+  const fileInputRef = useRef(null);
 
   const filterActive = selectedGenes !== null;
   const selectedList = filterActive ? [...selectedGenes].sort() : [];
@@ -477,8 +681,59 @@ function TranscriptSpeciesSection() {
     ? allGenes.filter((g) => g.toLowerCase().includes(search.toLowerCase()))
     : allGenes;
 
-  if (allGenes.length === 0) {
+  // Resolve display color: override first, then deterministic hash
+  function resolveColor(gene) {
+    const ov = transcriptColorOverrides[gene];
+    if (ov) return ov;
+    return [...geneColor(gene), 255];
+  }
+
+  function handleImportCSV(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const lines = ev.target.result.split(/\r?\n/).filter((l) => l.trim());
+      const map = {};
+      for (const line of lines) {
+        const sep = line.includes("\t") ? "\t" : ",";
+        const parts = line.split(sep).map((p) => p.trim().replace(/^"|"$/g, ""));
+        if (parts.length < 2) continue;
+        const [gene, hex] = parts;
+        if (!hex || !hex.match(/^#?[0-9a-fA-F]{6}$/)) continue;
+        const normalHex = hex.startsWith("#") ? hex : `#${hex}`;
+        map[gene] = hexToRgba(normalHex);
+      }
+      if (Object.keys(map).length > 0) mergeTranscriptColorOverrides(map);
+    };
+    reader.readAsText(file);
+  }
+
+  function handleExportCSV() {
+    const genesToExport = filterActive ? selectedList : allGenes;
+    const rows = ["gene,color",
+      ...genesToExport.map((gene) => {
+        const [r, g, b] = resolveColor(gene);
+        return `"${gene.replace(/"/g, '""')}",${rgbaToHex([r, g, b])}`;
+      }),
+    ];
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "transcripts_palette.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const hasOverrides = Object.keys(transcriptColorOverrides).length > 0;
+
+  if (!genesLoaded) {
     return <div style={{ color: "#3a3a3a", paddingLeft: 4, marginBottom: 6, fontSize: 11 }}>— loading genes…</div>;
+  }
+  if (allGenes.length === 0) {
+    return <div style={{ color: "#3a3a3a", paddingLeft: 4, marginBottom: 6, fontSize: 11 }}>— no gene list available</div>;
   }
 
   return (
@@ -509,20 +764,24 @@ function TranscriptSpeciesSection() {
           {selectedList.length === 0 && (
             <div style={{ fontSize: 11, color: "#555", paddingLeft: 2 }}>no genes selected</div>
           )}
-          {selectedList.map((gene) => (
-            <div
-              key={gene}
-              style={{ display: "flex", alignItems: "center", fontSize: 11, color: "#e88", padding: "1px 0" }}
-            >
-              <span style={{ flex: 1 }}>{gene}</span>
-              <button
-                onClick={() => toggleSelectedGene(gene)}
-                style={{ background: "transparent", border: "none", color: "#844", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1 }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+          {selectedList.map((gene) => {
+            const [r, g, b] = resolveColor(gene);
+            return (
+              <div key={gene} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#e88", padding: "1px 0" }}>
+                <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
+                  <input type="color" value={rgbaToHex([r, g, b])}
+                    onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
+                    style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
+                </label>
+                <span style={{ flex: 1 }}>{gene}</span>
+                <button
+                  onClick={() => toggleSelectedGene(gene)}
+                  style={{ background: "transparent", border: "none", color: "#844", cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1 }}
+                >✕</button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -543,31 +802,57 @@ function TranscriptSpeciesSection() {
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {pickerGenes.map((gene) => {
               const checked = selectedGenes === null || selectedGenes.has(gene);
+              const [r, g, b] = resolveColor(gene);
               return (
-                <label key={gene} style={{ ...LABEL_STYLE, marginBottom: 3, display: "flex" }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleSelectedGene(gene)}
-                    style={{ accentColor: "#e88", width: 12, height: 12, cursor: "pointer", flexShrink: 0 }}
-                  />
-                  <span
-                    style={{
-                      marginLeft: 4,
-                      color: checked ? "#ccc" : "#444",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {gene}
-                  </span>
-                </label>
+                // Row split into swatch-label + checkbox-label so clicking the
+                // swatch doesn't also toggle the checkbox (nested-label issue).
+                <div key={gene} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3 }}>
+                  <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
+                    <input type="color" value={rgbaToHex([r, g, b])}
+                      onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
+                      style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
+                  </label>
+                  <label style={{ ...LABEL_STYLE, flex: 1, marginBottom: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSelectedGene(gene)}
+                      style={{ accentColor: "#e88", width: 12, height: 12, cursor: "pointer", flexShrink: 0 }}
+                    />
+                    <span style={{ marginLeft: 2, color: checked ? "#ccc" : "#444", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {gene}
+                    </span>
+                  </label>
+                </div>
               );
             })}
           </div>
         </div>
       )}
+
+      {/* Palette import / export / reset — always visible once genes are loaded */}
+      <div style={{ display: "flex", gap: 6, marginTop: 5, alignItems: "center" }}>
+        <button onClick={() => fileInputRef.current?.click()}
+          title="Load a CSV with columns: gene, #hexcolor"
+          style={{ fontSize: 9, fontFamily: "monospace", color: "#6cf", background: "none", border: "1px solid #2a4a5a", borderRadius: 3, padding: "2px 6px", cursor: "pointer" }}>
+          import palette
+        </button>
+        <button onClick={handleExportCSV}
+          title={filterActive ? "Export colors for selected genes" : "Export colors for all genes"}
+          style={{ fontSize: 9, fontFamily: "monospace", color: "#6cf", background: "none", border: "1px solid #2a4a5a", borderRadius: 3, padding: "2px 6px", cursor: "pointer" }}>
+          export palette
+        </button>
+        {hasOverrides && (
+          <button onClick={resetTranscriptColorOverrides}
+            title="Restore default gene colors"
+            style={{ fontSize: 9, fontFamily: "monospace", color: "#888", background: "none", border: "1px solid #333", borderRadius: 3, padding: "2px 6px", cursor: "pointer" }}>
+            reset
+          </button>
+        )}
+        <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt"
+          onChange={handleImportCSV} style={{ display: "none" }} />
+      </div>
     </div>
   );
 }
@@ -919,6 +1204,17 @@ function EdgeSection() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Version badge — pinned to bottom of panel */}
+      {appVersion && (
+        <div style={{
+          marginTop: "auto", paddingTop: 16,
+          fontSize: 9, color: "#333", textAlign: "right",
+          fontFamily: "monospace", userSelect: "none",
+        }}>
+          TissuePlex v{appVersion}
         </div>
       )}
     </div>
