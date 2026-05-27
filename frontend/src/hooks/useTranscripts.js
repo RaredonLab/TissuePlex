@@ -42,16 +42,10 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
           }
         }
 
+        // Always send bbox when available so the backend can sample uniformly
+        // within the viewport. No zoom-out skip — the backend cap handles volume.
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
-          const fracW = (xmax - xmin) / imageSize.w;
-          if (fracW >= 0.7) {
-            // Zoomed too far out — transcripts are sub-pixel; skip fetch.
-            setTranscripts([]);
-            setTotal(0);
-            setLoading(false);
-            return;
-          }
           url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
 

@@ -106,7 +106,7 @@ class XeniumReader(SpatialDatasetReader):
             df = df[df["feature_name"].isin(genes)]
         total = len(df)
         fraction = max(0.0001, min(1.0, fraction))
-        sample_n = round(fraction * total)
+        sample_n = min(round(fraction * total), 200_000)
         df = (df.sample(n=sample_n, random_state=42).copy()
               if sample_n < total else df.copy())
         df["x_location"] = df["x_location"] / self.pixel_size
