@@ -4,18 +4,22 @@ import { useState, useEffect, useRef } from "react";
  * Fetches transcripts from the backend, filtered by viewport bbox.
  * Debounced so rapid pan/zoom doesn't hammer the API.
  *
- * @param fraction  0–1 fraction of viewport transcripts to request.
- *                  Passed straight to the backend; 1.0 = all transcripts.
+ * @param fraction      0–1 fraction of viewport transcripts to request.
+ * @param selectedGenes null = all species; Set<string> = only those genes.
+ *                      Passed to the backend so total reflects selected species only.
  *
  * Returns { transcripts, total, loading, error }.
- *   total — pre-sample count in the viewport (from backend); 0 when unknown.
+ *   total — pre-sample count in the viewport after gene filtering (from backend).
  */
-export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = true, fraction = 1.0) {
+export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = true, fraction = 1.0, selectedGenes = null) {
   const [transcripts, setTranscripts] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const timerRef = useRef(null);
+
+  // Stable string representation of the gene set for use as a dep.
+  const genesKey = selectedGenes === null ? "" : [...selectedGenes].sort().join(",");
 
   useEffect(() => {
     if (!enabled || !dataset) {
@@ -30,6 +34,14 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
       setError(null);
       try {
         let url = `${apiBase}/spatial/${dataset}/transcripts?fraction=${fraction}`;
+
+        // Send selected gene filter so backend samples within those species only.
+        if (selectedGenes !== null && selectedGenes.size > 0) {
+          for (const g of selectedGenes) {
+            url += `&genes=${encodeURIComponent(g)}`;
+          }
+        }
+
         if (viewport && imageSize?.w) {
           const { xmin, ymin, xmax, ymax } = viewport;
           const fracW = (xmax - xmin) / imageSize.w;
@@ -42,6 +54,7 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
           }
           url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
+
         const res = await fetch(url);
         if (!res.ok) { setTranscripts([]); setTotal(0); return; }
         const data = await res.json();
@@ -59,7 +72,7 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
     }, 200);
 
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction]); // eslint-disable-line
+  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, genesKey]); // eslint-disable-line
 
   return { transcripts, total, loading, error };
 }
