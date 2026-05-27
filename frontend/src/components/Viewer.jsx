@@ -396,12 +396,20 @@ function ViewerPanel({ panelIndex }) {
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
   const { transcripts, total: transcriptTotal } = useTranscripts(
-    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction
+    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction, selectedGenes
   );
+
+  // visibleTranscripts: server already filtered by selectedGenes, so this is a no-op
+  // when a gene filter is active — kept as a safety net and for semantic clarity.
+  const visibleTranscripts = selectedGenes === null
+    ? transcripts
+    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
+
   // Expose live shown/total counts to the LayerPanel via the store (panel 0 only).
+  // Use visibleTranscripts.length so the stat always reflects the selected species.
   useEffect(() => {
-    if (panelIndex === 0) setTranscriptStats(transcripts.length, transcriptTotal);
-  }, [transcripts.length, transcriptTotal]); // eslint-disable-line
+    if (panelIndex === 0) setTranscriptStats(visibleTranscripts.length, transcriptTotal);
+  }, [visibleTranscripts.length, transcriptTotal]); // eslint-disable-line
 
   const { cells: cellPolygons } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
@@ -411,10 +419,6 @@ function ViewerPanel({ panelIndex }) {
   const { edges } = useEdges(
     apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity
   );
-
-  const visibleTranscripts = selectedGenes === null
-    ? transcripts
-    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
 
   const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
     apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp, categoryColorOverrides
