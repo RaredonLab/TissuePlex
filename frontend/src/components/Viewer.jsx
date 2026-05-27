@@ -83,6 +83,7 @@ function ViewerPanel({ panelIndex }) {
     clearAnnotations,
     panelCount,
     transcriptFraction, setTranscriptStats,
+    cellBoundaryFraction, setCellBoundaryStats,
   } = useStore();
 
   // Per-panel viewport from store
@@ -435,10 +436,18 @@ function ViewerPanel({ panelIndex }) {
     if (panelIndex === 0) setTranscriptStats(visibleTranscripts.length, transcriptTotal);
   }, [visibleTranscripts.length, transcriptTotal]); // eslint-disable-line
 
-  const { cells: cellPolygons } = useCellBoundaries(
-    apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
+  const {
+    cells: cellPolygons,
+    total: cellBoundaryTotal,
+  } = useCellBoundaries(
+    apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries, cellBoundaryFraction
   );
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
+
+  // Expose live cell boundary counts to LayerPanel (panel 0 only).
+  useEffect(() => {
+    if (panelIndex === 0) setCellBoundaryStats(cellPolygons.length, cellBoundaryTotal);
+  }, [cellPolygons.length, cellBoundaryTotal]); // eslint-disable-line
 
   const { edges } = useEdges(
     apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity

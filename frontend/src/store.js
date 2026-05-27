@@ -49,6 +49,17 @@ export const useStore = create((set, get) => ({
     edges:        { visible: false, opacity: 0.25 },
   },
 
+  // cellBoundaryFraction: fraction of cells in viewport to fetch.
+  // null = auto (hook targets ~5k cells, adapts per viewport density).
+  // number = user override (0–1, set by slider).
+  cellBoundaryFraction: null,
+  setCellBoundaryFraction: (v) => set({
+    cellBoundaryFraction: v !== null ? Math.max(0.0001, Math.min(1.0, v)) : null,
+  }),
+  // cellBoundaryStats: live sampled/total counts for the status display.
+  cellBoundaryStats: { shown: 0, total: 0 },
+  setCellBoundaryStats: (shown, total) => set({ cellBoundaryStats: { shown, total } }),
+
   // ── Color range cache (updated from Viewer hooks for legend display) ──────
   cellColorRange: { vmin: null, vmax: null },
   setCellColorRange: (vmin, vmax) => set({ cellColorRange: { vmin, vmax } }),

@@ -180,9 +180,9 @@ class MerscopeReader(SpatialDatasetReader):
 
     # ── Cell boundaries ───────────────────────────────────────────────────────
 
-    def cell_boundaries(self, bbox: Optional[tuple] = None, limit: int = 20_000) -> list[dict]:
-        # MERSCOPE cell boundaries are stored as HDF5 or separate CSV — stub for now
-        return []
+    def cell_boundaries(self, bbox: Optional[tuple] = None, fraction: float = 1.0) -> dict:
+        # MERSCOPE cell boundaries are stored as HDF5 — not yet implemented
+        return {"boundaries": [], "total": 0}
 
     # ── Expression ────────────────────────────────────────────────────────────
 

@@ -156,10 +156,10 @@ class XeniumReader(SpatialDatasetReader):
 
     # ── Cell boundaries ───────────────────────────────────────────────────────
 
-    def cell_boundaries(self, bbox: Optional[tuple] = None, limit: int = 20_000) -> list[dict]:
+    def cell_boundaries(self, bbox: Optional[tuple] = None, fraction: float = 1.0) -> dict:
         df = self._read_parquet("cell_boundaries.parquet")
         if df is None:
-            return []
+            return {"boundaries": [], "total": 0}
         x_col = next((c for c in df.columns if "vertex_x" in c), None)
         y_col = next((c for c in df.columns if "vertex_y" in c), None)
         if bbox and x_col and y_col:
@@ -169,15 +169,21 @@ class XeniumReader(SpatialDatasetReader):
                     (df[x_col] >= xmin) & (df[x_col] <= xmax) &
                     (df[y_col] >= ymin) & (df[y_col] <= ymax)
                 ]
-        if limit and "cell_id" in df.columns:
-            keep = df["cell_id"].drop_duplicates().iloc[:limit]
-            df = df[df["cell_id"].isin(keep)]
+        total_cells = 0
+        if "cell_id" in df.columns:
+            unique_ids = df["cell_id"].drop_duplicates()
+            total_cells = len(unique_ids)
+            fraction = max(0.0001, min(1.0, fraction))
+            sample_n = round(fraction * total_cells)
+            if sample_n < total_cells:
+                keep = unique_ids.sample(n=sample_n, random_state=42)
+                df = df[df["cell_id"].isin(keep)]
         df = df.copy()
         if x_col:
             df[x_col] = df[x_col] / self.pixel_size
         if y_col:
             df[y_col] = df[y_col] / self.pixel_size
-        return self._to_records(df)
+        return {"boundaries": self._to_records(df), "total": total_cells}
 
     # ── Expression ────────────────────────────────────────────────────────────
 

@@ -153,12 +153,13 @@ def cell_boundaries(
     ymin: float = Query(None),
     xmax: float = Query(None),
     ymax: float = Query(None),
-    limit: int = Query(20_000),
+    fraction: float = Query(1.0),
 ):
-    """Cell polygon boundaries filtered by bounding box."""
+    """Cell polygon boundaries filtered by bounding box.
+    fraction: 0–1 fraction of cells in viewport to return (randomly sampled)."""
     return _reader(dataset).cell_boundaries(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
-        limit=limit,
+        fraction=max(0.0001, min(1.0, fraction)),
     )
 
 
