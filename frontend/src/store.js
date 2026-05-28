@@ -8,7 +8,7 @@ export const useStore = create((set, get) => ({
   dataset: null,             // initialized from /spatial/datasets on first load
   activeImage: "morphology", // which OME-TIFF is loaded as the background
 
-  setDataset: (dataset) => set({ dataset, selectedGenes: null, allGenes: [], platformCapabilities: null }),
+  setDataset: (dataset) => set({ dataset, selectedGenes: null, allGenes: [], genesLoaded: false, platformCapabilities: null, categoryColorOverrides: {}, transcriptColorOverrides: {} }),
   setActiveImage: (activeImage) => set({ activeImage }),
 
   // ── Platform capabilities (fetched from /spatial/{dataset}/info) ──────────
@@ -48,6 +48,17 @@ export const useStore = create((set, get) => ({
     tissueGraph:  { visible: true,  opacity: 0.05 },
     edges:        { visible: false, opacity: 0.25 },
   },
+
+  // cellBoundaryFraction: fraction of cells in viewport to fetch.
+  // null = auto (hook targets ~5k cells, adapts per viewport density).
+  // number = user override (0–1, set by slider).
+  cellBoundaryFraction: null,
+  setCellBoundaryFraction: (v) => set({
+    cellBoundaryFraction: v !== null ? Math.max(0.0001, Math.min(1.0, v)) : null,
+  }),
+  // cellBoundaryStats: live sampled/total counts for the status display.
+  cellBoundaryStats: { shown: 0, total: 0 },
+  setCellBoundaryStats: (shown, total) => set({ cellBoundaryStats: { shown, total } }),
 
   // ── Color range cache (updated from Viewer hooks for legend display) ──────
   cellColorRange: { vmin: null, vmax: null },
@@ -143,7 +154,39 @@ export const useStore = create((set, get) => ({
 
   // allGenes: full gene panel, fetched once on dataset change
   allGenes: [],
+  genesLoaded: false,
   setAllGenes: (genes) => set({ allGenes: genes }),
+  setGenesLoaded: (loaded) => set({ genesLoaded: loaded }),
+
+  // transcriptFraction: fraction of viewport transcripts to request (0–1).
+  // transcriptStats: live shown/total counts for the status display (panel 0).
+  transcriptFraction: 0.1,
+  setTranscriptFraction: (f) => set({ transcriptFraction: Math.max(0.0001, Math.min(1.0, f)) }),
+  transcriptStats: { shown: 0, total: 0 },
+  setTranscriptStats: (shown, total) => set({ transcriptStats: { shown, total } }),
+
+  // categoryColorOverrides: user-chosen colors for categorical metadata columns.
+  // keyed by `${field}::${category}` → [r, g, b, 255].  Reset on dataset change.
+  categoryColorOverrides: {},
+  setCategoryColorOverride: (field, cat, rgba) => set((s) => ({
+    categoryColorOverrides: { ...s.categoryColorOverrides, [`${field}::${cat}`]: rgba },
+  })),
+  // Bulk-set: merges supplied map on top of existing overrides (used for CSV import).
+  mergeCategoryColorOverrides: (map) => set((s) => ({
+    categoryColorOverrides: { ...s.categoryColorOverrides, ...map },
+  })),
+  resetCategoryColorOverrides: () => set({ categoryColorOverrides: {} }),
+
+  // transcriptColorOverrides: user-chosen colors for transcript species.
+  // keyed by gene name → [r, g, b, 255].  Reset on dataset change.
+  transcriptColorOverrides: {},
+  setTranscriptColorOverride: (gene, rgba) => set((s) => ({
+    transcriptColorOverrides: { ...s.transcriptColorOverrides, [gene]: rgba },
+  })),
+  mergeTranscriptColorOverrides: (map) => set((s) => ({
+    transcriptColorOverrides: { ...s.transcriptColorOverrides, ...map },
+  })),
+  resetTranscriptColorOverrides: () => set({ transcriptColorOverrides: {} }),
 
   // ── Selected cell ─────────────────────────────────────────────────────────
   selectedCell: null,

@@ -51,18 +51,35 @@ class XeniumReader(SpatialDatasetReader):
     # ── Gene catalogue ────────────────────────────────────────────────────────
 
     def gene_list(self) -> list[str]:
+        skip = ("Blank", "NegControl", "Unassigned", "DEPRECATED",
+                "NegControlCodeword", "NegControlProbe", "antisense")
+
+        # Primary: read gene names from cell_feature_matrix.h5
         h5 = self.path / "cell_feature_matrix.h5"
-        if not h5.exists():
-            return []
-        try:
-            import h5py
-            with h5py.File(h5, "r") as f:
-                names = f["matrix/features/name"][()].astype(str).tolist()
-            skip = ("Blank", "NegControl", "Unassigned", "DEPRECATED",
-                    "NegControlCodeword", "NegControlProbe", "antisense")
-            return [g for g in names if not any(g.startswith(p) for p in skip)]
-        except Exception:
-            return []
+        if h5.exists():
+            try:
+                import h5py
+                with h5py.File(h5, "r") as f:
+                    names = f["matrix/features/name"][()].astype(str).tolist()
+                filtered = [g for g in names if not any(g.startswith(p) for p in skip)]
+                if filtered:
+                    return filtered
+            except Exception:
+                pass
+
+        # Fallback: extract unique feature_name values from transcripts.parquet.
+        # This handles datasets exported without the cell feature matrix H5.
+        tx = self.path / "transcripts.parquet"
+        if tx.exists():
+            try:
+                import pyarrow.parquet as pq
+                col = pq.read_table(tx, columns=["feature_name"])["feature_name"]
+                names = sorted({v.as_py() for v in col if v.is_valid})
+                return [g for g in names if not any(g.startswith(p) for p in skip)]
+            except Exception:
+                pass
+
+        return []
 
     # ── Transcripts ───────────────────────────────────────────────────────────
 
@@ -70,14 +87,14 @@ class XeniumReader(SpatialDatasetReader):
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
-        limit: int = 50_000,
-    ) -> list[dict]:
+        fraction: float = 1.0,
+    ) -> dict:
         df = self._read_parquet(
             "transcripts.parquet",
             columns=["x_location", "y_location", "feature_name", "qv"],
         )
         if df is None:
-            return []
+            return {"transcripts": [], "total": 0}
         if bbox:
             xmin, ymin, xmax, ymax = self._bbox_to_native(bbox)
             if None not in (xmin, ymin, xmax, ymax):
@@ -87,11 +104,14 @@ class XeniumReader(SpatialDatasetReader):
                 ]
         if genes:
             df = df[df["feature_name"].isin(genes)]
-        df = (df.sample(n=min(limit, len(df)), random_state=42).copy()
-              if len(df) > limit else df.copy())
+        total = len(df)
+        fraction = max(0.0001, min(1.0, fraction))
+        sample_n = min(round(fraction * total), 200_000)
+        df = (df.sample(n=sample_n, random_state=42).copy()
+              if sample_n < total else df.copy())
         df["x_location"] = df["x_location"] / self.pixel_size
         df["y_location"] = df["y_location"] / self.pixel_size
-        return self._to_records(df)
+        return {"transcripts": self._to_records(df), "total": total}
 
     # ── Cells ─────────────────────────────────────────────────────────────────
 
@@ -136,10 +156,10 @@ class XeniumReader(SpatialDatasetReader):
 
     # ── Cell boundaries ───────────────────────────────────────────────────────
 
-    def cell_boundaries(self, bbox: Optional[tuple] = None, limit: int = 20_000) -> list[dict]:
+    def cell_boundaries(self, bbox: Optional[tuple] = None, fraction: float = 1.0) -> dict:
         df = self._read_parquet("cell_boundaries.parquet")
         if df is None:
-            return []
+            return {"boundaries": [], "total": 0}
         x_col = next((c for c in df.columns if "vertex_x" in c), None)
         y_col = next((c for c in df.columns if "vertex_y" in c), None)
         if bbox and x_col and y_col:
@@ -149,15 +169,21 @@ class XeniumReader(SpatialDatasetReader):
                     (df[x_col] >= xmin) & (df[x_col] <= xmax) &
                     (df[y_col] >= ymin) & (df[y_col] <= ymax)
                 ]
-        if limit and "cell_id" in df.columns:
-            keep = df["cell_id"].drop_duplicates().iloc[:limit]
-            df = df[df["cell_id"].isin(keep)]
+        total_cells = 0
+        if "cell_id" in df.columns:
+            unique_ids = df["cell_id"].drop_duplicates()
+            total_cells = len(unique_ids)
+            fraction = max(0.0001, min(1.0, fraction))
+            sample_n = round(fraction * total_cells)
+            if sample_n < total_cells:
+                keep = unique_ids.sample(n=sample_n, random_state=42)
+                df = df[df["cell_id"].isin(keep)]
         df = df.copy()
         if x_col:
             df[x_col] = df[x_col] / self.pixel_size
         if y_col:
             df[y_col] = df[y_col] / self.pixel_size
-        return self._to_records(df)
+        return {"boundaries": self._to_records(df), "total": total_cells}
 
     # ── Expression ────────────────────────────────────────────────────────────
 
@@ -245,20 +271,28 @@ class XeniumReader(SpatialDatasetReader):
             return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
         col = df[field]
         cell_ids = df["cell_id"].astype(str).tolist()
+        has_value = col.notna()
         is_categorical = (
             pd.api.types.is_string_dtype(col) or
             pd.api.types.is_object_dtype(col) or
             (pd.api.types.is_integer_dtype(col) and col.nunique() <= 30)
         )
         if is_categorical:
-            labels = col.fillna("").astype(str).tolist()
-            categories = sorted(col.dropna().astype(str).unique().tolist())
-            values = {cell_ids[i]: labels[i] for i in range(len(cell_ids))}
+            categories = sorted(col[has_value].astype(str).unique().tolist())
+            values = {
+                cell_ids[i]: str(col.iloc[i])
+                for i in range(len(cell_ids)) if has_value.iloc[i]
+            }
             return {"type": "categorical", "values": values, "categories": categories}
-        filled = col.fillna(0)
-        values = {cell_ids[i]: float(filled.iloc[i]) for i in range(len(cell_ids))}
+        valid = col[has_value]
+        if valid.empty:
+            return {"type": "continuous", "values": {}, "min": 0.0, "max": 0.0}
+        values = {
+            cell_ids[i]: float(col.iloc[i])
+            for i in range(len(cell_ids)) if has_value.iloc[i]
+        }
         return {"type": "continuous", "values": values,
-                "min": float(filled.min()), "max": float(filled.max())}
+                "min": float(valid.min()), "max": float(valid.max())}
 
     # ── Supplemental metadata ─────────────────────────────────────────────────
 

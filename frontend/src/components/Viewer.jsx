@@ -48,8 +48,10 @@ function ViewerPanel({ panelIndex }) {
   const deckViewStateRef = useRef(null);
   const measureFirstRef = useRef(null);
   const clickTimerRef = useRef(null);
+  const hoverTimerRef = useRef(null);
   const cellPolygonsRef = useRef([]);
   const [cursorPos, setCursorPos] = useState(null);
+  const [hoveredTranscript, setHoveredTranscript] = useState(null);
   // Incremented every time this panel's OSD fires "open" — used to reliably
   // re-apply morphology visibility after each OSD (re)initialization.
   const [osdOpenCount, setOsdOpenCount] = useState(0);
@@ -60,8 +62,8 @@ function ViewerPanel({ panelIndex }) {
     setViewport,
     layers: layerState,
     platformCapabilities, setPlatformCapabilities,
-    cellColorEnabled, colorBy, cellColorPalette,
-    allGenes, selectedGenes,
+    cellColorEnabled, colorBy, cellColorPalette, categoryColorOverrides,
+    allGenes, selectedGenes, transcriptColorOverrides,
     selectedCell, setSelectedCell,
     edgeMinStrength, edgeDensity,
     edgeColorBy, edgeColorPalette, edgeDirectional, showAutocrine,
@@ -80,6 +82,8 @@ function ViewerPanel({ panelIndex }) {
     measurements, addMeasurement,
     clearAnnotations,
     panelCount,
+    transcriptFraction, setTranscriptStats,
+    cellBoundaryFraction, setCellBoundaryStats,
   } = useStore();
 
   // Per-panel viewport from store
@@ -301,6 +305,28 @@ function ViewerPanel({ panelIndex }) {
     }
   }, [setSelectedCell, setSelectedEdge]);
 
+  // ── Transcript hover tooltip ──────────────────────────────────────────────
+  const handleTranscriptHoverMove = useCallback((e) => {
+    if (!deckRef.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      const info = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["transcripts"] });
+      if (info?.object?.feature_name) {
+        setHoveredTranscript({ gene: info.object.feature_name, qv: info.object.qv, x, y });
+      } else {
+        setHoveredTranscript(null);
+      }
+    }, 30);
+  }, []);
+
+  const handleTranscriptHoverLeave = useCallback(() => {
+    clearTimeout(hoverTimerRef.current);
+    setHoveredTranscript(null);
+  }, []);
+
   // ── Screen ↔ image-pixel coordinate conversion ───────────────────────────
   const screenToData = useCallback((sx, sy) => {
     const vs = deckViewStateRef.current;
@@ -394,24 +420,41 @@ function ViewerPanel({ panelIndex }) {
   const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
-  const { transcripts } = useTranscripts(
-    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts
+  const { transcripts, total: transcriptTotal } = useTranscripts(
+    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction, selectedGenes
   );
-  const { cells: cellPolygons } = useCellBoundaries(
-    apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries
+
+  // visibleTranscripts: server already filtered by selectedGenes, so this is a no-op
+  // when a gene filter is active — kept as a safety net and for semantic clarity.
+  const visibleTranscripts = selectedGenes === null
+    ? transcripts
+    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
+
+  // Expose live shown/total counts to the LayerPanel via the store (panel 0 only).
+  // Use visibleTranscripts.length so the stat always reflects the selected species.
+  useEffect(() => {
+    if (panelIndex === 0) setTranscriptStats(visibleTranscripts.length, transcriptTotal);
+  }, [visibleTranscripts.length, transcriptTotal]); // eslint-disable-line
+
+  const {
+    cells: cellPolygons,
+    total: cellBoundaryTotal,
+  } = useCellBoundaries(
+    apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries, cellBoundaryFraction
   );
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
+
+  // Expose live cell boundary counts to LayerPanel (panel 0 only).
+  useEffect(() => {
+    if (panelIndex === 0) setCellBoundaryStats(cellPolygons.length, cellBoundaryTotal);
+  }, [cellPolygons.length, cellBoundaryTotal]); // eslint-disable-line
 
   const { edges } = useEdges(
     apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity
   );
 
-  const visibleTranscripts = selectedGenes === null
-    ? transcripts
-    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
-
   const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
-    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp
+    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp, categoryColorOverrides
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
@@ -499,9 +542,9 @@ function ViewerPanel({ panelIndex }) {
     getRadius: 4,
     radiusMinPixels: 1,
     radiusMaxPixels: 8,
-    getFillColor: (d) => geneColor(d.feature_name),
-    pickable: false,
-    updateTriggers: { getFillColor: [] },
+    getFillColor: (d) => transcriptColorOverrides[d.feature_name] ?? geneColor(d.feature_name),
+    pickable: true,
+    updateTriggers: { getFillColor: [transcriptColorOverrides] },
   });
 
   const allDirectedEdges = useMemo(() => {
@@ -757,6 +800,8 @@ function ViewerPanel({ panelIndex }) {
         ref={containerRef}
         style={{ width: "100%", height: "100%" }}
         onClick={inAnnotationMode ? undefined : handleViewerClick}
+        onMouseMove={transcriptsVisible ? handleTranscriptHoverMove : undefined}
+        onMouseLeave={handleTranscriptHoverLeave}
       />
 
       {/* deck.gl overlay — pointerEvents:none so OSD handles pan/zoom */}
@@ -806,6 +851,32 @@ function ViewerPanel({ panelIndex }) {
           {label}
         </div>
       ))}
+
+      {/* Transcript hover tooltip */}
+      {hoveredTranscript && (
+        <div style={{
+          position: "absolute",
+          left: hoveredTranscript.x + 14,
+          top: hoveredTranscript.y - 10,
+          background: "rgba(0,0,0,0.82)",
+          color: "#fff",
+          fontFamily: "monospace",
+          fontSize: 11,
+          padding: "3px 8px",
+          borderRadius: 4,
+          pointerEvents: "none",
+          whiteSpace: "nowrap",
+          zIndex: 20,
+          border: "1px solid rgba(255,255,255,0.12)",
+        }}>
+          {hoveredTranscript.gene}
+          {hoveredTranscript.qv != null && (
+            <span style={{ color: "#777", marginLeft: 7 }}>
+              QV {Number(hoveredTranscript.qv).toFixed(1)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Annotation toolbar — split toggle only shown on panel 0 */}
       <AnnotationToolbar onScreenshot={handleScreenshot} panelIndex={panelIndex} />

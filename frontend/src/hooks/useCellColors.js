@@ -17,7 +17,7 @@ import { geneColor } from "../utils/geneColor";
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading
  */
-export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes, palette, enabled, clamp) {
+export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes, palette, enabled, clamp, categoryColorOverrides) {
   const [result, setResult] = useState({
     colorValues: null, type: "continuous", vmin: 0, vmax: 0,
     categories: [], categoryColors: new Map(),
@@ -25,9 +25,15 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
   const [loading, setLoading] = useState(false);
   const timerRef = useRef(null);
 
+  // rawCat: the last categorical response from the server { categories, values }
+  // stored separately so color remapping doesn't trigger a re-fetch.
+  const [rawCat, setRawCat] = useState(null);
+
+  // ── Effect 1: fetch server data ──────────────────────────────────────────
   useEffect(() => {
     if (!enabled || !colorBy || colorBy.mode === "off") {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+      setRawCat(null);
       return;
     }
 
@@ -39,10 +45,12 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
       : null;
     if (mode === "gene_set" && (!genesToSend || genesToSend.length === 0)) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+      setRawCat(null);
       return;
     }
     if (mode === "metadata" && !field) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
+      setRawCat(null);
       return;
     }
 
@@ -65,20 +73,10 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
         if (!data?.values) throw new Error("color-values response missing 'values'");
 
         if (data.type === "categorical") {
-          const { categories } = data;
-          const colorMap = new Map(
-            categories.map((cat, i) => [
-              cat,
-              i < QUAL_PALETTE.length
-                ? QUAL_PALETTE[i]
-                : [...geneColor(cat), 255],  // hash-based for large category sets
-            ])
-          );
-          const cellColors = new Map(
-            Object.entries(data.values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])
-          );
-          setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap });
+          // Store raw server response; color mapping happens in Effect 2.
+          setRawCat({ categories: data.categories, values: data.values });
         } else {
+          setRawCat(null);
           const { min, max } = data;
           const lo = clamp?.low ?? min;
           const hi = clamp?.high ?? max;
@@ -88,13 +86,33 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
           setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() });
         }
       } catch {
+        setRawCat(null);
         setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       } finally {
         setLoading(false);
       }
     }, 150);
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, colorBy?.mode, colorBy?.field, allGenes, selectedGenes, palette, enabled, clamp?.low, clamp?.high]);
+  }, [apiBase, dataset, colorBy?.mode, colorBy?.field, allGenes, selectedGenes, palette, enabled, clamp?.low, clamp?.high]); // eslint-disable-line
+
+  // ── Effect 2: remap categorical colors client-side (no server call) ──────
+  // Runs whenever raw server data changes OR the user edits a swatch color.
+  useEffect(() => {
+    if (!rawCat) return;
+    const { categories, values } = rawCat;
+    const field = colorBy?.field;
+    const colorMap = new Map(
+      categories.map((cat, i) => {
+        const key = `${field}::${cat}`;
+        const override = categoryColorOverrides?.[key];
+        return [cat, override ?? (i < QUAL_PALETTE.length ? QUAL_PALETTE[i] : [...geneColor(cat), 255])];
+      })
+    );
+    const cellColors = new Map(
+      Object.entries(values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])
+    );
+    setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap });
+  }, [rawCat, categoryColorOverrides, colorBy?.field]); // eslint-disable-line
 
   return { ...result, loading };
 }

@@ -65,10 +65,12 @@ class SpatialDatasetReader(ABC):
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
-        limit: int = 50_000,
-    ) -> list[dict]:
+        fraction: float = 1.0,
+    ) -> dict:
         """Transcript records in pixel space.
-        Required keys: x_location, y_location, feature_name."""
+        Returns {"transcripts": list[dict], "total": int} where total is the
+        pre-sample count after bbox/gene filtering.
+        Required keys per record: x_location, y_location, feature_name."""
         ...
 
     @abstractmethod
@@ -86,10 +88,11 @@ class SpatialDatasetReader(ABC):
     def cell_boundaries(
         self,
         bbox: Optional[tuple] = None,
-        limit: int = 20_000,
+        fraction: float = 1.0,
     ) -> list[dict]:
         """Boundary vertex records in pixel space.
-        Required keys: cell_id, vertex_x, vertex_y."""
+        Required keys: cell_id, vertex_x, vertex_y.
+        fraction: 0 < f ≤ 1.0 — randomly sample this fraction of cells in viewport."""
         ...
 
     @abstractmethod
