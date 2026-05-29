@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TissuePlex — User Manual</title>
+  <title>TissuePlex User Manual</title>
   <style>
     /* ── Reset & variables ───────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -244,19 +244,17 @@
 <!--  WELCOME                                                              -->
 <!-- ══════════════════════════════════════════════════════════════════════ -->
 <div class="hero" id="welcome">
-  <h1>Welcome to TissuePlex</h1>
-  <div class="sub">A step-by-step guide for first-time users</div>
+  <h1>TissuePlex User Manual</h1>
+  <div class="sub">Setup and operation guide</div>
   <p>TissuePlex is a web-based viewer for spatial transcriptomics data. It layers
-  cell positions, gene expression, cell-to-cell signaling, and your own analysis
-  results on top of your tissue morphology image — all viewable in a regular web
-  browser, running entirely on your own computer.</p>
-  <p>This guide is written for people with no prior computational experience. You
-  do not need to know how to program. You just need to be able to follow steps —
-  and you absolutely can do this.</p>
-  <p><strong>By the end of this guide you will:</strong> have TissuePlex installed
-  and running, your Xenium dataset loaded, cell-cell communication edges visible,
-  custom clustering results overlaid, and a confident understanding of every
-  control in the viewer.</p>
+  cell positions, gene expression, cell-to-cell signaling, and custom analysis
+  results on top of a tissue morphology image, running in a browser on your local
+  machine.</p>
+  <p>No programming experience is required. This guide covers installation, data
+  setup, and every control in the interface.</p>
+  <p><strong>By the end of this guide you will have:</strong> TissuePlex installed
+  and running, a Xenium dataset loaded, cell-cell communication edges from NICHESv2
+  visible, and custom analysis results available as cell color overlays.</p>
 </div>
 
 
@@ -266,8 +264,7 @@
   <div class="cards">
     <div class="card">
       <h4>A Mac or Windows computer</h4>
-      <p>TissuePlex runs in the browser — no special graphics card required for
-      basic use. A reasonably modern laptop is fine.</p>
+      <p>TissuePlex runs in the browser. No special graphics card is needed.</p>
     </div>
     <div class="card">
       <h4>Your Xenium output folder</h4>
@@ -277,13 +274,12 @@
     </div>
     <div class="card">
       <h4>An internet connection</h4>
-      <p>Only for the initial download steps. After installation, TissuePlex
-      runs entirely offline on your local machine.</p>
+      <p>Required for the initial download steps only. After setup, TissuePlex
+      runs on your local machine.</p>
     </div>
     <div class="card">
       <h4>About 30–45 minutes</h4>
-      <p>For the initial setup. Once everything is installed, launching
-      TissuePlex takes a single command and a few seconds.</p>
+      <p>For initial setup. Subsequent launches take seconds.</p>
     </div>
   </div>
 </section>
@@ -297,9 +293,9 @@
   <div class="part-label">Part I</div>
   <h2>Getting TissuePlex Running</h2>
 </div>
-<p>In this part you will install two small programs, download TissuePlex, and
-get it running on your computer. Most of these steps are one-time-only — after
-that, launching TissuePlex is just one command.</p>
+<p>Install two programs (Git and Docker), download TissuePlex, and run it for
+the first time. These are one-time steps; after setup, launching TissuePlex
+takes a single command.</p>
 
 
 <!-- ── Step 1: Git ───────────────────────────────────────────────────── -->
@@ -307,33 +303,28 @@ that, launching TissuePlex is just one command.</p>
   <div class="step-num">1</div>
   <div class="step-body">
     <h3>Install Git</h3>
-    <p>Git is a program that lets you download software from the internet and
-    keep it up to date. Think of it as a smarter download button — it remembers
-    exactly what version you have and can update it with a single command later.</p>
+    <p>Git downloads and manages software repositories. It lets you pull
+    TissuePlex updates with a single command.</p>
 
     <h4>On a Mac</h4>
-    <p>Open the <strong>Terminal</strong> application. You can find it in
-    <em>Applications → Utilities</em>, or search for "Terminal" using
-    <code>⌘ Space</code> and typing "Terminal".</p>
-    <p>In the Terminal window, type the following and press <strong>Return</strong>:</p>
+    <p>Open <strong>Terminal</strong> (Applications &rarr; Utilities, or
+    <code>⌘ Space</code> and type "Terminal") and run:</p>
     <pre><code>git --version</code></pre>
-    <p>If you see a response like <code>git version 2.x.x</code>, Git is already
-    installed — skip ahead to Step 2. If a pop-up appears offering to install
-    "Command Line Developer Tools" or "Xcode Command Line Tools", click
-    <strong>Install</strong> and follow the prompts. This installs Git automatically
-    and takes a few minutes.</p>
+    <p>If you see <code>git version 2.x.x</code>, Git is already installed;
+    skip to Step 2. If a pop-up offers to install "Command Line Developer Tools"
+    or "Xcode Command Line Tools", click <strong>Install</strong> and follow the
+    prompts.</p>
 
     <h4>On Windows</h4>
-    <p>Go to <strong>git-scm.com</strong> and click the big download button for
-    Windows. Run the installer. You can accept every default setting by clicking
-    "Next" through every screen. When it finishes, you will have a new program
-    called <strong>Git Bash</strong> — this is what you'll use for all
-    command-line steps in this guide (use it anywhere the guide says "Terminal").</p>
+    <p>Go to <strong>git-scm.com</strong>, download the Windows installer, and
+    run it. Accept the default settings. When it finishes, you will have a program
+    called <strong>Git Bash</strong>. Use Git Bash wherever this guide says
+    "Terminal".</p>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> To confirm Git is working, open Terminal
-      (Mac) or Git Bash (Windows) and run <code>git --version</code>. You should
-      see a version number printed.
+      <strong class="label">Tip:</strong> Verify the install by running
+      <code>git --version</code> in Terminal or Git Bash. A version number should
+      appear.
     </div>
   </div>
 </div>
@@ -344,34 +335,33 @@ that, launching TissuePlex is just one command.</p>
   <div class="step-num">2</div>
   <div class="step-body">
     <h3>Install Docker Desktop</h3>
-    <p>Docker is the engine that runs TissuePlex. Think of it like a sealed
-    bubble — it contains all the software TissuePlex needs (Python, databases,
-    web server) without you having to install any of that yourself. You install
-    Docker once, and Docker handles everything else.</p>
+    <p>Docker runs TissuePlex in an isolated container that bundles all required
+    software (Python, databases, web server). Install Docker once; no other
+    dependencies are needed on your machine.</p>
 
     <p>Go to <a href="https://www.docker.com/products/docker-desktop/" target="_blank">docker.com/products/docker-desktop</a>
-    and download Docker Desktop for your operating system. Install it the same
-    way you would install any other application.</p>
+    and download Docker Desktop for your operating system. Install it as you
+    would any other application.</p>
 
     <div class="callout warn">
       <strong class="label">Important:</strong> After installing, <strong>open
-      Docker Desktop</strong> and wait for it to fully start up. You will see a
-      small Docker whale icon in your menu bar (Mac) or system tray (Windows)
-      turn from grey/animated to a solid color. TissuePlex will not work unless
-      Docker Desktop is running first.
+      Docker Desktop</strong> and wait for it to finish starting. The Docker
+      whale icon in your menu bar (Mac) or system tray (Windows) will stop
+      animating when it is ready. TissuePlex requires Docker Desktop to be
+      running.
     </div>
 
     <h4>Recommended: increase Docker's memory limit</h4>
-    <p>In Docker Desktop, open <strong>Settings</strong> (gear icon) →
-    <strong>Resources</strong>. If your computer has 16 GB of RAM or more, set
-    the memory limit to at least <strong>8 GB</strong>. This helps TissuePlex
-    process large datasets without slowing down. Then click
+    <p>In Docker Desktop, go to <strong>Settings</strong> (gear icon) &rarr;
+    <strong>Resources</strong>. If your machine has 16 GB of RAM or more, set
+    the memory limit to at least <strong>8 GB</strong>, then click
     <strong>Apply &amp; Restart</strong>.</p>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> You need Docker Desktop to be running
-      every time you use TissuePlex. Consider adding it to your login items
-      (Mac: System Settings → General → Login Items) so it starts automatically.
+      <strong class="label">Tip:</strong> Docker Desktop must be running each
+      time you use TissuePlex. Consider adding it to your login items
+      (Mac: System Settings &rarr; General &rarr; Login Items) so it starts
+      automatically.
     </div>
   </div>
 </div>
@@ -382,27 +372,23 @@ that, launching TissuePlex is just one command.</p>
   <div class="step-num">3</div>
   <div class="step-body">
     <h3>Download TissuePlex</h3>
-    <p>Now you will download TissuePlex from GitHub onto your computer. Open
-    Terminal (Mac) or Git Bash (Windows) and navigate to the folder where you
-    want to keep TissuePlex. For example, to put it in your Documents folder:</p>
+    <p>Open Terminal (Mac) or Git Bash (Windows). Navigate to the folder where
+    you want to keep TissuePlex, for example:</p>
 
     <pre><code>cd ~/Documents</code></pre>
 
-    <p>Then run:</p>
+    <p>Then clone the repository:</p>
 
     <pre><code>git clone https://github.com/RaredonLab/TissuePlex.git
 cd TissuePlex</code></pre>
 
-    <p>This creates a folder called <code>TissuePlex</code> in your Documents
-    folder and downloads all of the code into it. The second command moves your
-    terminal prompt inside that folder.</p>
+    <p>This creates a <code>TissuePlex</code> folder and downloads all the code
+    into it. The second command moves your terminal into that folder.</p>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> To update TissuePlex in the future,
-      open Terminal, navigate back to this folder
-      (<code>cd ~/Documents/TissuePlex</code>), and run <code>git pull</code>,
-      followed by <code>docker compose up --build</code> to rebuild with the
-      latest changes.
+      <strong class="label">Tip:</strong> To update TissuePlex later, navigate
+      back to this folder (<code>cd ~/Documents/TissuePlex</code>), run
+      <code>git pull</code>, then <code>docker compose up --build</code>.
     </div>
   </div>
 </div>
@@ -412,44 +398,41 @@ cd TissuePlex</code></pre>
 <div class="step" id="step4">
   <div class="step-num">4</div>
   <div class="step-body">
-    <h3>Launch TissuePlex for the First Time</h3>
-    <p>TissuePlex comes with a small sample dataset so you can verify everything
-    is working before touching your real data. Make sure Docker Desktop is
-    running, then — with your terminal still inside the TissuePlex folder —
-    run:</p>
+    <h3>First Launch</h3>
+    <p>TissuePlex includes a small sample dataset for verifying the installation.
+    With Docker Desktop running, run the following from inside the TissuePlex
+    folder:</p>
 
     <pre><code>docker compose up --build</code></pre>
 
-    <p>The first time you run this, Docker downloads and assembles everything.
-    This can take <strong>5–15 minutes</strong> depending on your internet
-    speed. You will see a lot of text scrolling by — that's normal! When you
-    see messages containing <code>uvicorn running</code> and references to
-    <code>nginx</code>, TissuePlex is ready.</p>
+    <p>The first run downloads and builds all container images, which takes
+    <strong>5–15 minutes</strong> depending on internet speed. A large amount of
+    build output will scroll by. When you see messages containing
+    <code>uvicorn running</code> and <code>nginx</code>, TissuePlex is ready.</p>
 
-    <p>Open your web browser (Chrome or Firefox recommended) and go to:</p>
+    <p>Open Chrome or Firefox and go to:</p>
 
     <pre><code>http://localhost:3000</code></pre>
 
-    <p>You should see the TissuePlex viewer load with the sample dataset.
-    <strong>Congratulations — TissuePlex is running!</strong></p>
+    <p>The TissuePlex viewer should load with the sample dataset.</p>
 
     <div class="callout warn">
       <strong class="label">Note:</strong> The first time a dataset is opened,
-      TissuePlex needs to process the morphology image — this takes
-      <strong>10–30 seconds</strong>. If you see a grey or blank canvas, wait a
-      moment and then refresh the page.
+      TissuePlex builds a tile pyramid from the morphology image, which takes
+      <strong>10–30 seconds</strong>. If the canvas looks blank, wait and
+      refresh.
     </div>
 
     <h4>Stopping TissuePlex</h4>
-    <p>When you are done for the day, go back to your terminal and press
-    <strong>Ctrl + C</strong> to stop the running process, then run:</p>
+    <p>Press <strong>Ctrl + C</strong> in the terminal to stop the process,
+    then run:</p>
     <pre><code>docker compose down</code></pre>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> On subsequent launches you can use the
-      faster <code>docker compose up</code> (without <code>--build</code>) since
-      nothing has changed. Only add <code>--build</code> when you want to pick
-      up code updates after a <code>git pull</code>.
+      <strong class="label">Tip:</strong> On subsequent launches,
+      <code>docker compose up</code> (without <code>--build</code>) is faster.
+      Add <code>--build</code> after a <code>git pull</code> to rebuild with
+      the latest changes.
     </div>
   </div>
 </div>
@@ -460,39 +443,33 @@ cd TissuePlex</code></pre>
   <div class="step-num">5</div>
   <div class="step-body">
     <h3>Load Your Xenium Dataset</h3>
-    <p>Now let's point TissuePlex at your actual data. TissuePlex needs a
-    <strong>parent folder</strong> that contains your dataset folder(s). The
-    layout should look like this:</p>
+    <p>TissuePlex reads from a <strong>parent folder</strong> containing one or
+    more dataset subfolders. The expected layout:</p>
 
-    <div class="tree"><span class="hl">/Users/yourname/xenium-data/</span>          <span class="cmt">&lt;— this is your DATA_PATH</span>
-  my-experiment-2024/                  <span class="cmt">&lt;— your dataset folder</span>
-    <span class="hl">experiment.xenium</span>                <span class="cmt">&lt;— TissuePlex detects Xenium from this file</span>
+    <div class="tree"><span class="hl">/Users/yourname/xenium-data/</span>          <span class="cmt">&lt;- this is your DATA_PATH</span>
+  my-experiment-2024/                  <span class="cmt">&lt;- your dataset folder</span>
+    <span class="hl">experiment.xenium</span>                <span class="cmt">&lt;- Xenium platform sentinel</span>
     morphology.ome.tif
     transcripts.parquet
     cells.parquet
     ...</div>
 
-    <p>You point TissuePlex at the <strong>parent folder</strong> (e.g.
-    <code>/Users/yourname/xenium-data/</code>), not at the dataset folder
-    itself. You can have as many dataset folders inside the parent as you like —
-    TissuePlex will list them all and let you switch between them.</p>
+    <p>Set <code>DATA_PATH</code> to the parent folder. Multiple dataset folders
+    are supported; TissuePlex lists them all in the interface.</p>
 
-    <h4>On Mac or Linux</h4>
+    <h4>Mac or Linux</h4>
     <pre><code>DATA_PATH="/Users/yourname/xenium-data" docker compose up --build</code></pre>
 
-    <h4>On Windows (Git Bash)</h4>
+    <h4>Windows (Git Bash)</h4>
     <pre><code>DATA_PATH="C:/Users/yourname/xenium-data" docker compose up --build</code></pre>
 
     <div class="callout warn">
       <strong class="label">Important:</strong> The path must be
-      <strong>absolute</strong> — it must start from the root of your computer.
-      Paths like <code>../my-data</code> will not work. On Windows, use forward
-      slashes (<code>/</code>) rather than backslashes (<code>\</code>) in
-      Git Bash.
+      <strong>absolute</strong> (starting from the filesystem root). On Windows
+      in Git Bash, use forward slashes (<code>/</code>).
     </div>
 
-    <p>TissuePlex auto-detects which platform the data came from based on the
-    files present in each folder:</p>
+    <p>TissuePlex detects the platform from the files present in each subfolder:</p>
 
     <table>
       <tr><th>Platform</th><th>Required file in the dataset folder</th></tr>
@@ -501,8 +478,7 @@ cd TissuePlex</code></pre>
       <tr><td>CosMx (Nanostring)</td><td>a file ending in <code>_tx_file.csv</code></td></tr>
     </table>
 
-    <p>If none of those sentinel files are present, TissuePlex will not list the
-    folder as a dataset — no error, it just skips it.</p>
+    <p>Folders without a matching sentinel file are silently skipped.</p>
   </div>
 </div>
 
@@ -515,42 +491,36 @@ cd TissuePlex</code></pre>
   <div class="part-label">Part II</div>
   <h2>Enriching Your Data</h2>
 </div>
-<p>TissuePlex can display more than just the standard Xenium output. In this part
-you will add two kinds of enriched data: <strong>cell-cell communication
-edges</strong> from the NICHESv2 R pipeline, and <strong>custom cell
-metadata</strong> such as clustering labels or pseudotime scores from your own
-analysis. Both are entirely optional — TissuePlex works well without them — but
-adding this data unlocks the most powerful features of the viewer.</p>
+<p>TissuePlex can display enriched data alongside the standard Xenium output:
+<strong>cell-cell communication edges</strong> from the NICHESv2 R pipeline,
+and <strong>custom cell metadata</strong> such as clustering labels or pseudotime
+scores. Both are optional; the core viewer works without them.</p>
 
 
 <!-- ── Step 6: About NICHESv2 ────────────────────────────────────────── -->
 <div class="step" id="step6">
   <div class="step-num">6</div>
   <div class="step-body">
-    <h3>Understanding the NICHESv2 Edge Layer</h3>
-    <p>One of TissuePlex's most distinctive features is the ability to visualize
-    <strong>cell-cell communication</strong> as a spatial graph drawn directly on
-    top of the tissue. Each line in this graph represents a pair of neighboring
-    cells, and the lines can be colored and filtered by
-    <strong>ligand-receptor mechanisms (LRMs)</strong> — the specific molecular
-    signals that one cell sends to another.</p>
+    <h3>The NICHESv2 Edge Layer</h3>
+    <p>TissuePlex can render <strong>cell-cell communication</strong> as a spatial
+    graph overlaid on the tissue. Each line represents a pair of neighboring cells;
+    lines are colored and filtered by <strong>ligand-receptor mechanisms (LRMs)</strong>:
+    the molecular signals passing from one cell to another.</p>
 
-    <p>This data comes from <strong>NICHESv2</strong>, a computational R pipeline
-    developed in the Raredon Lab. NICHESv2 takes your Xenium data and scores every
-    spatially neighboring cell pair for every ligand-receptor interaction present
-    in the dataset, producing a rich, quantitative connectivity map.</p>
+    <p>This data comes from <strong>NICHESv2</strong>, a Raredon Lab R pipeline
+    that scores every spatially neighboring cell pair for every ligand-receptor
+    interaction in the dataset.</p>
 
-    <p>The output that TissuePlex reads is a single file called
-    <code>edges.parquet</code>, placed in your dataset folder alongside
-    <code>experiment.xenium</code>. If this file is present, the edge
-    visualization layers appear in the Layer Panel. If it is absent, those layers
-    are simply hidden and everything else works normally.</p>
+    <p>The output TissuePlex reads is a single file, <code>edges.parquet</code>,
+    placed in the dataset folder alongside <code>experiment.xenium</code>. When
+    present, the edge layers appear in the Layer Panel. When absent, those layers
+    are hidden and all other features work as normal.</p>
 
     <div class="callout note">
       <strong class="label">Note:</strong> Running NICHESv2 requires R and
-      several R packages, and can take substantial computational time for large
-      datasets. <strong>Ask a lab member for guidance on your first run.</strong>
-      The steps below describe the workflow so you know what to expect.
+      several packages and can take significant time for large datasets. Ask a
+      lab member for guidance on your first run. The steps below outline the
+      workflow.
     </div>
   </div>
 </div>
@@ -561,14 +531,12 @@ adding this data unlocks the most powerful features of the viewer.</p>
   <div class="step-num">7</div>
   <div class="step-body">
     <h3>Install R and RStudio</h3>
-    <p>R is a free programming language widely used in biology and statistics.
-    RStudio is a friendly graphical application for writing and running R code.
-    You will need both.</p>
+    <p>R is a programming language widely used in biology and statistics.
+    RStudio is a graphical interface for writing and running R code.</p>
 
     <h4>Install R</h4>
     <p>Go to <a href="https://cran.r-project.org" target="_blank">cran.r-project.org</a>
-    and download the latest version of R for your operating system. Install it
-    like any normal application.</p>
+    and download the latest version of R for your operating system.</p>
 
     <h4>Install RStudio</h4>
     <p>Go to
@@ -576,21 +544,18 @@ adding this data unlocks the most powerful features of the viewer.</p>
     and download the free <strong>RStudio Desktop</strong> version. Install it
     after R.</p>
 
-    <h4>Install the required R packages</h4>
-    <p>Open RStudio. In the <strong>Console</strong> panel at the bottom, paste
-    the following and press <strong>Enter</strong>:</p>
+    <h4>Install required R packages</h4>
+    <p>Open RStudio. In the <strong>Console</strong> panel, paste the following
+    and press <strong>Enter</strong>:</p>
 
     <pre><code>install.packages(c("Seurat", "arrow", "dplyr", "devtools"))</code></pre>
 
-    <p>This may take several minutes. Each package downloads and installs
-    automatically. Then install the NICHESv2 package by following the
-    instructions from the lab — ask a lab member for the current installation
-    command and any additional steps specific to the version you need.</p>
+    <p>Installation may take several minutes. Then install the NICHESv2 package;
+    ask a lab member for the current installation command.</p>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> You only need to install R and RStudio
-      once. Packages also persist between sessions, so this step is a one-time
-      setup.
+      <strong class="label">Tip:</strong> R, RStudio, and installed packages
+      persist between sessions.
     </div>
   </div>
 </div>
@@ -601,9 +566,8 @@ adding this data unlocks the most powerful features of the viewer.</p>
   <div class="step-num">8</div>
   <div class="step-body">
     <h3>Run NICHESv2 and Export Edge Data</h3>
-    <p>This step involves loading your Xenium data into R, running NICHESv2 to
-    compute cell-cell communication scores, and exporting the result so
-    TissuePlex can display it. The general workflow looks like this:</p>
+    <p>The workflow has three steps: load your Xenium data into R, run NICHESv2
+    to score cell-cell communication, and export the result for TissuePlex.</p>
 
     <pre><code>library(Seurat)
 library(NICHESv2)
@@ -614,22 +578,21 @@ xenium_obj &lt;- LoadXenium("/path/to/your/xenium-dataset")
 # 2. Run NICHESv2 (ask a lab member for recommended parameters)
 niches_result &lt;- RunNICHES(xenium_obj, ...)
 
-# 3. Export for TissuePlex — writes edges.parquet to the dataset folder
+# 3. Export for TissuePlex (writes edges.parquet to the dataset folder)
 export_for_TissuePlex(
   niches_result,
   output_dir = "/path/to/your/xenium-dataset"
 )</code></pre>
 
-    <p>The <code>export_for_TissuePlex()</code> function writes a file called
-    <code>edges.parquet</code> directly into your dataset folder. After it
-    finishes, your folder structure will look like this:</p>
+    <p><code>export_for_TissuePlex()</code> writes <code>edges.parquet</code>
+    to your dataset folder. The resulting structure:</p>
 
     <div class="tree">my-experiment-2024/
   experiment.xenium
   morphology.ome.tif
   transcripts.parquet
   cells.parquet
-  <span class="hl">edges.parquet</span>              <span class="cmt">&lt;— newly created by NICHESv2</span></div>
+  <span class="hl">edges.parquet</span>              <span class="cmt">&lt;- newly created by NICHESv2</span></div>
 
     <div class="callout warn">
       <strong class="label">Important:</strong> The exact arguments for
@@ -639,11 +602,11 @@ export_for_TissuePlex(
     </div>
 
     <h4>Verify the result</h4>
-    <p>Restart TissuePlex with your <code>DATA_PATH</code>. In the Layer Panel
-    on the right, you should now see <span class="ui">Tissue Graph</span> and
-    <span class="ui">Directed Edges</span> sections that were not there before.
-    If you do not see them, double-check that <code>edges.parquet</code> is
-    directly inside the dataset folder (not in a subfolder).</p>
+    <p>Restart TissuePlex. The <span class="ui">Tissue Graph</span> and
+    <span class="ui">Directed Edges</span> sections should appear in the Layer
+    Panel. If they do not, confirm that <code>edges.parquet</code> is directly
+    inside the dataset folder at the same level as
+    <code>experiment.xenium</code>.</p>
   </div>
 </div>
 
@@ -653,12 +616,10 @@ export_for_TissuePlex(
   <div class="step-num">9</div>
   <div class="step-body">
     <h3>Add Custom Cell Metadata</h3>
-    <p>Beyond the standard Xenium output, TissuePlex can color cells by any
-    metadata you generate yourself — for example: clustering labels, cell type
-    annotations, pseudotime scores, or gene module scores. You add this by
-    placing a CSV file in a special subfolder called <code>cell-metadata</code>
-    inside your dataset directory. TissuePlex finds it automatically and makes
-    every column available in the color-by dropdown.</p>
+    <p>TissuePlex can color cells by any metadata you generate: clustering labels,
+    cell type annotations, pseudotime scores, or gene module scores. Place a CSV
+    in a subfolder named <code>cell-metadata</code> inside the dataset directory.
+    Every column is automatically available in the color-by dropdown.</p>
 
     <h4>A typical R workflow</h4>
 
@@ -678,7 +639,7 @@ xenium_obj &lt;- FindClusters(xenium_obj, resolution = 0.5)
 
 # Extract the columns you want to export
 metadata_to_export &lt;- xenium_obj@meta.data[, c("seurat_clusters")]
-# Add as many columns as you like — they will all appear in TissuePlex.
+# Add as many columns as you like; they all appear in TissuePlex.
 
 # Create the cell-metadata folder if it does not already exist
 dir.create(
@@ -686,21 +647,21 @@ dir.create(
   showWarnings = FALSE
 )
 
-# Save the file — cell barcodes become the row names automatically
+# Save the file (cell barcodes become the row names automatically)
 write.csv(
   metadata_to_export,
   file.path("/path/to/your/xenium-dataset", "cell-metadata", "my_clusters.csv")
 )</code></pre>
 
     <div class="callout note">
-      <strong class="label">Note:</strong> The row names of your data frame must
-      match the cell barcodes in the Xenium output. If you loaded the data using
-      <code>LoadXenium()</code>, the barcodes in
-      <code>xenium_obj@meta.data</code> will already match. Ask a lab member
-      for guidance on choosing clustering parameters appropriate for your dataset.
+      <strong class="label">Note:</strong> Row names must match the cell barcodes
+      in the Xenium output. Loading data via <code>LoadXenium()</code> ensures
+      the barcodes in <code>xenium_obj@meta.data</code> are already correct. Ask
+      a lab member for guidance on clustering parameters appropriate for your
+      dataset.
     </div>
 
-    <h4>Your dataset folder structure should now look like this:</h4>
+    <h4>Resulting folder structure:</h4>
 
     <div class="tree">my-experiment-2024/
   experiment.xenium
@@ -708,18 +669,17 @@ write.csv(
   transcripts.parquet
   cells.parquet
   edges.parquet
-  <span class="hl">cell-metadata/</span>             <span class="cmt">&lt;— create this folder in R or manually</span>
-    <span class="hl">my_clusters.csv</span>          <span class="cmt">&lt;— your exported metadata</span></div>
+  <span class="hl">cell-metadata/</span>             <span class="cmt">&lt;- create this folder in R or manually</span>
+    <span class="hl">my_clusters.csv</span>          <span class="cmt">&lt;- your exported metadata</span></div>
 
-    <p>After adding the file, restart TissuePlex. Your metadata columns appear
+    <p>After adding the file, restart TissuePlex. Metadata columns appear
     automatically under
-    <span class="ui">Cell Segments → Color by → Cell metadata</span>. No
-    configuration is needed.</p>
+    <span class="ui">Cell Segments &rarr; Color by &rarr; Cell metadata</span>.</p>
 
     <div class="callout tip">
-      <strong class="label">Tip:</strong> You can place as many CSV files as you
-      like in the <code>cell-metadata/</code> folder. TissuePlex merges them all
-      on the barcode key. Each file can contain different columns.
+      <strong class="label">Tip:</strong> Multiple CSV files are supported in
+      <code>cell-metadata/</code>. TissuePlex merges them on the barcode key;
+      each file can contain different columns.
     </div>
   </div>
 </div>
@@ -733,47 +693,42 @@ write.csv(
   <div class="part-label">Part III</div>
   <h2>Using TissuePlex</h2>
 </div>
-<p>Now for the rewarding part. This section walks you through every control in
-the TissuePlex interface — what each one does and when you'd want to use it.</p>
+<p>This section covers every control in the TissuePlex interface.</p>
 
 
 <!-- ── Interface overview ─────────────────────────────────────────────── -->
 <section id="interface">
   <h2 class="section-title">Interface Overview</h2>
-  <p>When TissuePlex loads you will see four main areas:</p>
+  <p>TissuePlex has four main areas:</p>
   <ul>
-    <li><strong>The Viewer</strong> — the large central area where your tissue
-    image and all data layers are displayed. Pan by clicking and dragging;
-    zoom with the scroll wheel (or pinch gesture on a trackpad).</li>
-    <li><strong>The Layer Panel</strong> — the panel along the right side. This
-    is where you control everything: which layers are visible, how they are
-    colored, which genes or mechanisms to show, and more.</li>
-    <li><strong>The Annotation Toolbar</strong> — a compact toolbar at the top
-    of the viewer, containing tools for drawing regions, measuring distances,
-    toggling split-screen mode, and saving images.</li>
-    <li><strong>Info Panels</strong> — small floating panels that appear when
-    you click on a cell or an edge, showing detailed information about that
-    object.</li>
+    <li><strong>The Viewer.</strong> The large central area showing the tissue
+    image and all data layers. Pan by clicking and dragging; zoom with the scroll
+    wheel or pinch gesture.</li>
+    <li><strong>The Layer Panel.</strong> The right-hand panel for controlling
+    layer visibility, color mappings, gene filters, and LRM selections.</li>
+    <li><strong>The Annotation Toolbar.</strong> A compact bar at the top of the
+    viewer with tools for drawing regions, measuring distances, toggling
+    split-screen mode, and saving images.</li>
+    <li><strong>Info Panels.</strong> Floating panels that appear when you click
+    on a cell or edge, showing metadata and scores for that object.</li>
   </ul>
 
   <h3>Dataset &amp; Image Picker</h3>
-  <p>At the very top of the Layer Panel you will find two dropdown menus:</p>
+  <p>At the top of the Layer Panel are two dropdowns:</p>
   <ul>
-    <li><span class="ui">Dataset</span> — lists all the datasets TissuePlex
-    found in your <code>DATA_PATH</code> folder. Switch between datasets
-    here.</li>
-    <li><span class="ui">Image</span> — if your dataset contains multiple
-    OME-TIFF image files, you can switch between them here. Most Xenium datasets
-    have just one.</li>
+    <li><span class="ui">Dataset</span>: lists all datasets found in your
+    <code>DATA_PATH</code> folder.</li>
+    <li><span class="ui">Image</span>: lists the available OME-TIFF files in
+    the dataset. Most Xenium datasets have one.</li>
   </ul>
-  <p>Switching datasets reloads all data layers automatically. The first time
-  each image is viewed, TissuePlex builds a tile pyramid which takes 10–30
-  seconds — just wait and refresh if the canvas looks blank.</p>
+  <p>Switching datasets reloads all layers automatically. The first time each
+  image is viewed, TissuePlex builds a tile pyramid (10–30 seconds); if the
+  canvas looks blank, wait and refresh.</p>
 
   <div class="callout tip">
     <strong class="label">Tip:</strong> TissuePlex works best in
-    <strong>Google Chrome</strong> or <strong>Firefox</strong>. If you
-    experience visual glitches in Safari, try switching to Chrome.
+    <strong>Google Chrome</strong> or <strong>Firefox</strong>. Switch to Chrome
+    if you see visual glitches in Safari.
   </div>
 </section>
 
@@ -799,65 +754,60 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
   measured boundary.</p>
 
   <h3>Visibility and Opacity</h3>
-  <p>There are separate opacity sliders for the cell <strong>fill</strong> (the
-  solid interior) and the cell <strong>outline</strong> (the border line):</p>
+  <p>Separate opacity sliders control the cell <strong>fill</strong> (solid
+  interior) and <strong>outline</strong> (border line):</p>
   <ul>
     <li>Use the checkbox next to <span class="ui">Cell Segments</span> to show
-    or hide cell boundaries entirely.</li>
-    <li>The <span class="ui">fill</span> slider adjusts how opaque the interior
-    color is — useful for letting the morphology image show through.</li>
-    <li>The <span class="ui">outline</span> slider adjusts how prominent the
-    cell border lines are.</li>
+    or hide boundaries entirely.</li>
+    <li>The <span class="ui">fill</span> slider adjusts interior opacity.</li>
+    <li>The <span class="ui">outline</span> slider adjusts the border line
+    weight.</li>
   </ul>
 
-  <p>There is also a <span class="ui">sample</span> slider that controls what
-  fraction of cell boundaries are loaded from the server at any given time.
-  At low zoom levels this is managed automatically; when you are zoomed in, you
-  can raise the sampling fraction to see more cells in detail.</p>
+  <p>The <span class="ui">sample</span> slider controls what fraction of cell
+  boundaries are loaded. At low zoom it adjusts automatically; raise it when
+  zoomed in to load more cells.</p>
 
   <div class="callout tip">
-    <strong class="label">Tip:</strong> Showing outlines at full opacity with fill
-    at very low opacity (5–10%) gives a clean view of cell shape and layout
-    without obscuring the underlying morphology image.
+    <strong class="label">Tip:</strong> Outlines at full opacity with fill at
+    5–10% gives a clean view of cell shape while keeping the morphology image
+    visible.
   </div>
 
   <h3>Color By</h3>
-  <p>The <span class="ui">Color by</span> dropdown is the most powerful control
-  in this section. It lets you color each cell by a data value.</p>
+  <p>The <span class="ui">Color by</span> dropdown colors each cell by a data
+  value.</p>
 
   <h4>Off (default)</h4>
-  <p>All cells are shown in a neutral color. Use this when you just want to see
-  cell positions without any data overlay.</p>
+  <p>Cells shown in a neutral color. Use this to view cell positions without a
+  data overlay.</p>
 
   <h4>Gene Set</h4>
   <p>Colors each cell by the combined expression of a selected set of genes.
-  Cells that express those genes highly appear at the "hot" end of the color
-  scale; cells that do not express them appear at the "cold" end.</p>
+  High-expressing cells appear at the hot end of the color scale; low-expressing
+  cells at the cold end.</p>
   <ul>
-    <li>The gene set is defined using the same gene filter in the
-    <span class="ui">Transcripts</span> section — select your genes of interest
-    there, and "Gene Set" coloring will reflect that selection.</li>
-    <li>Choose a <strong>color palette</strong>: viridis (yellow→purple), plasma
-    (yellow→magenta), magma (yellow→black), or inferno. <em>Viridis</em> is
-    recommended for colorblind accessibility.</li>
-    <li>A color legend appears below showing the data range. Use the
-    <strong>clamp</strong> sliders on the legend to focus the color range on a
-    specific window of values — for example, if a handful of outlier cells have
-    very high expression and are washing out the variation in the rest, set a
-    lower maximum to bring out the middle range.</li>
+    <li>The gene set is defined by the selection in the
+    <span class="ui">Transcripts</span> gene filter.</li>
+    <li>Choose a <strong>color palette</strong>: viridis (yellow&rarr;purple),
+    plasma (yellow&rarr;magenta), magma (yellow&rarr;black), or inferno.
+    <em>Viridis</em> is recommended for colorblind accessibility.</li>
+    <li>A color legend shows the data range. Use the <strong>clamp</strong>
+    sliders to restrict the color range to a specific window, useful when
+    outliers at the high end compress the variation across the rest of the
+    dataset.</li>
   </ul>
 
   <h4>Cell Metadata</h4>
-  <p>Colors each cell by any metadata column — including the supplemental
-  metadata you added to the <code>cell-metadata/</code> folder.</p>
+  <p>Colors each cell by any metadata column, including supplemental columns
+  added to the <code>cell-metadata/</code> folder.</p>
   <ul>
-    <li>Use the <span class="ui">field</span> dropdown to pick which column to
-    display.</li>
-    <li><strong>Continuous columns</strong> (numbers like pseudotime or module
-    scores) are shown with a gradient palette and clamp controls.</li>
-    <li><strong>Categorical columns</strong> (text labels like cluster names or
-    cell types) are automatically assigned a set of distinct colors, one per
-    category. A legend appears listing all categories.</li>
+    <li>Use the <span class="ui">field</span> dropdown to select the column.</li>
+    <li><strong>Continuous columns</strong> (pseudotime, module scores, etc.)
+    use a gradient palette with clamp controls.</li>
+    <li><strong>Categorical columns</strong> (cluster labels, cell type names,
+    etc.) are assigned distinct colors automatically, one per category, with a
+    legend.</li>
   </ul>
 </section>
 
@@ -865,49 +815,41 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
 <!-- ── Transcripts ────────────────────────────────────────────────────── -->
 <section id="transcripts">
   <h2 class="section-title">Transcripts</h2>
-  <p>The <span class="ui">Transcripts</span> layer shows individual detected RNA
-  molecules as small colored dots, each colored by the gene it represents. This
-  is one of the most detailed views available.</p>
+  <p>The <span class="ui">Transcripts</span> layer renders individual detected
+  RNA molecules as colored dots, each colored by gene identity.</p>
 
   <div class="callout warn">
-    <strong class="label">Note:</strong> Because a large dataset can have millions
-    of transcripts, this layer only appears when you are zoomed in enough to see
-    individual cells. If you don't see transcript dots, try zooming in further.
-    A small counter in the panel shows how many transcripts are currently
-    visible.
+    <strong class="label">Note:</strong> Transcripts are only rendered when
+    zoomed in far enough to see individual cells. If no dots appear, zoom in
+    further. A counter in the panel shows how many are currently visible.
   </div>
 
   <h3>Gene Filter</h3>
-  <p>By default, transcripts from <em>all</em> detected genes are shown
-  simultaneously, each in its own color. You can narrow this to only the genes
-  you care about:</p>
+  <p>By default, transcripts from all detected genes are shown, each in its own
+  color. To restrict the display to specific genes:</p>
 
   <ul>
-    <li>The current status is shown as either <span class="ui">all N genes</span>
+    <li>The current status reads either <span class="ui">all N genes</span>
     or <span class="ui">M / N genes selected</span>.</li>
     <li>Click <span class="ui">select ▼</span> (or <span class="ui">edit
-    ▼</span> if a filter is already active) to open the gene picker.</li>
-    <li>In the picker you can <strong>search</strong> by gene name, and
-    <strong>check or uncheck</strong> any gene.</li>
-    <li>Click <span class="ui">all</span> to show all genes (remove the filter),
-    or <span class="ui">none</span> to start a fresh selection from scratch.</li>
-    <li>Selected genes also have an <span class="ui">✕</span> button to remove
-    them individually from the active filter.</li>
-    <li>Click <span class="ui">clear</span> at any time to reset back to showing
-    all genes.</li>
+    ▼</span> if a filter is active) to open the gene picker.</li>
+    <li>Search by gene name and check or uncheck any gene.</li>
+    <li>Click <span class="ui">all</span> to remove the filter, or
+    <span class="ui">none</span> to start a fresh selection.</li>
+    <li>Selected genes have an <span class="ui">✕</span> button for individual
+    removal.</li>
+    <li>Click <span class="ui">clear</span> to reset to all genes.</li>
   </ul>
 
-  <p>You can also <strong>import</strong> and <strong>export</strong> gene–color
-  assignments as a CSV file using the corresponding buttons — handy for
-  reproducing a specific color scheme across sessions or sharing it with
-  collaborators.</p>
+  <p>Gene-color assignments can be <strong>imported</strong> and
+  <strong>exported</strong> as CSV using the corresponding buttons, useful for
+  reproducing a color scheme across sessions.</p>
 
   <div class="callout tip">
-    <strong class="label">Tip:</strong> The gene selection here is shared with
-    the "Gene Set" cell coloring mode. Select a set of marker genes, then switch
-    Cell Segments to "Gene Set" — you will see which cells express those genes,
-    while the Transcripts layer shows where each individual mRNA molecule is
-    located.
+    <strong class="label">Tip:</strong> The gene selection is shared with the
+    "Gene Set" cell coloring mode. Select marker genes, switch Cell Segments to
+    "Gene Set", and both the per-cell expression overlay and individual transcript
+    locations will reflect that selection simultaneously.
   </div>
 </section>
 
@@ -915,39 +857,30 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
 <!-- ── Tissue Graph ───────────────────────────────────────────────────── -->
 <section id="tissue-graph">
   <h2 class="section-title">Connectivity Layers</h2>
-  <p>These layers are only visible when <code>edges.parquet</code> is present
-  in your dataset folder (see Step 8). They visualize cell-cell communication
-  as a spatial graph overlaid on the tissue.</p>
+  <p>These layers require <code>edges.parquet</code> in the dataset folder (see
+  Step 8). They visualize cell-cell communication as a spatial graph overlaid
+  on the tissue.</p>
 
   <h3>Edge Density</h3>
-  <p>The <span class="ui">density</span> slider (shown as a percentage between
-  the Tissue Graph and Directed Edges sections) controls what fraction of
-  available edges are rendered at any given time. The default is <strong>10%
-  </strong>, which balances visual clarity with rendering performance.</p>
+  <p>The <span class="ui">density</span> slider controls what fraction of
+  available edges are rendered. The default is <strong>10%</strong>.</p>
   <ul>
-    <li>At <strong>low density</strong> (1–10%) you see a sparse, readable graph
-    — good for understanding overall connectivity patterns across the tissue.</li>
-    <li>At <strong>high density</strong> (50–100%) you see far more edges,
-    revealing densely connected hubs — but rendering may slow down for large
-    datasets.</li>
+    <li>At <strong>low density</strong> (1–10%): a sparse graph useful for
+    viewing overall connectivity patterns.</li>
+    <li>At <strong>high density</strong> (50–100%): many more edges, revealing
+    densely connected hubs. Rendering may slow for large datasets.</li>
   </ul>
 
   <div class="callout tip">
-    <strong class="label">Tip:</strong> Start at 10% to get a feel for the
-    landscape, then increase in specific regions of interest to see more detail.
+    <strong class="label">Tip:</strong> Start at 10%, then increase in specific
+    regions of interest to see more detail.
   </div>
 
   <h3>Tissue Graph</h3>
   <p>The <span class="ui">Tissue Graph</span> is a structural background layer
-  showing <em>which</em> cells are spatial neighbors, without any
-  mechanism-specific information. Each line simply means "these two cells are
-  close enough to potentially communicate." Use this layer to understand the
-  physical layout of the cell-cell neighborhood network.</p>
-  <ul>
-    <li>Toggle it on or off with the checkbox.</li>
-    <li>The opacity slider lets you use it as a subtle structural reference at
-    low opacity, or bring it to the foreground at full opacity.</li>
-  </ul>
+  showing which cells are spatial neighbors, independent of any LRM information.
+  Each line indicates spatial adjacency between two cells. Use the checkbox to
+  toggle it and the opacity slider to adjust its visual weight.</p>
 </section>
 
 
@@ -956,91 +889,83 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
   <h2 class="section-title">Directed Edges</h2>
   <p>The <span class="ui">Directed Edges</span> layer is the quantitative
   counterpart to the Tissue Graph. Each arrow represents a directed signal from
-  a <em>sending</em> cell to a <em>receiving</em> cell, with its appearance
-  determined by the ligand-receptor mechanisms (LRMs) active on that edge.</p>
+  a <em>sending</em> cell to a <em>receiving</em> cell, with appearance
+  determined by the active ligand-receptor mechanisms (LRMs).</p>
 
-  <p>When two cells communicate in both directions (A → B and B → A), both
-  arrows are shown offset slightly from each other — like two lanes of a
-  two-way road — making bidirectional signaling easy to see at a glance.</p>
+  <p>When two cells communicate in both directions (A &rarr; B and B &rarr; A),
+  both arrows are offset from each other, keeping bidirectional signals visually
+  distinct.</p>
 
   <h3>Style Controls</h3>
 
   <h4>Directional</h4>
-  <p>The <span class="ui">Directional</span> checkbox enables direction-aware
-  rendering: A → B and B → A are drawn as two offset parallel lines rather than
-  overlapping. This is on by default and almost always what you want.</p>
+  <p>The <span class="ui">Directional</span> checkbox renders A &rarr; B and
+  B &rarr; A as two offset parallel lines. On by default.</p>
 
   <h4>Arrowheads</h4>
-  <p>The <span class="ui">Arrowheads</span> checkbox adds directional arrow tips
-  at the receiving end of each edge (only available when Directional is on). When
-  arrowheads are active, two additional controls appear:</p>
+  <p>The <span class="ui">Arrowheads</span> checkbox adds directional tips at
+  the receiving end of each edge (available only when Directional is on). Two
+  additional controls appear when arrowheads are active:</p>
   <ul>
-    <li><span class="ui">arrow scale</span> slider — adjusts arrowhead size.</li>
-    <li><span class="ui">Full</span> / <span class="ui">Harpoon</span> radio
-    buttons — choose between a solid triangle arrowhead ("Full") or a single-sided
-    chevron ("Harpoon"). Harpoon style mimics the chemistry ⇌ notation and can be
-    cleaner for dense graphs.</li>
+    <li><span class="ui">arrow scale</span>: adjusts arrowhead size.</li>
+    <li><span class="ui">Full</span> / <span class="ui">Harpoon</span>: solid
+    triangle or single-sided chevron. Harpoon style mimics the chemistry
+    &#8652; notation and is often cleaner for dense graphs.</li>
   </ul>
 
   <h4>Autocrine</h4>
   <p>The <span class="ui">Autocrine</span> checkbox toggles visibility of
-  <em>autocrine</em> signals — cases where a cell sends a signal to itself —
-  rendered as rings. When on, two additional sliders appear:</p>
+  autocrine signals (cases where a cell signals to itself), rendered as rings.
+  When on, two sliders appear:</p>
   <ul>
-    <li><span class="ui">ring r</span> — radius of the autocrine ring.</li>
-    <li><span class="ui">ring w</span> — line width of the ring.</li>
+    <li><span class="ui">ring r</span>: ring radius.</li>
+    <li><span class="ui">ring w</span>: ring line width.</li>
   </ul>
 
   <h4>Width and Offset</h4>
   <ul>
-    <li><span class="ui">width</span> slider — thickness of all edge lines.</li>
-    <li><span class="ui">offset</span> slider (visible when Directional is on)
-    — how far apart the A → B and B → A lines are from each other.</li>
+    <li><span class="ui">width</span>: thickness of all edge lines.</li>
+    <li><span class="ui">offset</span> (visible when Directional is on):
+    perpendicular separation between the A &rarr; B and B &rarr; A lines.</li>
   </ul>
 
   <h3>Minimum Strength Filter</h3>
-  <p>The <span class="ui">min strength</span> slider filters out weak edges.
-  Only edges whose total interaction score meets the threshold are displayed.
-  Raising this threshold focuses the view on the strongest, most confident
-  cell-cell communications and can dramatically reduce visual clutter.</p>
+  <p>The <span class="ui">min strength</span> slider hides edges below a total
+  interaction score threshold. Raising it restricts the view to stronger
+  interactions and reduces visual clutter.</p>
 
   <h3>Edge Color</h3>
   <p>The <span class="ui">edge color</span> dropdown has three modes:</p>
   <ul>
-    <li><strong>Default (uniform)</strong> — all edges in a single neutral color.</li>
-    <li><strong>LRM Set (selected mechanisms)</strong> — edges are colored by
-    their total communication score across all currently active LRMs. Edges with
-    stronger, more concentrated communication appear at the "hot" end of the
-    palette. The color scale adapts automatically to the data visible in your
+    <li><strong>Default (uniform):</strong> all edges in a single neutral color.</li>
+    <li><strong>LRM Set (selected mechanisms):</strong> edges colored by total
+    communication score across active LRMs. The color scale adapts to the
     current viewport. A palette picker and clamp controls appear below.</li>
-    <li><strong>Metadata column</strong> — color edges by a metadata field such
-    as sending cell type or receiving cell type. Continuous fields get a gradient;
-    categorical fields get distinct colors with a legend.</li>
+    <li><strong>Metadata column:</strong> color edges by a metadata field such
+    as sending or receiving cell type. Continuous fields use a gradient palette;
+    categorical fields use distinct colors with a legend.</li>
   </ul>
 
   <h3>LRM Mechanisms Checklist</h3>
-  <p>This is where TissuePlex becomes particularly powerful for mechanistic
-  exploration. The <span class="ui">LRM Mechanisms</span> list shows every
-  ligand-receptor mechanism present in your <code>edges.parquet</code> data,
-  and lets you toggle individual mechanisms on or off.</p>
+  <p>The <span class="ui">LRM Mechanisms</span> list shows every ligand-receptor
+  mechanism in your <code>edges.parquet</code> data. Toggle individual mechanisms
+  on or off to focus the visualization.</p>
 
   <ul>
-    <li>A counter shows how many are currently active (e.g.
+    <li>A counter shows how many are active (e.g.
     <span class="ui">488 / 488 active</span>).</li>
     <li>The <span class="ui">all</span> and <span class="ui">none</span> buttons
-    quickly select or deselect everything.</li>
-    <li>Use the <strong>search box</strong> to filter the list by gene name —
-    for example, type "Tgfb" to find all TGF-β mechanisms instantly.</li>
-    <li>Toggle individual mechanisms using their checkboxes. Hiding an LRM
-    reduces each edge's "visible score" by that mechanism's contribution, and
-    may hide edges whose score drops to zero.</li>
+    select or deselect everything.</li>
+    <li>Use the <strong>search box</strong> to filter by gene name (e.g. type
+    "Tgfb" to find all TGF-&beta; mechanisms).</li>
+    <li>Hiding an LRM reduces each edge's visible score by that mechanism's
+    contribution; edges whose score reaches zero are hidden.</li>
   </ul>
 
   <div class="callout tip">
-    <strong class="label">Example:</strong> To ask "which cells are communicating
-    via TGF-β signaling?", click <span class="ui">none</span> to hide all LRMs,
-    then search for "Tgfb" and enable only the TGF-β mechanisms. Only edges driven
-    by TGF-β will remain visible.
+    <strong class="label">Example:</strong> To isolate TGF-&beta; signaling,
+    click <span class="ui">none</span> to hide all LRMs, search for "Tgfb",
+    then re-enable only those mechanisms.
   </div>
 </section>
 
@@ -1048,26 +973,23 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
 <!-- ── Clicking ───────────────────────────────────────────────────────── -->
 <section id="clicking">
   <h2 class="section-title">Clicking to Explore</h2>
-  <p>You can click on individual cells and edges to see detailed information
-  in floating info panels.</p>
+  <p>Clicking on cells or edges opens floating info panels with detailed
+  information.</p>
 
   <h3>Clicking on a Cell</h3>
-  <p>Click anywhere inside a cell's boundary to open the
-  <strong>Cell Info Panel</strong>. It shows the cell's barcode ID and all
-  available metadata values for that cell, including any supplemental columns
-  you added. The current color-by value is highlighted to make comparison easy.
-  Click anywhere on the empty canvas to dismiss the panel.</p>
+  <p>Click inside a cell to open the <strong>Cell Info Panel</strong>, which
+  shows the barcode ID, all metadata values for that cell, and the current
+  color-by value highlighted. Click on empty canvas to dismiss.</p>
 
   <h3>Clicking on an Edge or Tissue Graph Line</h3>
   <p>Click on any line in the Tissue Graph or Directed Edges layer to open the
-  <strong>Edge Info Panel</strong>, which shows the sending and receiving cell
-  barcodes and the top-scoring ligand-receptor mechanisms on that edge.</p>
+  <strong>Edge Info Panel</strong>, showing the sending and receiving cell
+  barcodes and the top-scoring LRMs for that edge.</p>
 
   <div class="callout tip">
     <strong class="label">Tip:</strong> When edges and cells overlap, a normal
-    click prioritizes the cell. Hold <strong>Shift</strong> while clicking to
-    prioritize edges instead — useful for inspecting a specific edge that passes
-    through a densely packed region.
+    click selects the cell. Hold <strong>Shift</strong> to prioritize edges
+    instead.
   </div>
 </section>
 
@@ -1076,53 +998,45 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
 <section id="split-screen">
   <h2 class="section-title">Split-Screen Mode</h2>
   <p>Split-screen mode divides the viewer into two independent side-by-side
-  panels. Each panel can be panned and zoomed to a different region of the
-  tissue — perfect for comparing two areas, or for looking at the same region
-  before and after applying a filter.</p>
+  panels, each with its own pan and zoom position. Use it to compare two tissue
+  regions or to view the same region with different filter settings.</p>
 
   <ul>
     <li>Click <span class="ui">⊞ Split</span> in the annotation toolbar to
     enter split-screen mode.</li>
     <li>Click <span class="ui">□ Single</span> to return to a single panel.</li>
     <li>Both panels share all layer settings (visibility, color-by, LRM filter,
-    etc.), but their pan and zoom positions are completely independent.</li>
+    etc.) but have independent pan and zoom positions.</li>
   </ul>
 
   <h3>Matching Zoom Between Panels</h3>
-  <p>The <span class="ui">⇔ Match</span> button in the toolbar makes the other
-  panel match your current panel's zoom level, while each panel stays centered
-  on its own region. This is useful when you want to compare two areas at
-  precisely the same magnification.</p>
+  <p>The <span class="ui">⇔ Match</span> button sets the other panel to your
+  current panel's zoom level while each panel remains centered on its own
+  region.</p>
 </section>
 
 
 <!-- ── Annotations ───────────────────────────────────────────────────── -->
 <section id="annotations">
   <h2 class="section-title">Annotation Tools</h2>
-  <p>The annotation toolbar at the top of the viewer offers three interaction
-  modes — click the button for the mode you want:</p>
+  <p>The annotation toolbar offers three interaction modes:</p>
 
   <ul>
-    <li><span class="ui">Pan</span> — the default mode. Click and drag to pan
-    the viewer.</li>
-    <li><span class="ui">⬡ Region</span> — draw a polygon region on the tissue.
-    Click to place each vertex; double-click to close the polygon and create the
-    region. Regions are colored and labeled, and remain visible on top of all
-    data layers. You can draw as many regions as you like.</li>
-    <li><span class="ui">⟷ Measure</span> — click two points on the tissue to
-    draw a measurement line and read off the distance between them in
-    micrometers.</li>
+    <li><span class="ui">Pan</span>: the default mode. Click and drag to pan.</li>
+    <li><span class="ui">⬡ Region</span>: draw a polygon on the tissue. Click
+    to place vertices; double-click to close. Regions are colored and labeled,
+    and remain visible on top of all data layers.</li>
+    <li><span class="ui">⟷ Measure</span>: click two points to measure the
+    distance between them in micrometers.</li>
   </ul>
 
   <p>The <span class="ui">Clear</span> button removes all regions and
   measurements at once.</p>
 
   <h3>Exporting Cells Within a Region</h3>
-  <p>Once a region is drawn, it appears in the Layer Panel's
-  <strong>Regions</strong> list. Each region has an
-  <strong>export</strong> button that saves a CSV file containing the barcodes
-  of all cells enclosed by that region. This is useful for extracting a
-  spatially defined subset of cells for downstream analysis in R.</p>
+  <p>Each drawn region appears in the Layer Panel's <strong>Regions</strong>
+  list. The export button saves a CSV of the barcodes of all enclosed cells,
+  for downstream analysis in R.</p>
 </section>
 
 
@@ -1132,26 +1046,23 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
   <p>TissuePlex has a built-in image export that composites the morphology image
   and all visible data layers into a single PNG file.</p>
 
-  <p>Click the <span class="ui">Save PNG</span> button in the annotation
-  toolbar. TissuePlex will download a PNG named
-  <code>tissueplex_[timestamp].png</code> (or
-  <code>tissueplex_panel1_[timestamp].png</code> / <code>panel2_</code> in
-  split-screen mode) to your browser's default Downloads folder.</p>
+  <p>Click <span class="ui">Save PNG</span> in the annotation toolbar. The file
+  is saved to your Downloads folder as <code>tissueplex_[timestamp].png</code>
+  (or <code>tissueplex_panel1_[timestamp].png</code> in split-screen mode).</p>
 
   <h3>Tips for high-quality output</h3>
   <ul>
-    <li><strong>Zoom in</strong> before saving — the export captures the viewer
-    at its current resolution, so a more zoomed-in view captures finer detail.</li>
-    <li><strong>Maximize your browser window</strong> to get a larger canvas.</li>
-    <li><strong>Draw annotation regions or measurements</strong> before
-    exporting if you want to mark up the area of interest for a figure.</li>
-    <li><strong>Reduce opacity</strong> on layers you are not featuring so the
-    key layer stands out clearly.</li>
-    <li>For very high-resolution output, use Chrome's built-in full-page
-    screenshot: open DevTools (<code>⌘ Option I</code> on Mac or
-    <code>F12</code> on Windows), press <code>⌘ Shift P</code> (Mac) or
-    <code>Ctrl Shift P</code> (Windows), type "screenshot", and select
-    <strong>Capture screenshot</strong>.</li>
+    <li><strong>Zoom in</strong> before saving: the export captures the viewer
+    at its current resolution, so a more zoomed-in view contains finer detail.</li>
+    <li><strong>Maximize the browser window</strong> to increase canvas size.</li>
+    <li><strong>Draw annotation regions or measurements</strong> before exporting
+    to mark up the area of interest for a figure.</li>
+    <li><strong>Reduce opacity</strong> on background layers to make the
+    featured layer stand out.</li>
+    <li>For higher-resolution output, use Chrome's built-in screenshot: open
+    DevTools (<code>⌘ Option I</code> on Mac, <code>F12</code> on Windows),
+    press <code>⌘ Shift P</code> (Mac) or <code>Ctrl Shift P</code> (Windows),
+    type "screenshot", and select <strong>Capture screenshot</strong>.</li>
   </ul>
 </section>
 
@@ -1175,9 +1086,9 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
     </tr>
     <tr>
       <td>My dataset doesn't appear in the dropdown</td>
-      <td>Check that <code>DATA_PATH</code> points to the <em>parent</em> folder
-      (not the dataset folder itself), and that the dataset folder contains
-      the correct sentinel file (e.g. <code>experiment.xenium</code>).</td>
+      <td>Check that <code>DATA_PATH</code> points to the parent folder and that
+      the dataset folder contains the platform sentinel file (e.g.
+      <code>experiment.xenium</code>).</td>
     </tr>
     <tr>
       <td>Tissue Graph and Directed Edges don't appear in the panel</td>
@@ -1187,10 +1098,10 @@ the TissuePlex interface — what each one does and when you'd want to use it.</
     </tr>
     <tr>
       <td>My metadata columns don't appear in the Color-by dropdown</td>
-      <td>Check that your CSV is inside a folder named exactly
-      <code>cell-metadata</code> within the dataset folder, and that the file
-      has row names (barcodes) as its first column — R's default
-      <code>write.csv()</code> behavior handles this automatically.</td>
+      <td>Check that the CSV is in a folder named exactly
+      <code>cell-metadata</code> inside the dataset folder, with barcodes as
+      the first column. R's default <code>write.csv()</code> writes barcodes
+      there automatically.</td>
     </tr>
     <tr>
       <td>Transcripts are not showing</td>
