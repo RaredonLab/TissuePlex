@@ -103,6 +103,11 @@ docker compose up --build
 
 The `--build` flag rebuilds the images with any code changes. Your data and tile cache are unaffected.
 
+> **Windows note:** If you see a black screen or a browser console error about a wrong MIME type after updating, Docker may have used a stale build cache. Force a clean rebuild with:
+> ```bash
+> docker compose build --no-cache && docker compose up
+> ```
+
 ---
 
 ## Shared lab server
@@ -138,3 +143,5 @@ If `edges.parquet` is absent, the Edges layer is hidden — all other layers wor
 **Port conflict**: If port 3000 or 8000 is already in use, change the host ports in `docker-compose.yml` and rebuild.
 
 **Tile cache corruption**: Run `docker compose down -v` to clear the cache, then restart.
+
+**Black screen / MIME type error in browser console** (common on Windows after an update): Docker reused a stale build cache and the frontend is serving outdated files. Run `docker compose build --no-cache && docker compose up` to force a clean rebuild.
