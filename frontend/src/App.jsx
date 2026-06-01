@@ -1,4 +1,8 @@
-import React from "react";
+import React, { useEffect } from "react";
+
+/* eslint-disable no-undef */
+const APP_VERSION = __APP_VERSION__;
+/* eslint-enable no-undef */
 import Viewer from "./components/Viewer";
 import LayerPanel from "./components/LayerPanel";
 import CellInfoPanel from "./components/CellInfoPanel";
@@ -30,7 +34,14 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+export { APP_VERSION };
+
 export default function App() {
+  // Keep browser tab title in sync with the build version.
+  useEffect(() => {
+    document.title = `TissuePlex v${APP_VERSION}`;
+  }, []);
+
   return (
     <ErrorBoundary>
       <div style={{ display: "flex", width: "100%", height: "100%", background: "#1a1a1a" }}>

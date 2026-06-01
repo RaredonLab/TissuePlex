@@ -37,6 +37,61 @@ const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
 
 const VIEW_ID = "main";
 
+// ── Rotation helpers (pure, module-level) ─────────────────────────────────
+
+/**
+ * Build a column-major 4×4 deck.gl modelMatrix for CW rotation by angleDeg
+ * around pivot (cx, cy) in image pixel space.  Returns null at 0° (identity).
+ */
+function makeRotMatrix(angleDeg, cx, cy) {
+  if (!angleDeg) return null;
+  const theta = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(theta), sin = Math.sin(theta);
+  const tx = cx * (1 - cos) + cy * sin;
+  const ty = cy * (1 - cos) - cx * sin;
+  // prettier-ignore
+  return [cos, sin, 0, 0, -sin, cos, 0, 0, 0, 0, 1, 0, tx, ty, 0, 1];
+}
+
+/**
+ * Expand a viewport bbox to fully cover the corners of a rotated rectangle.
+ * At 0°/180° the bbox is unchanged; at other angles the box grows outward.
+ */
+function rotatedBbox(cx, cy, halfW, halfH, angleDeg) {
+  if (!angleDeg || angleDeg === 180) {
+    return { xmin: cx - halfW, ymin: cy - halfH, xmax: cx + halfW, ymax: cy + halfH };
+  }
+  const theta = (angleDeg * Math.PI) / 180;
+  const ac = Math.abs(Math.cos(theta)), as = Math.abs(Math.sin(theta));
+  const bw = halfW * ac + halfH * as;
+  const bh = halfW * as + halfH * ac;
+  return { xmin: cx - bw, ymin: cy - bh, xmax: cx + bw, ymax: cy + bh };
+}
+
+/**
+ * Inverse-rotate a point from rotated view space back to original image coords.
+ * Undoes the same CW rotation around (cx, cy) that makeRotMatrix applies.
+ */
+function inverseRotate(ix, iy, cx, cy, angleDeg) {
+  if (!angleDeg) return [ix, iy];
+  const theta = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(theta), sin = Math.sin(theta);
+  const dx = ix - cx, dy = iy - cy;
+  return [cx + dx * cos + dy * sin, cy - dx * sin + dy * cos];
+}
+
+/**
+ * Forward-rotate a point from original image coords into rotated view space.
+ * Used to compute the screen positions of annotation labels after rotation.
+ */
+function forwardRotate(x, y, cx, cy, angleDeg) {
+  if (!angleDeg) return [x, y];
+  const theta = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(theta), sin = Math.sin(theta);
+  const dx = x - cx, dy = y - cy;
+  return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+}
+
 // ── ViewerPanel ───────────────────────────────────────────────────────────────
 // One instance per visible panel. Each has its own OSD + deck.gl + viewport.
 // All layer/color/filter settings come from the shared Zustand store.
@@ -57,10 +112,14 @@ function ViewerPanel({ panelIndex }) {
   // re-apply morphology visibility after each OSD (re)initialization.
   const [osdOpenCount, setOsdOpenCount] = useState(0);
 
+  // deck.gl modelMatrix for the current rotation + viewport pivot.
+  // Recomputed in syncDeckFromOSD on every viewport change and on rotation change.
+  const [rotModelMatrix, setRotModelMatrix] = useState(null);
+
   const {
     apiBase, dataset, activeImage,
     imageSize, setImageSize,
-    setViewport,
+    setViewport, setViewportActual,
     layers: layerState,
     platformCapabilities, setPlatformCapabilities,
     cellColorEnabled, colorBy, cellColorPalette, categoryColorOverrides,
@@ -86,7 +145,10 @@ function ViewerPanel({ panelIndex }) {
     transcriptFraction, setTranscriptStats,
     cellBoundaryFraction, setCellBoundaryStats,
     setLoadingKey,
+    panelRotations, setPanelRotation,
   } = useStore();
+
+  const panelRotation = panelRotations[panelIndex] ?? 0;
 
   // Per-panel viewport from store
   const viewport = useStore((s) => s.viewports[panelIndex]);
@@ -117,14 +179,27 @@ function ViewerPanel({ panelIndex }) {
 
       setDeckViewState((prev) => ({ ...prev, target: [cx, cy, 0], zoom }));
 
-      setViewport({
+      // Store the true OSD bounds (un-expanded) for the ⇔ Match zoom feature,
+      // which needs the actual visible width/height rather than the padded fetch bbox.
+      const actualBbox = {
         xmin: bounds.x * imgW,
         ymin: bounds.y * imgW,
-        xmax: (bounds.x + bounds.width) * imgW,
+        xmax: (bounds.x + bounds.width)  * imgW,
         ymax: (bounds.y + bounds.height) * imgW,
-      }, panelIndex);
+      };
+      setViewportActual(actualBbox, panelIndex);
+
+      // Expand bbox to cover the full rotated viewport rectangle.
+      // At 0° this is identical to the un-rotated bbox; at other angles
+      // the box grows so all visible data is fetched.
+      const halfW = (bounds.width  * imgW) / 2;
+      const halfH = (bounds.height * imgW) / 2;
+      setViewport(rotatedBbox(cx, cy, halfW, halfH, panelRotation), panelIndex);
+
+      // Recompute the deck.gl layer rotation matrix around the new viewport pivot.
+      setRotModelMatrix(makeRotMatrix(panelRotation, cx, cy));
     },
-    [imageSize, setViewport, panelIndex]
+    [imageSize, setViewport, setViewportActual, panelIndex, panelRotation, setRotModelMatrix]
   );
   useEffect(() => { syncRef.current = syncDeckFromOSD; }, [syncDeckFromOSD]);
   useEffect(() => { deckViewStateRef.current = deckViewState; }, [deckViewState]);
@@ -218,6 +293,15 @@ function ViewerPanel({ panelIndex }) {
     if (navItem) navItem.setOpacity(0.35);
   }, [morphologyVisible, morphologyOpacity, osdOpenCount]);
 
+  // ── Rotation — keep OSD tiles and deck.gl modelMatrix in sync ────────────
+  // Fires when rotation angle changes OR when OSD reinitialises (osdOpenCount).
+  useEffect(() => {
+    viewerRef.current?.viewport?.setRotation(panelRotation);
+    // Re-run syncDeckFromOSD via the stable ref so the modelMatrix pivot and
+    // expanded bbox are immediately recomputed for the new angle.
+    if (viewerRef.current) syncRef.current?.(viewerRef.current);
+  }, [panelRotation, osdOpenCount]); // eslint-disable-line
+
   // ── Match zoom (from "⇔ Match" button) ───────────────────────────────────
   // The source panel sets pendingZoomMatch = { fromPanel }. The target panel
   // (fromPanel !== panelIndex) keeps its own center but adopts the source's zoom.
@@ -227,7 +311,9 @@ function ViewerPanel({ panelIndex }) {
     if (fromPanel === panelIndex) return; // I'm the source — ignore
     if (!viewerRef.current || !imageSize.w) return;
 
-    const srcVp = useStore.getState().viewports[fromPanel];
+    // Use viewportActual (un-expanded OSD bounds) so rotation-padded fetch
+    // bboxes don't skew the matched zoom level.
+    const srcVp = useStore.getState().viewportActual[fromPanel];
     if (!srcVp) return;
 
     const imgW = imageSize.w;
@@ -335,11 +421,12 @@ function ViewerPanel({ panelIndex }) {
     if (!vs || !containerRef.current) return null;
     const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
     const scale = Math.pow(2, vs.zoom);
-    return [
-      vs.target[0] + (sx - cW / 2) / scale,
-      vs.target[1] + (sy - cH / 2) / scale,
-    ];
-  }, []);
+    // Project screen → rotated view space (same as un-rotated image space for deck.gl)
+    const ix = vs.target[0] + (sx - cW / 2) / scale;
+    const iy = vs.target[1] + (sy - cH / 2) / scale;
+    // Inverse-rotate back to original image coordinates
+    return inverseRotate(ix, iy, vs.target[0], vs.target[1], panelRotation);
+  }, [panelRotation]);
 
   // ── Annotation overlay events ─────────────────────────────────────────────
   const handleOverlayMouseMove = useCallback((e) => {
@@ -522,6 +609,7 @@ function ViewerPanel({ panelIndex }) {
   const cellFillLayer = new SolidPolygonLayer({
     id: "cell-segments-fill",
     data: cellPolygons,
+    modelMatrix: rotModelMatrix,
     visible: cellSegmentsVisible,
     opacity: cellSegmentsOpacity,
     getPolygon: (d) => d.polygon,
@@ -536,6 +624,7 @@ function ViewerPanel({ panelIndex }) {
   const cellOutlineLayer = new PathLayer({
     id: "cell-segments-outline",
     data: cellPolygons,
+    modelMatrix: rotModelMatrix,
     visible: cellSegmentsVisible,
     opacity: cellOutlineOpacity,
     getPath: (d) => [...d.polygon, d.polygon[0]],
@@ -553,6 +642,7 @@ function ViewerPanel({ panelIndex }) {
   const transcriptLayer = new ScatterplotLayer({
     id: "transcripts",
     data: visibleTranscripts,
+    modelMatrix: rotModelMatrix,
     visible: transcriptsVisible,
     opacity: transcriptsOpacity,
     getPosition: (d) => [d.x_location, d.y_location],
@@ -637,6 +727,7 @@ function ViewerPanel({ panelIndex }) {
   const tissueGraphLayer = new LineLayer({
     id: "tissue-graph",
     data: allDirectedEdges,
+    modelMatrix: rotModelMatrix,
     visible: tissueGraphVisible,
     opacity: tissueGraphOpacity,
     getSourcePosition: (d) => [d.x1, d.y1],
@@ -651,6 +742,7 @@ function ViewerPanel({ panelIndex }) {
   const edgeDirectedLayer = new LineLayer({
     id: "edges-directed",
     data: directedEdgesWithOffset,
+    modelMatrix: rotModelMatrix,
     visible: edgesVisible,
     opacity: edgesOpacity,
     getSourcePosition: (d) => edgeDirectional ? [d.sx, d.sy] : [d.x1, d.y1],
@@ -672,6 +764,7 @@ function ViewerPanel({ panelIndex }) {
   const edgeArrowheadLayer = new SolidPolygonLayer({
     id: "edges-arrowheads",
     data: arrowheadTriangles,
+    modelMatrix: rotModelMatrix,
     visible: edgesVisible && showArrowheads && edgeDirectional,
     opacity: edgesOpacity,
     getPolygon: (d) => d.polygon,
@@ -691,6 +784,7 @@ function ViewerPanel({ panelIndex }) {
   const edgeAutocrineLayer = new ScatterplotLayer({
     id: "edges-autocrine",
     data: autocrineCells,
+    modelMatrix: rotModelMatrix,
     visible: edgesVisible && showAutocrine,
     opacity: edgesOpacity,
     getPosition: (d) => [d.x, d.y],
@@ -713,6 +807,7 @@ function ViewerPanel({ panelIndex }) {
     new SolidPolygonLayer({
       id: `region-fill-${r.id}`,
       data: [r],
+      modelMatrix: rotModelMatrix,
       getPolygon: (d) => d.points,
       getFillColor: [...r.color, 40],
       filled: true,
@@ -724,6 +819,7 @@ function ViewerPanel({ panelIndex }) {
     new PathLayer({
       id: `region-outline-${r.id}`,
       data: [[...r.points, r.points[0]]],
+      modelMatrix: rotModelMatrix,
       getPath: (d) => d,
       getColor: [...r.color, 220],
       getWidth: 2,
@@ -737,6 +833,7 @@ function ViewerPanel({ panelIndex }) {
   const activeRegionLayer = new PathLayer({
     id: "active-region",
     data: activePts.length > 1 ? [activePts] : [],
+    modelMatrix: rotModelMatrix,
     getPath: (d) => d,
     getColor: [255, 255, 255, 200],
     getWidth: 2,
@@ -748,6 +845,7 @@ function ViewerPanel({ panelIndex }) {
   const activeVertexLayer = new ScatterplotLayer({
     id: "active-vertices",
     data: activeRegion,
+    modelMatrix: rotModelMatrix,
     getPosition: (d) => d,
     getRadius: 4,
     radiusMinPixels: 4,
@@ -757,6 +855,7 @@ function ViewerPanel({ panelIndex }) {
   const measureLineLayer = new LineLayer({
     id: "measure-lines",
     data: measurements,
+    modelMatrix: rotModelMatrix,
     getSourcePosition: (d) => d.p1,
     getTargetPosition: (d) => d.p2,
     getColor: [255, 220, 60, 220],
@@ -767,6 +866,7 @@ function ViewerPanel({ panelIndex }) {
   const measureEndpointLayer = new ScatterplotLayer({
     id: "measure-endpoints",
     data: measurements.flatMap((m) => [m.p1, m.p2]),
+    modelMatrix: rotModelMatrix,
     getPosition: (d) => d,
     getRadius: 5,
     radiusMinPixels: 5,
@@ -776,6 +876,7 @@ function ViewerPanel({ panelIndex }) {
   const measureFirstLayer = new ScatterplotLayer({
     id: "measure-first",
     data: measureFirstRef.current ? [measureFirstRef.current] : [],
+    modelMatrix: rotModelMatrix,
     getPosition: (d) => d,
     getRadius: 5,
     radiusMinPixels: 5,
@@ -797,10 +898,13 @@ function ViewerPanel({ panelIndex }) {
     if (!vs || !containerRef.current) return null;
     const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
     const scale = Math.pow(2, vs.zoom);
+    const [cx, cy] = vs.target;
     const mx = (m.p1[0] + m.p2[0]) / 2;
     const my = (m.p1[1] + m.p2[1]) / 2;
-    const sx = (mx - vs.target[0]) * scale + cW / 2;
-    const sy = (my - vs.target[1]) * scale + cH / 2;
+    // Forward-rotate image midpoint into the rotated view space before projecting
+    const [rx, ry] = forwardRotate(mx, my, cx, cy, panelRotation);
+    const sx = (rx - cx) * scale + cW / 2;
+    const sy = (ry - cy) * scale + cH / 2;
     const distUm = m.distPx * pixelSize;
     return { id: m.id, sx, sy, label: `${distUm.toFixed(1)} µm` };
   }).filter(Boolean);

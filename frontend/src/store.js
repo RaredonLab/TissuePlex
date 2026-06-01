@@ -22,11 +22,22 @@ export const useStore = create((set, get) => ({
 
   // ── Viewport (image pixel coords, kept in sync with OpenSeadragon) ────────
   // One entry per panel; panel 1 is only used in split-screen mode.
+  // viewports        — expanded bbox used by data-fetching hooks (may be larger than
+  //                    the true visible area when the panel is rotated, to ensure all
+  //                    visible corners are covered).
+  // viewportActual   — un-expanded OSD bounds (true visible area); used only by the
+  //                    ⇔ Match zoom feature so it matches the real viewport width.
   viewports: [null, null],
   setViewport: (viewport, panelIndex = 0) => set((s) => {
     const next = [...s.viewports];
     next[panelIndex] = viewport;
     return { viewports: next };
+  }),
+  viewportActual: [null, null],
+  setViewportActual: (viewport, panelIndex = 0) => set((s) => {
+    const next = [...s.viewportActual];
+    next[panelIndex] = viewport;
+    return { viewportActual: next };
   }),
 
   // ── Split-screen ──────────────────────────────────────────────────────────
@@ -39,6 +50,16 @@ export const useStore = create((set, get) => ({
   pendingZoomMatch: null,
   requestZoomMatch: (fromPanel) => set({ pendingZoomMatch: { fromPanel } }),
   clearZoomMatch: () => set({ pendingZoomMatch: null }),
+
+  // ── Per-panel rotation ────────────────────────────────────────────────────
+  // Rotation angle in degrees (0–359) for each panel.
+  // Applied to OSD tile display (setRotation) and deck.gl layer modelMatrix.
+  panelRotations: [0, 0],
+  setPanelRotation: (panelIndex, angle) => set((s) => {
+    const next = [...s.panelRotations];
+    next[panelIndex] = ((Math.round(angle) % 360) + 360) % 360;
+    return { panelRotations: next };
+  }),
 
   // ── Layer visibility ───────────────────────────────────────────────────────
   layers: {

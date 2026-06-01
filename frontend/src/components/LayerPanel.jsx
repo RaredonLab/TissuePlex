@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
+import { APP_VERSION } from "../App";
 import { legendGradient, QUAL_PALETTE } from "../utils/colormap";
 import { geneColor } from "../utils/geneColor";
 
@@ -137,12 +138,18 @@ export default function LayerPanel() {
   const unitLabel      = platformCapabilities?.unit_label ?? "cell";
   const unitTitle      = unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1);
 
-  const [appVersion, setAppVersion] = useState(null);
+  // Show the build-time version immediately; check the backend version via /health
+  // and append a warning if they diverge (useful during development).
+  const [backendVersion, setBackendVersion] = useState(null);
   useEffect(() => {
     fetch(`${apiBase}/health`).then((r) => r.ok ? r.json() : null).then((d) => {
-      if (d?.version) setAppVersion(d.version);
+      if (d?.version) setBackendVersion(d.version);
     }).catch(() => {});
   }, [apiBase]); // eslint-disable-line
+  const versionMismatch = backendVersion && backendVersion !== APP_VERSION;
+  const versionLabel = versionMismatch
+    ? `v${APP_VERSION} (api: v${backendVersion})`
+    : `v${APP_VERSION}`;
 
   return (
     <div style={{
@@ -184,16 +191,15 @@ export default function LayerPanel() {
 
       <RegionsSection />
 
-      {/* Version badge */}
-      {appVersion && (
-        <div style={{
-          marginTop: "auto", paddingTop: 16,
-          fontSize: 9, color: "#333", textAlign: "right",
-          fontFamily: "monospace", userSelect: "none",
-        }}>
-          TissuePlex v{appVersion}
-        </div>
-      )}
+      {/* Version badge — always visible, subtle */}
+      <div style={{
+        marginTop: "auto", paddingTop: 16,
+        fontSize: 9, color: versionMismatch ? "#a66" : "#444",
+        textAlign: "right", fontFamily: "monospace", userSelect: "none",
+        title: "TissuePlex build version",
+      }}>
+        TissuePlex {versionLabel}
+      </div>
     </div>
   );
 }
