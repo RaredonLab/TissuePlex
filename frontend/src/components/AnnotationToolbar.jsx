@@ -1,5 +1,6 @@
 /**
- * Floating annotation toolbar — Pan / Draw Region / Measure / Clear.
+ * Floating annotation toolbar — Pan / Draw Region / Measure / Clear
+ * + per-panel rotation controls (⟲ / angle input / ⟳).
  */
 import React from "react";
 import { useStore } from "../store";
@@ -20,14 +21,21 @@ const BTN = {
   cursor: "pointer",
 };
 
+const SEP = { width: 1, background: "#333", margin: "2px 2px" };
+
 export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
   const {
     annotationMode, setAnnotationMode, clearAnnotations, regions, measurements,
     panelCount, setPanelCount,
     requestZoomMatch,
+    panelRotations, setPanelRotation,
   } = useStore();
+
   const hasAnnotations = regions.length > 0 || measurements.length > 0;
   const isSplit = panelCount >= 2;
+  const rotation = panelRotations[panelIndex] ?? 0;
+
+  const rotate = (delta) => setPanelRotation(panelIndex, rotation + delta);
 
   return (
     <div style={{
@@ -37,6 +45,7 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
       transform: "translateX(-50%)",
       zIndex: 20,
       display: "flex",
+      alignItems: "center",
       gap: 2,
       background: "rgba(20,20,20,0.85)",
       border: "1px solid #333",
@@ -60,19 +69,65 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
         </button>
       ))}
 
-      <div style={{ width: 1, background: "#333", margin: "2px 2px" }} />
+      <div style={SEP} />
 
-      <button
-        title="Save screenshot as PNG"
-        onClick={onScreenshot}
-        style={{ ...BTN, color: "#888" }}
-      >
+      <button title="Save screenshot as PNG" onClick={onScreenshot} style={{ ...BTN, color: "#888" }}>
         Save PNG
       </button>
 
+      {/* ── Rotation controls ─────────────────────────────── */}
+      <div style={SEP} />
+      <button
+        title="Rotate 90° counter-clockwise"
+        onClick={() => rotate(-90)}
+        style={{ ...BTN, color: "#888", padding: "3px 6px" }}
+      >
+        ⟲
+      </button>
+      <input
+        type="number"
+        min="0"
+        max="359"
+        step="1"
+        value={rotation}
+        title="Rotation angle (0–359°)"
+        onChange={(e) => {
+          const v = parseFloat(e.target.value);
+          if (!isNaN(v)) setPanelRotation(panelIndex, v);
+        }}
+        style={{
+          width: 38,
+          background: rotation !== 0 ? "#1a2a1a" : "transparent",
+          border: "1px solid #444",
+          borderRadius: 3,
+          color: rotation !== 0 ? "#9f9" : "#888",
+          fontFamily: "monospace",
+          fontSize: 11,
+          textAlign: "center",
+          padding: "2px 2px",
+        }}
+      />
+      <span style={{ color: "#555", fontFamily: "monospace", fontSize: 11, marginLeft: 1 }}>°</span>
+      <button
+        title="Rotate 90° clockwise"
+        onClick={() => rotate(90)}
+        style={{ ...BTN, color: "#888", padding: "3px 6px" }}
+      >
+        ⟳
+      </button>
+      {rotation !== 0 && (
+        <button
+          title="Reset rotation to 0°"
+          onClick={() => setPanelRotation(panelIndex, 0)}
+          style={{ ...BTN, color: "#9f9", fontSize: 10, padding: "3px 5px" }}
+        >
+          ×
+        </button>
+      )}
+
       {panelIndex === 0 && (
         <>
-          <div style={{ width: 1, background: "#333", margin: "2px 2px" }} />
+          <div style={SEP} />
           <button
             title={isSplit ? "Return to single panel" : "Split view — compare two areas side by side"}
             onClick={() => setPanelCount(isSplit ? 1 : 2)}
@@ -90,7 +145,7 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
 
       {isSplit && (
         <>
-          <div style={{ width: 1, background: "#333", margin: "2px 2px" }} />
+          <div style={SEP} />
           <button
             title={panelIndex === 0
               ? "Navigate panel 2 to match this view"
@@ -105,7 +160,7 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
 
       {hasAnnotations && (
         <>
-          <div style={{ width: 1, background: "#333", margin: "2px 2px" }} />
+          <div style={SEP} />
           <button
             title="Clear all annotations and measurements"
             onClick={clearAnnotations}

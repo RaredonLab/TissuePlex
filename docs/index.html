@@ -390,6 +390,15 @@ cd TissuePlex</code></pre>
       back to this folder (<code>cd ~/Documents/TissuePlex</code>), run
       <code>git pull</code>, then <code>docker compose up --build</code>.
     </div>
+
+    <div class="callout warn">
+      <strong class="label">Windows users:</strong> After a <code>git pull</code>,
+      Docker Desktop sometimes reuses a stale build cache and serves an outdated
+      version of the app, resulting in a black screen with an error about a wrong
+      MIME type in the browser console. If this happens, force a clean rebuild:
+      <pre style="margin-top:.6rem;"><code>docker compose build --no-cache
+docker compose up</code></pre>
+    </div>
   </div>
 </div>
 
@@ -1083,6 +1092,11 @@ write.csv(
       <td>Blank or grey canvas after the dataset loads</td>
       <td>TissuePlex is still processing the morphology image. Wait 15–30 seconds
       and refresh the page.</td>
+    </tr>
+    <tr>
+      <td>Black screen after updating (especially on Windows)</td>
+      <td>Docker reused a stale build cache. Force a clean rebuild:<br>
+      <code>docker compose build --no-cache &amp;&amp; docker compose up</code></td>
     </tr>
     <tr>
       <td>My dataset doesn't appear in the dropdown</td>
