@@ -201,7 +201,6 @@ class EdgeReader:
     def query_grouped(
         self,
         bbox: Optional[tuple] = None,
-        excluded_lrms: Optional[list] = None,
         min_lrm_count: int = 1,
         density: float = 1.0,
         max_limit: int = 500_000,
@@ -209,6 +208,14 @@ class EdgeReader:
         """
         Return one row per directed edge (GROUP BY edge), pre-aggregated.
         ~500x fewer rows than query() for typical LRM-rich parquet files.
+
+        Returns structural columns (positions, metadata, lrm_count) plus
+        score_sum = SUM(score) over ALL LRMs — the unfiltered total used as
+        the default when no LRM filter is active.
+
+        LRM-filter-aware scores (visible_lrm_count / visible_score_sum) are
+        served separately by query_scores() so that LRM selection changes do
+        not require re-fetching the heavy structural data.
 
         density=1.0 returns all edges in the viewport (up to max_limit).
         density<1.0 uses bernoulli sampling so each edge is independently
@@ -246,34 +253,16 @@ class EdgeReader:
             if coord in schema_names:
                 agg_cols.append(f'FIRST("{coord}") AS "{coord}"')
 
-        # lrm_count         = total LRMs for this edge (tissue graph — show all pairs)
-        # visible_lrm_count = LRMs not excluded (directed edges — hide when 0)
-        # visible_score_sum = SUM(score) for non-excluded LRMs (client-side lrm_set coloring)
-        excl_params: list = []
-        if has_lrm and excluded_lrms:
-            ph = ", ".join("?" for _ in excluded_lrms)
+        # lrm_count  = total LRMs for this edge (tissue-graph structural layer)
+        # score_sum  = SUM(all scores) — default visible_score_sum when no LRM filter
+        if has_lrm:
             agg_cols.append("COUNT(*) AS lrm_count")
-            agg_cols.append(
-                f"SUM(CASE WHEN lrm NOT IN ({ph}) THEN 1 ELSE 0 END) AS visible_lrm_count"
-            )
-            if has_score:
-                agg_cols.append(
-                    f"SUM(CASE WHEN lrm NOT IN ({ph}) THEN score ELSE 0 END) AS visible_score_sum"
-                )
-            excl_params = list(excluded_lrms) * (2 if has_score else 1)
-        elif has_lrm:
-            agg_cols.append("COUNT(*) AS lrm_count")
-            agg_cols.append("COUNT(*) AS visible_lrm_count")
-            if has_score:
-                agg_cols.append("SUM(score) AS visible_score_sum")
         else:
             agg_cols.append("1 AS lrm_count")
-            agg_cols.append("1 AS visible_lrm_count")
+        if has_score:
+            agg_cols.append("SUM(score) AS score_sum")
 
         select = ", ".join(agg_cols)
-        # SELECT clause (lrm NOT IN ...) comes before WHERE in the SQL,
-        # so excl_params must be bound first, then where_params.
-        all_params = excl_params + where_params
 
         # Bernoulli sampling: each grouped edge row is included independently
         # at probability `density`. At density=1.0 no sampling clause is added
@@ -295,7 +284,7 @@ class EdgeReader:
         """
 
         with self._conn() as conn:
-            df = conn.execute(sql, all_params).df()
+            df = conn.execute(sql, where_params).df()
 
         for col in ("x1", "y1", "x2", "y2"):
             if col in df.columns:
@@ -303,6 +292,119 @@ class EdgeReader:
 
         if "is_autocrine" in df.columns:
             df["is_autocrine"] = df["is_autocrine"].astype(bool)
+
+        return [
+            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
+             for c, v in row.items()}
+            for row in df.to_dict(orient="records")
+        ]
+
+    def query_scores(
+        self,
+        bbox: Optional[tuple] = None,
+        included_lrms: Optional[list] = None,
+        excluded_lrms: Optional[list] = None,
+        max_limit: int = 500_000,
+    ) -> list[dict]:
+        """
+        Return per-edge LRM visibility scores: visible_lrm_count + visible_score_sum.
+        Much lighter than query_grouped — no coordinates or metadata columns.
+
+        Two query strategies, chosen by the caller based on set sizes:
+
+        included_lrms (preferred when visible set is small):
+            WHERE lrm IN (included_lrms) — DuckDB only reads matching rows,
+            giving roughly a (visible / total) fraction of the scan cost.
+            Edges absent from the result have visible_lrm_count = 0.
+
+        excluded_lrms (preferred when excluded set is small):
+            CASE WHEN lrm NOT IN (excluded_lrms) — full scan with per-row mask.
+            All bbox edges appear in the result.
+
+        The frontend picks whichever produces the smaller IN-list.
+        No density sampling — returns scores for all bbox edges so the
+        density-sampled structural edges always find their matching scores.
+        """
+        ps = self.pixel_size
+        schema_names = set(self._parquet_schema().names)
+        has_lrm   = "lrm"   in schema_names
+        has_score = "score" in schema_names
+
+        if not has_lrm:
+            return []
+
+        where_conditions: list[str] = []
+        where_params: list = []
+
+        if bbox:
+            xmin, ymin, xmax, ymax = bbox
+            if None not in (xmin, ymin, xmax, ymax):
+                xmin_u, ymin_u = xmin * ps, ymin * ps
+                xmax_u, ymax_u = xmax * ps, ymax * ps
+                where_conditions.append(
+                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
+                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
+                )
+                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
+                                      xmin_u, xmax_u, ymin_u, ymax_u])
+
+        where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+        if included_lrms is not None:
+            # Fast path: filter to visible rows only, then aggregate.
+            # Edges with 0 visible LRMs simply don't appear — the frontend
+            # treats missing entries as visible_lrm_count = 0.
+            ph = ", ".join("?" for _ in included_lrms)
+            lrm_filter = f" AND lrm IN ({ph})" if included_lrms else " AND FALSE"
+            full_where = (
+                f"WHERE {' AND '.join(where_conditions)}{lrm_filter}"
+                if where_conditions
+                else f"WHERE lrm IN ({ph})" if included_lrms else "WHERE FALSE"
+            )
+            score_col = "SUM(score) AS visible_score_sum" if has_score else "0 AS visible_score_sum"
+            sql = f"""
+                SELECT edge,
+                       COUNT(*) AS visible_lrm_count,
+                       {score_col}
+                FROM {self._from()}
+                {full_where}
+                GROUP BY edge
+                LIMIT {max_limit}
+            """
+            params = where_params + list(included_lrms)
+
+        else:
+            # Standard path: full scan with CASE WHEN exclusion mask.
+            excl = excluded_lrms or []
+            ph = ", ".join("?" for _ in excl)
+            vis_count = (
+                f"SUM(CASE WHEN lrm NOT IN ({ph}) THEN 1 ELSE 0 END)"
+                if excl else "COUNT(*)"
+            )
+            vis_score = ""
+            if has_score:
+                vis_score = (
+                    f", SUM(CASE WHEN lrm NOT IN ({ph}) THEN score ELSE 0 END) AS visible_score_sum"
+                    if excl else ", SUM(score) AS visible_score_sum"
+                )
+            # CASE WHEN placeholders come before WHERE placeholders in bind order
+            excl_params = list(excl) * (2 if (excl and has_score) else (1 if excl else 0))
+            sql = f"""
+                SELECT edge,
+                       {vis_count} AS visible_lrm_count
+                       {vis_score}
+                FROM {self._from()}
+                {where}
+                GROUP BY edge
+                LIMIT {max_limit}
+            """
+            params = excl_params + where_params
+
+        with self._conn() as conn:
+            df = conn.execute(sql, params).df()
+
+        if df.empty:
+            return []
 
         return [
             {c: (None if isinstance(v, float) and not math.isfinite(v) else v)

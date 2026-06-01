@@ -114,7 +114,6 @@ class EdgeGroupedQueryRequest(BaseModel):
     ymin: Optional[float] = None
     xmax: Optional[float] = None
     ymax: Optional[float] = None
-    excluded_lrms: Optional[List[Optional[str]]] = None
     min_strength: Optional[float] = None
     density: float = 1.0   # fraction of viewport edges to return (0.01–1.0)
 
@@ -125,17 +124,50 @@ def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
     """
     Return one row per directed edge (pre-aggregated by edge).
     ~500x fewer rows than /query for LRM-rich parquet files.
-    Accepts excluded_lrms list so visible_lrm_count reflects only visible mechanisms.
+    Returns structural columns + score_sum (unfiltered total).
+    LRM-filter-aware scores are served by /query-scores.
     """
     bbox = (body.xmin, body.ymin, body.xmax, body.ymax) \
         if body.xmin is not None else None
-    # Strip any null entries that can arise from null lrm values in the parquet
-    excluded = [x for x in (body.excluded_lrms or []) if x is not None]
     density = max(0.001, min(1.0, body.density))
     return _reader(dataset, edge_file).query_grouped(
         bbox=bbox,
-        excluded_lrms=excluded,
         density=density,
+    )
+
+
+class EdgeScoreQueryRequest(BaseModel):
+    xmin: Optional[float] = None
+    ymin: Optional[float] = None
+    xmax: Optional[float] = None
+    ymax: Optional[float] = None
+    # Exactly one of included_lrms / excluded_lrms should be provided.
+    # The frontend sends whichever produces the smaller IN-list:
+    #   included_lrms — when the visible set is small (fast WHERE lrm IN path)
+    #   excluded_lrms — when the excluded set is small (CASE WHEN path)
+    included_lrms: Optional[List[Optional[str]]] = None
+    excluded_lrms: Optional[List[Optional[str]]] = None
+
+
+@router.post("/{dataset}/query-scores")
+def query_edge_scores(dataset: str, body: EdgeScoreQueryRequest,
+                      edge_file: str = Query("edges.parquet")):
+    """
+    Return per-edge LRM visibility scores: {edge, visible_lrm_count, visible_score_sum}.
+    Lightweight complement to /query-grouped — only two aggregate columns, no coordinates.
+    Re-runs whenever hiddenLrms changes without requiring a full structural re-fetch.
+    """
+    bbox = (body.xmin, body.ymin, body.xmax, body.ymax) \
+        if body.xmin is not None else None
+    # Strip nulls that can arise from null lrm values in the parquet
+    included = [x for x in (body.included_lrms or []) if x is not None] \
+        if body.included_lrms is not None else None
+    excluded = [x for x in (body.excluded_lrms or []) if x is not None] \
+        if body.excluded_lrms is not None else None
+    return _reader(dataset, edge_file).query_scores(
+        bbox=bbox,
+        included_lrms=included,
+        excluded_lrms=excluded,
     )
 
 

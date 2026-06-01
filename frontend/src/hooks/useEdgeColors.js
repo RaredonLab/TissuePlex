@@ -7,6 +7,9 @@ import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
  * lrm_set mode: computed client-side from visible_score_sum in the edges array
  *               (no server call — eliminates the 13.8s global scan).
  * metadata mode: fetched from the backend (requires server-side GROUP BY + field lookup).
+ *               Debounced at 400ms so rapid field-switching collapses to a single
+ *               request for the final selected field. In-flight requests are aborted
+ *               when superseded.
  *
  * Returns:
  *   colorValues   Map<edge_id, [r,g,b,a]> or null when mode is "default"
@@ -28,6 +31,7 @@ export function useEdgeColors(
   });
   const [loading, setLoading] = useState(false);
   const timerRef = useRef(null);
+  const abortRef = useRef(null);
 
   // ── lrm_set: compute synchronously from edges.visible_score_sum ──────────
   const lrmSetResult = useMemo(() => {
@@ -59,23 +63,31 @@ export function useEdgeColors(
       if (edgeColorBy?.mode !== "lrm_set") {
         setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
       }
+      setLoading(false);
       return;
     }
 
     const { field } = edgeColorBy;
     if (!field) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
+      setLoading(false);
       return;
     }
 
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
+      // Cancel any in-flight request before starting a new one
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       setLoading(true);
       try {
         const res = await fetch(`${apiBase}/edges/${dataset}/edge-color-values`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "metadata", field }),
+          signal: ctrl.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -100,14 +112,23 @@ export function useEdgeColors(
           );
           setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() });
         }
-      } catch {
+      } catch (e) {
+        if (e.name === "AbortError") return; // silently ignore — a newer fetch is in flight
         setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null, categories: [], categoryColors: new Map() });
       } finally {
-        setLoading(false);
+        if (abortRef.current === ctrl) setLoading(false);
       }
-    }, 150);
+    }, 400);
     return () => clearTimeout(timerRef.current);
   }, [apiBase, dataset, edgeColorBy?.mode, edgeColorBy?.field, palette, enabled, clamp?.low, clamp?.high]);
+
+  // Abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(timerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   // Return lrm_set result immediately (synchronous), or the fetched metadata result
   if (edgeColorBy?.mode === "lrm_set") {

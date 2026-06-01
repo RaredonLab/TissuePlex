@@ -5,6 +5,11 @@ import { geneColor } from "../utils/geneColor";
 /**
  * Fetches per-cell color values and maps them to RGBA.
  *
+ * Debounced at 400ms so rapid sequential changes (e.g. toggling genes one by
+ * one) collapse into a single server request for the final state.
+ * In-flight requests are aborted when superseded, so intermediate results never
+ * overwrite the response for the user's actual target settings.
+ *
  * Modes:
  *   gene_set  — POST with selected genes; returns continuous sum
  *   metadata  — POST with field; backend auto-detects continuous vs. categorical
@@ -24,6 +29,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
   });
   const [loading, setLoading] = useState(false);
   const timerRef = useRef(null);
+  const abortRef = useRef(null);
 
   // rawCat: the last categorical response from the server { categories, values }
   // stored separately so color remapping doesn't trigger a re-fetch.
@@ -34,6 +40,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
     if (!enabled || !colorBy || colorBy.mode === "off") {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       setRawCat(null);
+      setLoading(false);
       return;
     }
 
@@ -46,16 +53,23 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
     if (mode === "gene_set" && (!genesToSend || genesToSend.length === 0)) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       setRawCat(null);
+      setLoading(false);
       return;
     }
     if (mode === "metadata" && !field) {
       setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       setRawCat(null);
+      setLoading(false);
       return;
     }
 
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
+      // Cancel any in-flight request before starting a new one
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       setLoading(true);
       try {
         const body = mode === "gene_set"
@@ -66,6 +80,7 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: ctrl.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -85,13 +100,14 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
           );
           setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() });
         }
-      } catch {
+      } catch (e) {
+        if (e.name === "AbortError") return; // silently ignore — a newer fetch is in flight
         setRawCat(null);
         setResult({ colorValues: null, type: "continuous", vmin: 0, vmax: 0, categories: [], categoryColors: new Map() });
       } finally {
-        setLoading(false);
+        if (abortRef.current === ctrl) setLoading(false);
       }
-    }, 150);
+    }, 400);
     return () => clearTimeout(timerRef.current);
   }, [apiBase, dataset, colorBy?.mode, colorBy?.field, allGenes, selectedGenes, palette, enabled, clamp?.low, clamp?.high]); // eslint-disable-line
 
@@ -113,6 +129,14 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
     );
     setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap });
   }, [rawCat, categoryColorOverrides, colorBy?.field]); // eslint-disable-line
+
+  // Abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(timerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   return { ...result, loading };
 }

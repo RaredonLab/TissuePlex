@@ -29,6 +29,7 @@ import { useEdgeColors } from "../hooks/useEdgeColors";
 import { geneColor } from "../utils/geneColor";
 import AnnotationToolbar from "./AnnotationToolbar";
 import EdgeInfoPanel from "./EdgeInfoPanel";
+import RenderingStatus from "./RenderingStatus";
 
 // Default edge color when no color mode is active
 const DEFAULT_EDGE_COLOR = [255, 150, 0, 160];
@@ -84,6 +85,7 @@ function ViewerPanel({ panelIndex }) {
     panelCount,
     transcriptFraction, setTranscriptStats,
     cellBoundaryFraction, setCellBoundaryStats,
+    setLoadingKey,
   } = useStore();
 
   // Per-panel viewport from store
@@ -420,7 +422,7 @@ function ViewerPanel({ panelIndex }) {
   const hasTranscripts = platformCapabilities?.has_transcripts ?? true;
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
-  const { transcripts, total: transcriptTotal } = useTranscripts(
+  const { transcripts, total: transcriptTotal, loading: transcriptsLoading } = useTranscripts(
     apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction, selectedGenes
   );
 
@@ -439,6 +441,7 @@ function ViewerPanel({ panelIndex }) {
   const {
     cells: cellPolygons,
     total: cellBoundaryTotal,
+    loading: cellBoundariesLoading,
   } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries, cellBoundaryFraction
   );
@@ -449,11 +452,12 @@ function ViewerPanel({ panelIndex }) {
     if (panelIndex === 0) setCellBoundaryStats(cellPolygons.length, cellBoundaryTotal);
   }, [cellPolygons.length, cellBoundaryTotal]); // eslint-disable-line
 
-  const { edges } = useEdges(
-    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible, edgeMinStrength, hiddenLrms, edgeDensity
+  const { edges, loading: edgesLoading } = useEdges(
+    apiBase, dataset, viewport, imageSize, edgesVisible || tissueGraphVisible,
+    edgeMinStrength, hiddenLrms, lrmCatalogue, edgeDensity
   );
 
-  const { colorValues, vmin: cellVmin, vmax: cellVmax } = useCellColors(
+  const { colorValues, vmin: cellVmin, vmax: cellVmax, loading: cellColorsLoading } = useCellColors(
     apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette, cellColorEnabled, cellColorClamp, categoryColorOverrides
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
@@ -462,7 +466,7 @@ function ViewerPanel({ panelIndex }) {
   }, [cellVmin, cellVmax]); // eslint-disable-line
 
   const edgeColorEnabled = edgeColorBy.mode !== "default";
-  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95 } = useEdgeColors(
+  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95, loading: edgeColorsLoading } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette, edgeColorEnabled, edgeColorClamp, edges
   );
   useEffect(() => {
@@ -476,6 +480,19 @@ function ViewerPanel({ panelIndex }) {
   }, [edgeP95]); // eslint-disable-line
 
   useEffect(() => { setSelectedEdge(null); }, [dataset]); // eslint-disable-line
+
+  // ── Loading state → store (for RenderingStatus badge) ────────────────────
+  // Aggregate all hook loading booleans into a single per-panel key so the
+  // badge appears whenever *any* layer for this panel is still fetching.
+  useEffect(() => {
+    const anyLoading = transcriptsLoading || cellBoundariesLoading || edgesLoading || cellColorsLoading || edgeColorsLoading;
+    setLoadingKey(`panel-${panelIndex}`, anyLoading);
+  }, [transcriptsLoading, cellBoundariesLoading, edgesLoading, cellColorsLoading, edgeColorsLoading, panelIndex, setLoadingKey]);
+
+  // Clear this panel's loading key when the panel unmounts (split ↔ single toggle)
+  useEffect(() => {
+    return () => setLoadingKey(`panel-${panelIndex}`, false);
+  }, []); // eslint-disable-line
 
   // ── deck.gl layers ────────────────────────────────────────────────────────
   const selectedId = selectedCell?.cell_id ?? null;
@@ -880,6 +897,9 @@ function ViewerPanel({ panelIndex }) {
 
       {/* Annotation toolbar — split toggle only shown on panel 0 */}
       <AnnotationToolbar onScreenshot={handleScreenshot} panelIndex={panelIndex} />
+
+      {/* Loading / computing badge — appears ~400ms after any fetch starts */}
+      <RenderingStatus panelIndex={panelIndex} />
 
       {/* Edge info panel — only rendered in panel 0 to avoid duplication */}
       {panelIndex === 0 && selectedEdge && (
