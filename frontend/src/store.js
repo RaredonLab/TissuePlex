@@ -223,6 +223,16 @@ export const useStore = create((set, get) => ({
   clearAnnotations: () =>
     set({ activeRegion: [], regions: [], measurements: [] }),
 
+  // ── Rendering / loading state ─────────────────────────────────────────────
+  // loadingKeys: Set of string keys currently in flight (one entry per panel).
+  // The status badge is visible whenever loadingKeys.size > 0.
+  loadingKeys: new Set(),
+  setLoadingKey: (key, loading) => set((s) => {
+    const next = new Set(s.loadingKeys);
+    if (loading) next.add(key); else next.delete(key);
+    return { loadingKeys: next };
+  }),
+
   // ── Transcript species filter ──────────────────────────────────────────────
   // selectedGenes: null = no filter (show all); Set<string> = allowlist (show only these).
   // The selection is dataset-scoped and persists across pan/zoom.

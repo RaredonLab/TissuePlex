@@ -4,6 +4,9 @@ import { useState, useEffect, useRef } from "react";
  * Fetches cell boundary vertices and groups them into polygon objects.
  * Returns { cells, total, effectiveFraction, loading, error }.
  *
+ * In-flight requests are aborted when a newer fetch supersedes them, so stale
+ * responses from prior viewport positions never overwrite current data.
+ *
  * fraction param:
  *   null   → auto mode: hook targets ~TARGET_CELLS rendered cells, adapting the
  *            fraction to the actual density seen in the last fetch.
@@ -25,13 +28,22 @@ export function useCellBoundaries(
   const [loading, setLoading]                 = useState(false);
   const [error, setError]                     = useState(null);
   const timerRef    = useRef(null);
+  const abortRef    = useRef(null);
   const prevTotalRef = useRef(SEED_TOTAL);   // running estimate of cells in viewport
 
   useEffect(() => {
-    if (!enabled || !dataset) return;
+    if (!enabled || !dataset) {
+      setLoading(false);
+      return;
+    }
 
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
+      // Cancel any in-flight request before starting a new one
+      if (abortRef.current) abortRef.current.abort();
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
+
       // Compute the fraction we'll actually send this round
       const autoFrac = Math.min(1.0, TARGET_CELLS / Math.max(1, prevTotalRef.current));
       const eff = fraction !== null
@@ -50,7 +62,7 @@ export function useCellBoundaries(
         } else {
           url += `?${fracParam}`;
         }
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: ctrl.signal });
         if (!res.ok) { setCells([]); setTotal(0); return; }
         const data = await res.json();
 
@@ -74,14 +86,23 @@ export function useCellBoundaries(
           Array.from(byCell.entries()).map(([cell_id, polygon]) => ({ cell_id, polygon }))
         );
       } catch (e) {
+        if (e.name === "AbortError") return; // silently ignore — a newer fetch is in flight
         setError(e.message);
       } finally {
-        setLoading(false);
+        if (abortRef.current === ctrl) setLoading(false);
       }
     }, 200);
 
     return () => clearTimeout(timerRef.current);
   }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction]);
+
+  // Abort in-flight request on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(timerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
 
   return { cells, total, effectiveFraction, loading, error };
 }
