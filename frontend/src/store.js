@@ -558,7 +558,7 @@ export const useStore = create((set, get) => ({
 
   // ── Annotations ───────────────────────────────────────────────────────────
   // annotationMode: current interaction mode
-  annotationMode: "pan", // "pan" | "region" | "measure"
+  annotationMode: "pan", // "pan" | "region" | "measure" | "rectangle"
   setAnnotationMode: (mode) => set({ annotationMode: mode }),
 
   // Every annotation belongs to the panel it was drawn in, and this is not
@@ -602,6 +602,37 @@ export const useStore = create((set, get) => ({
   removeMeasurement: (id) =>
     set((s) => ({ measurements: s.measurements.filter((m) => m.id !== id) })),
 
+  // exportRects: the figure-export framing rectangle, at most one per panel.
+  // each: { panelIndex, corners: [[x,y] x4] (image px, clockwise from top-left),
+  //         rotation } — the panel rotation in force when it was drawn.
+  //
+  // Corners are stored in image space, not view space, so the rectangle stays
+  // put when the user pans: the deck.gl rotation matrix pivots on the viewport
+  // centre, which moves on every pan, so anything stored in rotated view space
+  // would drift across the tissue.
+  //
+  // `rotation` is kept because the export reproduces the framing as drawn. Four
+  // image-space corners only read back as an axis-aligned rectangle when
+  // forward-rotated by the angle they were captured at; using the panel's
+  // current angle instead would silently skew the output if the user rotated
+  // after drawing.
+  exportRects: [],
+  setExportRect: (rect, panelIndex = 0) =>
+    set((s) => ({
+      exportRects: [
+        ...s.exportRects.filter((r) => (r.panelIndex ?? 0) !== panelIndex),
+        { ...rect, panelIndex },
+      ],
+    })),
+  clearExportRect: (panelIndex) =>
+    set((s) => ({
+      exportRects: panelIndex === undefined
+        ? []
+        : s.exportRects.filter((r) => (r.panelIndex ?? 0) !== panelIndex),
+    })),
+  exportRectForPanel: (i) =>
+    get().exportRects.find((r) => (r.panelIndex ?? 0) === i) ?? null,
+
   regionsForPanel: (i) =>
     get().regions.filter((r) => (r.panelIndex ?? 0) === i),
   measurementsForPanel: (i) =>
@@ -612,12 +643,14 @@ export const useStore = create((set, get) => ({
   // the index clears everything, which is what a dataset-level reset wants.
   clearAnnotations: (panelIndex) =>
     set((s) => (panelIndex === undefined
-      ? { activeRegion: [], activeRegionPanel: null, regions: [], measurements: [] }
+      ? { activeRegion: [], activeRegionPanel: null, regions: [], measurements: [],
+          exportRects: [] }
       : {
           activeRegion: s.activeRegionPanel === panelIndex ? [] : s.activeRegion,
           activeRegionPanel: s.activeRegionPanel === panelIndex ? null : s.activeRegionPanel,
           regions: s.regions.filter((r) => (r.panelIndex ?? 0) !== panelIndex),
           measurements: s.measurements.filter((m) => (m.panelIndex ?? 0) !== panelIndex),
+          exportRects: s.exportRects.filter((r) => (r.panelIndex ?? 0) !== panelIndex),
         })),
 
   // ── Rendering / loading state ─────────────────────────────────────────────

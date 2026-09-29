@@ -31,13 +31,35 @@ import { geneColor } from "../utils/geneColor";
 import AnnotationToolbar from "./AnnotationToolbar";
 import { DatasetPicker } from "./DatasetPicker";
 import EdgeInfoPanel from "./EdgeInfoPanel";
+import ExportDialog from "./ExportDialog";
 import RenderingStatus from "./RenderingStatus";
+import { renderRegionToPng } from "../utils/highResExport";
+import { withPngDpi, downloadBlob } from "../utils/pngExport";
 
 // Default edge color when no color mode is active
 const DEFAULT_EDGE_COLOR = [255, 150, 0, 160];
 const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
 
 const VIEW_ID = "main";
+
+/**
+ * The layers a figure export draws. Deliberately just the data layers: the
+ * neighbourhood highlight, the in-progress polygon, the measurement markers and
+ * the framing rectangle itself are interaction aids, not results, and none of
+ * them belong in a published figure. Committed regions and measurements are
+ * available behind the dialog's "include annotations" toggle.
+ */
+const EXPORT_DATA_LAYER_IDS = new Set([
+  "cell-segments-fill", "cell-segments-outline", "transcripts",
+  "tissue-graph", "edges-directed", "edges-arrowheads", "edges-autocrine",
+]);
+
+const isAnnotationLayerId = (id) =>
+  id.startsWith("region-fill-") || id.startsWith("region-outline-") ||
+  id.startsWith("measure-");
+
+/** Below this a drag is a stray click, not an attempt to reframe. */
+const MIN_DRAG_PX = 8;
 
 // Matches pyramid.BLANK_IMAGE_NAME: the placeholder canvas served for datasets
 // with no morphology of their own. Not a real image, so it is not shown as one.
@@ -122,6 +144,18 @@ function ViewerPanel({ panelIndex }) {
   // Recomputed in syncDeckFromOSD on every viewport change and on rotation change.
   const [rotModelMatrix, setRotModelMatrix] = useState(null);
 
+  // ── Rectangle framing for figure export ───────────────────────────────────
+  // The in-progress drag is LOCAL state and must stay that way. Writing it to
+  // the store on every mousemove would push a re-render through every sidebar
+  // section subscribed via usePanelSettings — the same storm IGNORED_KEYS
+  // exists to stop. Only the finished rectangle is shared.
+  const [dragRect, setDragRect] = useState(null); // {x0,y0,x1,y1} in screen px
+  const dragStartRef = useRef(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  // The layer list as of the last render, so the export can read it without
+  // being rebuilt or re-derived at click time.
+  const deckLayersRef = useRef([]);
+
   // ── Shared settings: one sidebar drives every panel ───────────────────────
   const {
     apiBase,
@@ -143,6 +177,7 @@ function ViewerPanel({ panelIndex }) {
     activeRegion, addRegionPoint, cancelActiveRegion, commitRegion,
     removeRegion,
     addMeasurement,
+    setExportRect, clearExportRect,
     panelCount,
     transcriptFraction,
     cellBoundaryFraction,
@@ -195,6 +230,11 @@ function ViewerPanel({ panelIndex }) {
     [allMeasurements, panelIndex]);
   // The in-progress outline is only drawn by the panel actually drawing it.
   const drawingHere = activeRegionPanel === null || activeRegionPanel === panelIndex;
+
+  const allExportRects = useStore((s) => s.exportRects);
+  const exportRect = useMemo(
+    () => allExportRects.find((r) => (r.panelIndex ?? 0) === panelIndex) ?? null,
+    [allExportRects, panelIndex]);
 
   // Zoom-match signal — fired when the Match button is clicked in either panel
   const pendingZoomMatch = useStore((s) => s.pendingZoomMatch);
@@ -531,6 +571,64 @@ function ViewerPanel({ panelIndex }) {
   }, [screenToData]);
 
   const handleOverlayMouseLeave = useCallback(() => setCursorPos(null), []);
+
+  // ── Rectangle framing ─────────────────────────────────────────────────────
+  // The rectangle is axis-aligned on SCREEN — that is what "export what you
+  // see" means once a panel is rotated — but its corners are stored in image
+  // space, which is pan-invariant. The two are reconciled at export time by
+  // forward-rotating the corners about the export centre: rotating the quad by
+  // the same angle it was captured at yields an axis-aligned rectangle again,
+  // whatever pivot is used.
+  const cornersFromDrag = useCallback((d) => {
+    if (!d) return null;
+    const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1);
+    const y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1);
+    const pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+      .map(([sx, sy]) => screenToData(sx, sy));
+    return pts.every(Boolean) ? pts : null;
+  }, [screenToData]);
+
+  const handleRectMouseDown = useCallback((e) => {
+    if (annotationMode !== "rectangle" || !containerRef.current) return;
+    const r = containerRef.current.getBoundingClientRect();
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    dragStartRef.current = { x: sx, y: sy };
+    setDragRect({ x0: sx, y0: sy, x1: sx, y1: sy });
+  }, [annotationMode]);
+
+  const handleRectMouseMove = useCallback((e) => {
+    if (!dragStartRef.current || !containerRef.current) return;
+    const r = containerRef.current.getBoundingClientRect();
+    setDragRect({
+      x0: dragStartRef.current.x, y0: dragStartRef.current.y,
+      x1: e.clientX - r.left, y1: e.clientY - r.top,
+    });
+  }, []);
+
+  const handleRectMouseUp = useCallback(() => {
+    if (!dragStartRef.current) return;
+    const d = dragRect;
+    dragStartRef.current = null;
+    setDragRect(null);
+    if (!d) return;
+    // A stray click is not an attempt to reframe; keep whatever rectangle is
+    // already there rather than wiping it.
+    if (Math.abs(d.x1 - d.x0) < MIN_DRAG_PX || Math.abs(d.y1 - d.y0) < MIN_DRAG_PX) return;
+    const corners = cornersFromDrag(d);
+    if (corners) setExportRect({ corners, rotation: panelRotation }, panelIndex);
+  }, [dragRect, cornersFromDrag, setExportRect, panelRotation, panelIndex]);
+
+  // Combined overlay move handler: the region tool needs the cursor position
+  // for its rubber-band preview, the rectangle tool needs the drag.
+  const handleOverlayMove = useCallback((e) => {
+    handleOverlayMouseMove(e);
+    handleRectMouseMove(e);
+  }, [handleOverlayMouseMove, handleRectMouseMove]);
+
+  const handleOverlayLeave = useCallback(() => {
+    handleOverlayMouseLeave();
+    handleRectMouseUp();
+  }, [handleOverlayMouseLeave, handleRectMouseUp]);
 
   const handleOverlaySingleClick = useCallback((sx, sy) => {
     const pt = screenToData(sx, sy);
@@ -1083,6 +1181,21 @@ function ViewerPanel({ panelIndex }) {
     pickable: false,
   });
 
+  // The framing rectangle: the live drag wins over the committed one so the
+  // preview tracks the cursor.
+  const previewCorners = dragRect ? cornersFromDrag(dragRect) : null;
+  const shownRectCorners = previewCorners ?? exportRect?.corners ?? null;
+  const exportRectLayer = new PathLayer({
+    id: "export-rect",
+    data: shownRectCorners ? [[...shownRectCorners, shownRectCorners[0]]] : [],
+    modelMatrix: rotModelMatrix,
+    getPath: (d) => d,
+    getColor: [255, 255, 255, 235],
+    getWidth: 2,
+    widthMinPixels: 1.5,
+    pickable: false,
+  });
+
   const deckLayers = [
     cellFillLayer, cellOutlineLayer, transcriptLayer,
     tissueGraphLayer, edgeDirectedLayer, edgeArrowheadLayer, edgeAutocrineLayer,
@@ -1092,7 +1205,101 @@ function ViewerPanel({ panelIndex }) {
     ...regionFillLayers, ...regionOutlineLayers,
     activeRegionLayer, activeVertexLayer,
     measureLineLayer, measureEndpointLayer, measureFirstLayer,
+    exportRectLayer,
   ];
+  deckLayersRef.current = deckLayers;
+
+  // ── Figure export ─────────────────────────────────────────────────────────
+  /**
+   * Resolve what to render: the drawn rectangle if there is one, otherwise the
+   * whole current view. Returns world-space geometry plus the on-screen scale,
+   * which is what tells the renderer how far every pixel-space clamp has to be
+   * stretched to keep the export faithful.
+   */
+  const getExportGeometry = useCallback(() => {
+    const vs = deckViewStateRef.current;
+    if (!vs || !containerRef.current) return null;
+    const screenScale = Math.pow(2, vs.zoom);
+
+    let corners, rotation;
+    if (exportRect?.corners?.length === 4) {
+      corners = exportRect.corners;
+      // The angle the rectangle was drawn at, not the panel's current one:
+      // rotating after drawing must not skew the output.
+      rotation = exportRect.rotation ?? 0;
+    } else {
+      const { width: cW, height: cH } = containerRef.current.getBoundingClientRect();
+      corners = [[0, 0], [cW, 0], [cW, cH], [0, cH]]
+        .map(([sx, sy]) => screenToData(sx, sy));
+      if (corners.some((c) => !c)) return null;
+      rotation = panelRotation;
+    }
+
+    const cx = corners.reduce((s, c) => s + c[0], 0) / 4;
+    const cy = corners.reduce((s, c) => s + c[1], 0) / 4;
+    const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+    // Is the rectangle still on screen?
+    //
+    // This matters more than it looks. The rectangle is stored in image space
+    // and survives panning, but the layers hold only what the *current*
+    // viewport fetched — every data hook is viewport-bounded. Exporting a
+    // rectangle the user has since panned away from would render whatever
+    // happens to be in memory and silently produce a half-empty figure that
+    // looks like a rendering bug rather than a stale frame.
+    const { width: vw, height: vh } = containerRef.current.getBoundingClientRect();
+    const [vcx, vcy] = vs.target;
+    const tol = 2;
+    const inView = corners.every(([x, y]) => {
+      const [rx, ry] = forwardRotate(x, y, vcx, vcy, panelRotation);
+      const sx = (rx - vcx) * screenScale + vw / 2;
+      const sy = (ry - vcy) * screenScale + vh / 2;
+      return sx >= -tol && sy >= -tol && sx <= vw + tol && sy <= vh + tol;
+    });
+
+    return {
+      center: [cx, cy],
+      widthWorld: dist(corners[0], corners[1]),
+      heightWorld: dist(corners[0], corners[3]),
+      rotation,
+      screenScale,
+      inView,
+      // Re-pivot the rotation on the export centre; the on-screen matrix pivots
+      // on the viewport centre, which is somewhere else entirely.
+      modelMatrix: makeRotMatrix(rotation, cx, cy),
+    };
+  }, [exportRect, screenToData, panelRotation]);
+
+  const handleExport = useCallback(async (opts) => {
+    const geom = getExportGeometry();
+    if (!geom) throw new Error("The view is not ready yet — try again in a moment.");
+
+    const chosen = deckLayersRef.current.filter((l) => {
+      const id = l?.id ?? "";
+      if (EXPORT_DATA_LAYER_IDS.has(id)) return l.props?.visible !== false;
+      if (opts.includeAnnotations && isAnnotationLayerId(id)) return true;
+      return false;
+    });
+    if (chosen.length === 0) throw new Error("No visible data layers to export.");
+
+    const { blob, width, height } = await renderRegionToPng({
+      layers: chosen,
+      center: geom.center,
+      widthWorld: geom.widthWorld,
+      heightWorld: geom.heightWorld,
+      screenScale: geom.screenScale,
+      modelMatrix: geom.modelMatrix,
+      outWidth: opts.outWidth,
+      background: opts.background,
+      scaleBar: opts.scaleBar,
+      pixelSize,
+    });
+
+    const tagged = await withPngDpi(blob, opts.dpi);
+    const panelTag = panelCount > 1 ? `panel${panelIndex + 1}_` : "";
+    downloadBlob(tagged, `tissueplex_${dataset ?? "figure"}_${panelTag}${Date.now()}.png`);
+    return { width, height };
+  }, [getExportGeometry, pixelSize, panelCount, panelIndex, dataset]);
 
   // ── Measurement label positions (screen coords) ───────────────────────────
   const measureLabels = measurements.map((m) => {
@@ -1114,7 +1321,8 @@ function ViewerPanel({ panelIndex }) {
   // ── Render ────────────────────────────────────────────────────────────────
   const inAnnotationMode = annotationMode !== "pan";
   const cursor = annotationMode === "region" ? "crosshair"
-    : annotationMode === "measure" ? "cell" : "default";
+    : annotationMode === "measure" ? "cell"
+    : annotationMode === "rectangle" ? "crosshair" : "default";
 
   return (
     <div style={{ flex: 1, height: "100%", position: "relative", overflow: "hidden", minWidth: 0 }}>
@@ -1151,8 +1359,10 @@ function ViewerPanel({ panelIndex }) {
           }}
           onClick={handleOverlayClick}
           onDoubleClick={handleOverlayDblClick}
-          onMouseMove={handleOverlayMouseMove}
-          onMouseLeave={handleOverlayMouseLeave}
+          onMouseDown={handleRectMouseDown}
+          onMouseUp={handleRectMouseUp}
+          onMouseMove={handleOverlayMove}
+          onMouseLeave={handleOverlayLeave}
         />
       )}
 
@@ -1202,7 +1412,24 @@ function ViewerPanel({ panelIndex }) {
       )}
 
       {/* Annotation toolbar — split toggle only shown on panel 0 */}
-      <AnnotationToolbar onScreenshot={handleScreenshot} panelIndex={panelIndex} />
+      <AnnotationToolbar
+        onScreenshot={handleScreenshot}
+        onExport={() => setExportOpen(true)}
+        panelIndex={panelIndex}
+      />
+
+      {exportOpen && (
+        <ExportDialog
+          onClose={() => setExportOpen(false)}
+          onExport={handleExport}
+          geometry={getExportGeometry()}
+          hasRect={!!exportRect}
+          pixelSize={pixelSize}
+          unitLabel={platformCapabilities?.unit_label}
+          panelRotation={panelRotation}
+          onClearRect={() => clearExportRect(panelIndex)}
+        />
+      )}
 
       {/* Loading / computing badge — appears ~400ms after any fetch starts */}
       <RenderingStatus panelIndex={panelIndex} />

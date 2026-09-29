@@ -1292,7 +1292,7 @@ write.csv(
 <!-- ── Annotations ───────────────────────────────────────────────────── -->
 <section id="annotations">
   <h2 class="section-title">Annotation Tools</h2>
-  <p>The annotation toolbar offers three interaction modes:</p>
+  <p>The annotation toolbar offers four interaction modes:</p>
 
   <ul>
     <li><span class="ui">Pan</span>: the default mode. Click and drag to pan.</li>
@@ -1301,11 +1301,21 @@ write.csv(
     and remain visible on top of all data layers.</li>
     <li><span class="ui">⟷ Measure</span>: click two points to measure the
     distance between them in micrometers.</li>
+    <li><span class="ui">▭ Rectangle</span>: drag a rectangle to frame an area
+    for high-resolution figure export. See
+    <a href="#exporting">Saving Images</a>.</li>
   </ul>
 
-  <p>The <span class="ui">Clear</span> button removes the regions and
-  measurements belonging to <em>that panel</em> — each panel has its own toolbar,
-  so clearing one leaves the other's work alone.</p>
+  <div class="note">
+    <p><strong>⬡ Region and ▭ Rectangle do different things.</strong> A region
+    selects <em>cells</em>, and its output is a CSV of barcodes. A rectangle
+    frames an <em>image</em>, and its output is a PNG. Drawing a region does not
+    affect what an export contains, and vice versa.</p>
+  </div>
+
+  <p>The <span class="ui">Clear</span> button removes the regions, measurements
+  and export rectangle belonging to <em>that panel</em> — each panel has its own
+  toolbar, so clearing one leaves the other's work alone.</p>
 
   <div class="note">
     <p>In split-screen mode, regions and measurements belong to the panel they
@@ -1325,26 +1335,85 @@ write.csv(
 <!-- ── Saving images ──────────────────────────────────────────────────── -->
 <section id="exporting">
   <h2 class="section-title">Saving Images</h2>
-  <p>TissuePlex has a built-in image export that composites the morphology image
-  and all visible data layers into a single PNG file.</p>
+  <p>There are two ways to save an image, for two different purposes.</p>
 
-  <p>Click <span class="ui">Save PNG</span> in the annotation toolbar. The file
-  is saved to your Downloads folder as <code>tissueplex_[timestamp].png</code>
-  (or <code>tissueplex_panel1_[timestamp].png</code> in split-screen mode).</p>
+  <h3>Save PNG — a quick screenshot</h3>
+  <p>Click <span class="ui">Save PNG</span> in the annotation toolbar. This
+  composites the morphology image and all visible data layers exactly as shown,
+  at your screen's resolution, and saves it as
+  <code>tissueplex_[timestamp].png</code> (or
+  <code>tissueplex_panel1_[timestamp].png</code> in split-screen mode). Good for
+  slides, notes and sharing a view. Its resolution is limited to the size of the
+  viewer on screen, so it is not usually enough for print.</p>
 
-  <h3>Tips for high-quality output</h3>
+  <h3>Export… — a publication figure</h3>
+  <p>Click <span class="ui">Export…</span> to render the data layers again at
+  whatever resolution you ask for. Because the layers are geometry — lines,
+  polygons and points — they are redrawn at the output size rather than
+  enlarged, so they stay sharp at any resolution.</p>
+
+  <ol>
+    <li>Optionally choose <span class="ui">▭ Rectangle</span> and drag to frame
+    the area you want. Without a rectangle, the whole current view is used.</li>
+    <li>Click <span class="ui">Export…</span>.</li>
+    <li>Set the output <strong>width in pixels</strong> and the <strong>DPI</strong>,
+    then click <span class="ui">Export PNG</span>.</li>
+  </ol>
+
+  <div class="note">
+    <p><strong>Resolution is pixels, not DPI.</strong> A PNG contains pixels; DPI
+    only means something once you fix a print width. So decide the width in
+    inches your figure will be printed at, multiply by the DPI you need, and use
+    that as the pixel width:</p>
+    <ul>
+      <li>Single column, 3.5&nbsp;in at 500&nbsp;DPI → <strong>1750&nbsp;px</strong></li>
+      <li>Double column, 7&nbsp;in at 500&nbsp;DPI → <strong>3500&nbsp;px</strong></li>
+      <li>Double column, 7&nbsp;in at 600&nbsp;DPI → <strong>4200&nbsp;px</strong></li>
+    </ul>
+    <p>Buttons for these three are in the dialog. The DPI you enter is also
+    written into the PNG's metadata, which is what journal submission systems
+    read when they check a figure's resolution.</p>
+  </div>
+
+  <h4>Options</h4>
   <ul>
-    <li><strong>Zoom in</strong> before saving: the export captures the viewer
-    at its current resolution, so a more zoomed-in view contains finer detail.</li>
-    <li><strong>Maximize the browser window</strong> to increase canvas size.</li>
-    <li><strong>Draw annotation regions or measurements</strong> before exporting
-    to mark up the area of interest for a figure.</li>
-    <li><strong>Reduce opacity</strong> on background layers to make the
-    featured layer stand out.</li>
-    <li>For higher-resolution output, use Chrome's built-in screenshot: open
-    DevTools (<code>⌘ Option I</code> on Mac, <code>F12</code> on Windows),
-    press <code>⌘ Shift P</code> (Mac) or <code>Ctrl Shift P</code> (Windows),
-    type "screenshot", and select <strong>Capture screenshot</strong>.</li>
+    <li><strong>Background</strong> — black by default, matching the viewer.
+    Transparent is useful for compositing in Illustrator or Photoshop; white
+    suits a printed page. Some submission systems flatten transparency
+    unpredictably, so choose a solid background if you are unsure.</li>
+    <li><strong>Scale bar</strong> — drawn in a margin band <em>below</em> the
+    plot rather than over the tissue, at a rounded length (50&nbsp;µm,
+    100&nbsp;µm, 500&nbsp;µm…) computed from the dataset's pixel size.</li>
+    <li><strong>Include annotations</strong> — off by default; turn it on to
+    draw your regions and measurements into the figure.</li>
+  </ul>
+
+  <div class="note">
+    <p><strong>The morphology image is not included in Export….</strong> It is a
+    photograph, so unlike the data layers it cannot be redrawn at a higher
+    resolution than it was acquired at, and including it would cap the whole
+    figure at the source image's detail. Use <span class="ui">Save PNG</span> if
+    you need the tissue image in the picture, or export the data layers on a
+    transparent background and composite them over the morphology yourself.</p>
+  </div>
+
+  <h4>Points to watch</h4>
+  <ul>
+    <li><strong>Sampling is not changed for you.</strong> The figure shows
+    exactly what the panel shows, including the edge density and transcript
+    sampling in effect. If you want the full edge set in a figure, raise the
+    density slider before exporting — and record the value you used in the
+    legend.</li>
+    <li><strong>Keep the rectangle on screen.</strong> Data is loaded for the
+    current view, so if you pan away from your rectangle the export would be
+    missing whatever is off screen. The dialog warns you when this happens.</li>
+    <li><strong>Line weights are preserved, not re-tuned.</strong> Strokes are
+    scaled so the export matches what you approved on screen. A weight that
+    reads well on a monitor may still look heavy or thin in print — adjust
+    <span class="ui">edge width</span> for the figure and export again.</li>
+    <li><strong>If you rotate after drawing the rectangle</strong>, the export
+    keeps the orientation the rectangle was drawn at. Redraw it to use the new
+    angle.</li>
   </ul>
 </section>
 
