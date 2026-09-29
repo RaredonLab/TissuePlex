@@ -154,8 +154,10 @@ frontend/
                              dataset/image picker, transcript species filter
       CellInfoPanel.jsx      Floating panel on cell click; shows color-by value highlight
       EdgeInfoPanel.jsx      Floating panel on edge/autocrine click
-      AnnotationToolbar.jsx  Region drawing + measurement tools; ⊞ Split / □ Single toggle;
+      AnnotationToolbar.jsx  Region drawing + measurement tools; ▭ Rectangle framing;
+                             Save PNG / Export…; ⊞ Split / □ Single toggle;
                              ⇔ Match zoom; per-panel rotation (⟲ / angle / ⟳)
+      ExportDialog.jsx       Figure export: output size, DPI tag, background, scale bar
       RenderingStatus.jsx    Per-panel loading badge, driven by the store's loadingKeys set
     hooks/
       useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
@@ -166,6 +168,9 @@ frontend/
     utils/
       colormap.js            Palette definitions (viridis/plasma/magma/inferno) + valueToColor()
       geneColor.js           Deterministic gene → color mapping
+      highResExport.js       Offscreen deck.gl render of one region at arbitrary size.
+                             Its stroke-width scaling is inert — see Figure Export
+      pngExport.js           PNG pHYs (DPI) tagging, blob download, scale-bar rounding
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -480,6 +485,11 @@ makes that consumer silently stale, which is far worse than a redundant render.
 - **LRM filter**: `hiddenLrms` (Set of "ligand|receptor" strings), `lrmCatalogue`
 - **Selection**: `selectedCell`, `selectedEdge`
 - **Annotations**: `regions`, `measurements`, `activeRegion`, `annotationMode`
+  (`pan` / `region` / `measure` / `rectangle`)
+- **Figure export**: `exportRects` — at most one framing rectangle per panel,
+  `{panelIndex, corners (image px), rotation}`. Panel-scoped like annotations;
+  see the Figure Export section for why the corners are stored in image space
+  and why the rotation travels with them.
 - **Sampling**: `transcriptFraction` (default 0.1) and `cellBoundaryFraction`
   (`null` = auto) control how much of the viewport each hook requests;
   `transcriptStats` / `cellBoundaryStats` hold live `{shown, total}` counts that the
@@ -765,6 +775,141 @@ The rotation effect depends on `[panelRotation, osdOpenCount]` so it re-applies 
 OSD reinitialization, not just on an angle change.
 
 ---
+
+## Figure Export (▭ Rectangle + high-resolution PNG)
+
+Two separate capture paths, deliberately not merged:
+
+- **Save PNG** — unchanged one-click capture of the panel at screen resolution,
+  compositing the OSD morphology canvas and the deck.gl canvas. Fine for a slide
+  or a bug report; it cannot exceed the browser canvas size.
+- **Export…** — opens `ExportDialog` and re-renders the region offscreen at any
+  pixel size. This is the publication path.
+
+**"500 DPI" is not a property a PNG has.** DPI only becomes a number once a print
+width is fixed, so the dialog's real control is *output pixel width* — 7 in at
+500 DPI is 3,500 px. The DPI field fixes the intended print size and is written
+into the file's `pHYs` chunk (`utils/pngExport.js`) because journals run
+automated resolution checks against that metadata; a genuinely high-resolution
+figure with no tag still gets rejected. Both are shown together with the
+resulting print size so the relationship stays visible.
+
+### Stroke width does not scale with export size — known, measured, unfixed
+
+Every data layer constrains stroke width / dot radius in *screen* pixels —
+`widthMinPixels 0.5` … `widthMaxPixels 8`, `radiusMaxPixels 60`, and so on. At
+ordinary zoom those clamps, not the world-space widths, are what decide how thick
+a line actually looks.
+
+`highResExport.js::scaleClampProps` is *intended* to multiply every pixel clamp by
+`exportScale / screenScale` so an export is a faithful enlargement.
+**It does not currently take effect.** Measured on two exports of the same region,
+mean stroke width (ink area ÷ line crossings, which is insensitive to how dense
+the graph is):
+
+| luminance threshold | 1250 px | 1750 px | ratio |
+|---|---|---|---|
+| > 10 | 9.44 px | 8.48 px | 0.90 |
+| > 25 | 5.87 px | 5.05 px | 0.86 |
+| > 60 | 3.65 px | 3.52 px | 0.97 |
+
+The ratio would be **1.40** if the clamps were being scaled, and **1.00** if
+widths were fixed in output pixels. It is ~1.0, so **strokes are pinned in output
+pixels** and the clamp scaling is inert. The cause was not identified; the likely
+suspect is the `cloneLayer` path in `highResExport.js` not applying the overrides
+under deck.gl v9. Do not trust `scaleClampProps` to be doing anything until this
+is re-measured.
+
+Practical consequences, in order of how likely they are to bite:
+
+- **The bigger the export, the thinner the lines look relative to the image.**
+  Line weight in print is `pixels / DPI`, so at a fixed print width, more pixels
+  means a physically thinner stroke.
+- **Panels exported at different pixel widths have mismatched line weights.** This
+  is the one that matters for a multi-panel figure, and nothing in the UI explains
+  it. Export every panel of one figure at the same pixel width.
+- It is **benign, even preferable, for a crop-later workflow**: a crop out of a
+  large export keeps sensible line weight, where proportional scaling would make
+  crops chunky.
+
+**The tempting fix is wrong.** deck.gl's numeric `useDevicePixels` would scale
+everything automatically, but it anchors line weight to *export* width — the wrong
+anchor when the exported image is cropped before use. The right fix is to make
+line weight an **explicit control in the export dialog**, decoupled from both the
+screen view and the pixel count. Not built.
+
+Until then, edge clarity is tuned through **edge opacity, edge density, and
+switching the tissue graph off** — not through export size. Measured on a real
+export: dropping the tissue graph and raising edge opacity moved the grey:coloured
+ink ratio from 38:1 to 1.3:1, which is a far larger effect than any line-width
+change would have been.
+
+World quantities (`edgeOffset`, arrowhead length, polygons) do scale correctly on
+their own, and always did — they are geometry, not clamps.
+
+**The check to run** after touching any of this: export the same region at two
+pixel widths and compare mean stroke width. The ratio tells you unambiguously
+which regime you are in.
+
+**Vector layers only; no morphology.** The data layers are geometry, so
+re-rendering them at 3,500 px is genuinely sharp. The morphology raster is not:
+it cannot exceed the source OME-TIFF's native pixels for that region, so
+including it would cap the whole figure at the tile pyramid's resolution.
+Compositing it properly means a hidden OSD instance fetching the right pyramid
+level, which was deliberately deferred rather than shipping a blurry upscale.
+The background is painted on the 2D composite canvas rather than through deck's
+`clearColor`, which keeps the result identical across deck.gl versions and lets
+the scale-bar margin match. Default is **black**, matching the live viewer.
+
+**Sampling is untouched.** `edgeDensity` and the transcript / boundary fractions
+apply exactly as displayed, because the export draws the layers already in
+memory. Sampling is seeded and edge density is a deterministic hash, so the
+export reproduces the panel rather than drawing a fresh random subset. The
+dialog reports the region size so the figure legend can record it.
+
+**Rotation: "export what you see."** The rectangle is axis-aligned on *screen*,
+but its corners are stored in **image space**, which is pan-invariant — the deck
+rotation matrix pivots on the viewport centre, which moves on every pan, so
+anything stored in rotated view space would drift across the tissue. The two are
+reconciled by forward-rotating the corners about the export centre: rotating the
+quad by the angle it was captured at yields an axis-aligned rectangle again
+whatever pivot is used. The rectangle therefore stores `rotation` and the export
+uses *that*, not the panel's current angle — otherwise rotating after drawing
+would silently skew the output. The dialog says so when the two differ.
+
+**The rectangle can outlive the data under it.** It survives panning, but every
+data hook is viewport-bounded, so a rectangle the user has panned away from would
+export whatever is still in memory and produce a half-empty figure that reads as
+a rendering bug. `getExportGeometry` projects the corners back to screen and
+returns `inView`; the dialog warns rather than exporting silently.
+
+Other things worth knowing:
+
+- **The in-progress drag is local component state, never the store.** A store
+  write per mousemove would push a re-render through every sidebar section
+  subscribed via `usePanelSettings` — the same storm `IGNORED_KEYS` exists to
+  stop. Only the finished rectangle is shared.
+- **▭ Rectangle is not ⬡ Region.** Region selects *cells* for CSV export and is
+  a click-vertex polygon; Rectangle frames an *image* and is a drag. Keeping them
+  separate is why the two "selections" do not get confused.
+- `exportRects` holds at most one rectangle per panel and is scoped like
+  annotations (`panelIndex`), for the same reason: the corners are image pixels
+  of one dataset. `clearAnnotations(panelIndex)` clears it too.
+- Only the data layers are exported. The neighbourhood highlight, in-progress
+  polygon, measurement markers and the framing rectangle itself are interaction
+  aids; committed regions and measurements are behind an "include annotations"
+  toggle.
+- **"include annotations" is a confusing label and has misled a user already.**
+  In this app "annotations" means the *drawing tools'* output — ⬡ Region polygons
+  and ⟷ Measure lines — not cell metadata, clusters or anything biological. With
+  nothing drawn, the toggle changes nothing at all: two exports either side of it
+  came back byte-identical, which reads as a broken checkbox rather than an empty
+  one. Worth renaming to "include drawn regions & measurements", and worth having
+  the dialog disable it, with a reason, when the panel has neither.
+- Output is capped at 16,384 px (the usual WebGL texture limit) with a warning
+  past 8,000. The offscreen `Deck` is always `finalize()`d — browsers cap
+  concurrent WebGL contexts, so leaking one per export would eventually kill the
+  live viewer.
 
 ## Morphology Image Discovery
 
@@ -1470,7 +1615,18 @@ always a subset of it, and that sampling is stable between identical calls.
 
 `src/store.annotations.test.js` is the first of them. Store logic is plain JS, so
 these need no DOM and no jsdom dependency — reducers can be exercised directly
-through `useStore.getState()`. Coverage is currently annotations only.
+through `useStore.getState()`. `src/export.test.js` covers the export rectangle's
+panel scoping the same way, plus the two pure parts of figure export: scale-bar
+rounding, and the `pHYs` chunk surgery in `withPngDpi` (byte-level work that would
+otherwise fail silently — a malformed chunk still previews fine in a browser while
+the journal's resolution check reads garbage).
+
+Coverage is annotations, export-rectangle state and PNG tagging. **The offscreen
+render itself is not covered** — it needs a WebGL context, so `highResExport.js`
+has no automated test, and that is exactly how its stroke-width scaling shipped
+inert without anything failing. The substitute is the two-width stroke-width
+measurement described in the Figure Export section, run against real exported
+PNGs; it needs only Pillow and numpy and it is what caught the bug.
 
 There is still **no CI and no linter** — no `.github/workflows`, no ESLint or Python lint
 config. The snapshot is a guard, not a test suite: it catches "this changed" but does not
@@ -1578,6 +1734,18 @@ which it does not cover at all.
 9. **Authentication** — no application-level auth. Caddy `basicauth` is available for
    cloud deployments (`docs/cloud-deploy.md`) but is **opt-in and off by default**. There
    are no user accounts and no per-dataset permissions.
+
+10. **Export line-weight control, and the inert clamp scaling behind it.** Stroke
+    width is currently pinned in output pixels — see *Figure Export*. Deliberately
+    left alone rather than patched: the obvious fix anchors line weight to export
+    width, which is wrong for a crop-later workflow, and the current accidental
+    behaviour happens to suit that workflow. The real fix is an explicit line-weight
+    setting in `ExportDialog`, at which point the clamp scaling can be made to work
+    or removed outright. Until then, edge clarity is an opacity/density question.
+
+11. **Morphology in figure export** (Phase 2). `Export…` draws vector layers only.
+    Compositing the tile image under them needs a hidden OSD instance fetching the
+    right pyramid level, and inherits that image's native resolution as a ceiling.
 
 ### Open GitHub issues
 
