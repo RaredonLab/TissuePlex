@@ -22,7 +22,7 @@ import { ScatterplotLayer, SolidPolygonLayer, PathLayer, LineLayer } from "@deck
 
 import { useStore } from "../store";
 import { usePanelSettings, PanelIndexProvider } from "../hooks/usePanelSettings";
-import { useTranscripts } from "../hooks/useTranscripts";
+import { useTranscripts, TRANSCRIPT_MIN_QV } from "../hooks/useTranscripts";
 import { useCellBoundaries } from "../hooks/useCellBoundaries";
 import { useCellColors } from "../hooks/useCellColors";
 import { useEdges } from "../hooks/useEdges";
@@ -39,6 +39,7 @@ import { withPngDpi, downloadBlob } from "../utils/pngExport";
 // Default edge color when no color mode is active
 const DEFAULT_EDGE_COLOR = [255, 150, 0, 160];
 const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
+const LOW_QV_COLOR = [128, 128, 128, 255];   // Q-Score < 20, shown on request
 
 const VIEW_ID = "main";
 
@@ -179,7 +180,7 @@ function ViewerPanel({ panelIndex }) {
     addMeasurement,
     setExportRect, clearExportRect,
     panelCount,
-    transcriptFraction,
+    transcriptFraction, showLowQualityTranscripts,
     cellBoundaryFraction,
     setLoadingKey,
     panelRotations, setPanelRotation,
@@ -703,7 +704,8 @@ function ViewerPanel({ panelIndex }) {
   const hasBoundaries = platformCapabilities?.has_boundaries ?? true;
 
   const { transcripts, total: transcriptTotal, loading: transcriptsLoading } = useTranscripts(
-    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction, selectedGenes, allGenes
+    apiBase, dataset, viewport, imageSize, transcriptsVisible && hasTranscripts, transcriptFraction, selectedGenes, allGenes,
+    showLowQualityTranscripts ? null : TRANSCRIPT_MIN_QV
   );
 
   // visibleTranscripts: server already filtered by selectedGenes, so this is a no-op
@@ -890,7 +892,12 @@ function ViewerPanel({ panelIndex }) {
     getRadius: 4,
     radiusMinPixels: 1,
     radiusMaxPixels: 8,
-    getFillColor: (d) => transcriptColorOverrides[d.feature_name] ?? geneColor(d.feature_name),
+    // Low-quality transcripts reach the client only when the user asked to see
+    // them, and are then drawn gray as in Xenium Explorer — so they read as
+    // "shown on request", never as a gene's own colour.
+    getFillColor: (d) => (d.qv != null && d.qv < TRANSCRIPT_MIN_QV)
+      ? LOW_QV_COLOR
+      : transcriptColorOverrides[d.feature_name] ?? geneColor(d.feature_name),
     pickable: true,
     updateTriggers: { getFillColor: [transcriptColorOverrides] },
   });

@@ -85,17 +85,29 @@ class XeniumReader(SpatialDatasetReader):
 
     # ── Transcripts ───────────────────────────────────────────────────────────
 
+    def capabilities(self) -> dict:
+        tx = self.path / "transcripts.parquet"
+        has_qv = tx.exists() and "qv" in duck.columns(tx)
+        return {**super().capabilities(), "has_transcript_qv": has_qv}
+
     def transcripts(
         self,
         bbox: Optional[tuple] = None,
         genes: Optional[list[str]] = None,
         fraction: float = 1.0,
+        min_qv: Optional[float] = None,
     ) -> dict:
         """Transcript detections in pixel space, bbox- and gene-filtered.
 
         Queried through DuckDB so the bbox and gene predicates push down into the
         parquet scan. Only matching row groups are read; a zoomed-in viewport on a
         multi-GB transcripts.parquet touches a small fraction of the file.
+
+        ``min_qv`` keeps only transcripts with ``qv >= min_qv``, which is Xenium
+        Explorer's default view (it hides Q-Score < 20). Like the gene filter it
+        applies before the count and the sample, so the high-quality subset
+        renders at the full sample density rather than as a thinned remainder.
+        Ignored when the file has no ``qv`` column.
 
         ``total`` is the count *after* filtering but *before* sampling, because
         the frontend uses it to report "showing N of M" and to calibrate density.
@@ -132,6 +144,10 @@ class XeniumReader(SpatialDatasetReader):
             conditions.append(gene_sql)
             params.extend(gene_params)
 
+        if min_qv is not None and "qv" in cols:
+            # Inlined like the bbox: float() rejects anything that is not a number.
+            conditions.append(f'"qv" >= {float(min_qv)}')
+
         where = duck.where_clause(conditions)
         src = duck.scan(path)
 
@@ -148,9 +164,13 @@ class XeniumReader(SpatialDatasetReader):
             if sample_n <= 0:
                 return {"transcripts": [], "total": total}
 
-            sample = duck.reservoir_sample(sample_n) if sample_n < total else ""
+            # transcript_id is unique per detection; older exports without it
+            # fall back to position + gene, which is unique in practice.
+            key = (["transcript_id"] if "transcript_id" in cols else
+                   [c for c in ("x_location", "y_location", "feature_name") if c in cols])
+            sample = duck.hash_sample_predicate(key, sample_n, total)
             df = conn.execute(
-                f"SELECT * FROM (SELECT {select} FROM {src} {where}) {sample}",
+                f"SELECT {select} FROM {src} {duck.where_clause(conditions + [sample])}",
                 params,
             ).df()
 
@@ -261,8 +281,10 @@ class XeniumReader(SpatialDatasetReader):
             # Resolve the visible cell ids first, sample among them, then fetch
             # every vertex belonging to a surviving id. The second scan re-reads
             # the parquet, but both scans are predicate-pushed and together still
-            # read far less than materializing the whole file.
-            sample = duck.reservoir_sample(sample_n) if sample_n < total else ""
+            # read far less than materializing the whole file. Hashing cell_id
+            # keeps whole cells, and the same cells on every pan.
+            sample = duck.where_clause(
+                [duck.hash_sample_predicate(["cell_id"], sample_n, total)])
             df = conn.execute(
                 f"""
                 WITH visible AS (

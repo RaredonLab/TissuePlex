@@ -263,12 +263,17 @@ class SpatialDatasetReader(ABC):
         has_transcripts : bool  — individual molecule/transcript detections are available
         has_boundaries  : bool  — polygon cell/spot boundary vertices are available
         unit_label      : str   — display name for spatial units ("cell", "spot", "bin")
+        has_transcript_qv : bool — transcripts carry a Phred-scaled Q-Score that
+                          ``transcripts(min_qv=…)`` can filter on. Xenium only;
+                          absent or False elsewhere, and the router never passes
+                          ``min_qv`` to a reader that does not declare it.
         """
         return {
             "has_morphology": True,
             "has_transcripts": True,
             "has_boundaries": True,
             "unit_label": "cell",
+            "has_transcript_qv": False,
         }
 
     def data_extent(self) -> Optional[tuple]:

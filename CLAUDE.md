@@ -64,7 +64,8 @@ The backend uses an abstract reader pattern. All platform readers inherit from
 before returning data. The frontend always receives pixel coordinates.
 
 **Capability flags**: `capabilities()` on the base class returns
-`{has_morphology, has_transcripts, has_boundaries, unit_label}`. The frontend reads these
+`{has_morphology, has_transcripts, has_boundaries, unit_label, has_transcript_qv}`
+(the last is Xenium only; see Transcript Quality Filter). The frontend reads these
 from `/spatial/{dataset}/info` and hides layers a platform cannot serve. Readers override
 it to declare what they lack — this is how spot-based platforms suppress the transcript
 and boundary layers rather than returning empty arrays for them.
@@ -171,6 +172,7 @@ frontend/
       highResExport.js       Offscreen deck.gl render of one region at arbitrary size.
                              Its stroke-width scaling is inert — see Figure Export
       pngExport.js           PNG pHYs (DPI) tagging, blob download, scale-bar rounding
+      listImport.js          Gene / LRM list CSV import + export — see its own section
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -192,6 +194,9 @@ sample_data/                 Partially gitignored — default data mount for loc
                              columns derived from the edge file, one clearly-named
                              invented flag, plus a README in each folder saying which
                              is which. Nothing here is analysis output.
+  example_lists/             Demo gene / LRM list CSVs for the sidebar import
+                             buttons. Not a dataset, and kept out of dataset
+                             folders on purpose (root CSVs load as cell metadata).
 r/                           NICHESv2 → edges.parquet. See r/README.md.
   niches_xenium.R            Xenium — coordinates already µm; read this one first
   niches_seqfish.R           seqFISH — dense CSV counts, per-version coordinate units
@@ -527,6 +532,29 @@ a render crash.
 
 ---
 
+## Transcript Quality Filter (Q-Score)
+
+Copies Xenium Explorer: transcripts with `qv < 20` are hidden by default, and
+`showLowQualityTranscripts` (a per-panel setting, default false) shows them drawn
+**gray** (`LOW_QV_COLOR` in Viewer.jsx), whatever their gene. The threshold is
+`TRANSCRIPT_MIN_QV` in `useTranscripts.js`. `qv` is Phred-scaled 0–40.
+
+- **Filtered server-side, before the count and the sample** (`min_qv` on
+  `/spatial/{ds}/transcripts`, `XeniumReader.transcripts(min_qv=)`). This follows the
+  same rule as the metadata filters, so the kept subset renders at full sample density,
+  and `total` is the post-filter count.
+- **Capability-gated.** Xenium declares `has_transcript_qv` (true when
+  `transcripts.parquet` has `qv`). The router passes `min_qv` only to readers that
+  declare it, so in split view a MERSCOPE or seqFISH panel ignores the setting rather
+  than erroring. The sidebar checkbox appears only when some visible panel has the
+  flag, and `useUnionCapabilities` defaults it to false. seqFISH v1's `qv` is
+  deliberately not wired in, because its scale is not Xenium's.
+- **Verified against Xenium's own number.** On Rat-PPLR, `qv >= 20 AND is_gene` gives
+  117,408,409 transcripts, exactly `num_transcripts_high_quality` in `experiment.xenium`.
+  The layer total is 6,305 higher because "no gene filter" still includes control
+  probes (see below). A fixture may be far noisier than real data: 73% of
+  `mouse_ileum_tiny` is below 20, against 11.6% on Rat-PPLR.
+
 ## Transcript Gene Filter (selectedGenes)
 
 The gene filter uses an **allowlist** model, not a denylist:
@@ -581,6 +609,57 @@ unfiltered total against an empty canvas.
 
 `useCellColors` `gene_set` mode: if `selectedGenes === null`, uses all `allGenes`;
 otherwise uses `[...selectedGenes]`.
+
+---
+
+## Gene / LRM List Import (utils/listImport.js)
+
+`import` / `export` chips in the Transcript species section and the LRM Mechanisms
+header. Entirely client-side: the vocabularies are already in the browser, so
+nothing is uploaded and nothing is written under the read-only `/data`.
+
+**The format copies Xenium Explorer's gene-group upload**, deliberately strict:
+
+| Section | Required header (any case) | Values |
+|---|---|---|
+| Transcript species | `gene` | exact gene names |
+| LRM Mechanisms | `lrm`, or `ligand` + `receptor` | exact `ligand\|receptor` |
+
+Extra columns are ignored, so an XE `gene,group` file works unchanged (`group` is
+not used). Values match **exactly, case and direction included**. A reversed
+pair is a different mechanism and does not match. Whitespace around values is
+the only thing trimmed. `lrm` wins when both LRM forms are present. Export
+writes `lrm,ligand,receptor`, so it re-imports through the `lrm` path.
+
+Decisions made with the user, so don't "improve" them without asking:
+- **Import replaces** the selection. It does not merge.
+- **No match report.** On success the section's own "N / M" counter is the
+  feedback. Refusals are shown on a red line and change nothing: an Excel
+  workbook (detected from the file's first bytes, so renaming it to .csv doesn't
+  get through), a missing header, a header with no rows under it, and **zero
+  matches**. Zero matches is refused because applying it would blank the layer,
+  which reads as a rendering bug.
+- **The gene list drives transcripts only.** It does not select LRMs whose
+  ligand/receptor is in the list. As before, it also feeds `gene_set` cell color.
+- **An imported LRM list does not outlive its edge file.** `setPanelEdgeFile` /
+  `setPanelDataset` already clear `hiddenLrms`, and that is the intended behavior.
+
+Two things that are easy to get wrong:
+- **Use the RFC 4180 parser, never `split(",")`.** Complex mechanisms name
+  several subunits joined by commas (`niches_common.R` splits on `[,&+]`), so a
+  quoted `"Itgav,Itgb3"` must stay one field. The two palette importers still
+  use a naive split; that is fine for `gene,#hex` but not for this.
+- **`applyLrmList` takes the complement**, because the import is an allowlist
+  and `hiddenLrms` is a denylist. The complement is taken against the *union*
+  catalogue the sidebar shows, the same universe `hideAllLrms` covers.
+  `applyGeneList` collapses a list that covers every gene to `null`, matching
+  `toggleSelectedGene`.
+
+**Keep list files out of dataset folders.** A CSV in a dataset root is loaded as
+supplemental *cell metadata* (`_load_supplemental_metadata`): a gene list there
+would be outer-joined into the cells table as fake cell ids. That is why the
+demo lists live in `sample_data/example_lists/`, which no reader detects as a
+dataset. Tests: `src/listImport.test.js`.
 
 ---
 
@@ -963,15 +1042,17 @@ controlled by user-adjustable sampling fractions:
 Each hook reports live `{shown, total}` counts into the store so the LayerPanel can show
 what fraction of the data is actually on screen.
 
-**Transcript sampling**: the backend uses `df.sample(n=...)` (random, not `head`) so the
-returned transcripts are spatially uniform across the viewport rather than biased toward
-whatever region appears first in the parquet row order. Cell boundaries sample *unique
-cell IDs* before filtering rows, so a sampled cell keeps all of its vertices and never
-renders as a partial polygon.
+**Transcript sampling** keeps each row whose seeded hash of its identity falls below
+`n / total` (`duck.hash_sample_predicate`): `transcript_id` on Xenium, position + gene
+elsewhere. That makes it spatially uniform, the same on every re-fetch, and
+nested — zooming in only ever adds dots. Cell boundaries hash *cell IDs* before fetching
+rows, so a sampled cell keeps all of its vertices and never renders as a partial polygon.
+CosMx still uses pandas `df.sample`, which is uniform. See the Spatial Query Path section
+for why this is not `USING SAMPLE reservoir`.
 
-**Edge sampling** uses DuckDB `USING SAMPLE ... (bernoulli)` on the grouped result, so
-each edge is included independently at probability `density` — spatially uniform, and
-no sampling clause is emitted at all when `density = 1.0`.
+**Edge sampling** is the same idea: `density_predicate` hashes the edge id, so each
+edge is kept independently at probability `density`, and no predicate is emitted at all
+when `density = 1.0`.
 
 **Edge aggregation**: `useEdges` POSTs to `/edges/{dataset}/query-grouped` which returns
 one row per directed edge (GROUP BY edge, ORDER BY RANDOM()). For a 168M-row parquet
@@ -1232,7 +1313,7 @@ locally, gitignored, and must not be redistributed from this repo.
 
 `transcripts()` and `cell_boundaries()` query parquet through DuckDB rather than loading
 it into pandas. `readers/duck.py` holds the shared pieces — `connect()`, `scan()`,
-`columns()`, `bbox_predicate()`, `in_predicate()`, `reservoir_sample()`, `to_records()` —
+`columns()`, `bbox_predicate()`, `in_predicate()`, `hash_sample_predicate()`, `to_records()` —
 so every reader builds queries the same way. `EdgeReader` predates it and has its own
 equivalent helpers; the two should converge.
 
@@ -1301,9 +1382,9 @@ Four things to know:
   filename derives from the source stem alone, so without that check a file sorted on one
   column pair would be served for a query on another — sorted by the wrong axis, silently.
 
-Row *order* differs between a sorted file and its source, so seeded reservoir sampling
-draws a different subset. Totals and filter results are unaffected; it is only why
-enabling the cache moves the sampled golden probes.
+Sampling hashes each row's identity, not its position in the file, so the sorted cache
+and its source yield the same sample. Under the reservoir sampler that preceded it, the
+cache moved the sampled golden probes.
 
 Things to preserve when editing these methods:
 
@@ -1317,8 +1398,19 @@ Things to preserve when editing these methods:
   bundled breast dataset before this changed.
 - **Sampling is seeded** (`duck.SAMPLE_SEED`). Re-fetching an unchanged viewport must return
   the same rows or the layer visibly flickers.
-- **`USING SAMPLE` goes on a subquery** wrapping the filtered SELECT. Applied alongside a
-  WHERE clause, DuckDB may sample before filtering.
+- **Do not use `USING SAMPLE reservoir` for anything drawn on screen.** In DuckDB 1.2.2 it
+  is not uniform, single-threaded or not. On the 132M-row Rat-PPLR Xenium run it gave the
+  sparse left 500 µm of the slide 1,641 of 200K dots against 19 expected, with tiles
+  ranging 0.68–59× their fair share. The near-empty slide margin rendered as a dense,
+  straight-edged stripe that looked like tissue. `duck.hash_sample_predicate` replaced it:
+  20 dots against 19, tiles 0.81–1.25×, same result on every repeat fetch, and identical
+  dots where two panned viewports overlap.
+  The check to re-run after touching sampling: compare per-500 µm-tile sample counts with
+  true counts on a large real dataset. The fixtures are too small to show the bias. The
+  unused raw `/edges/{dataset}/query` endpoint still has a reservoir pre-sample.
+- **The kept count is approximate.** A hash cut-off keeps `n` rows in expectation, so the
+  200K transcript cap can be overshot by a fraction of a percent. Nothing depends on the
+  count being exact, and `total` stays the pre-sample count.
 - **Edge density is a deterministic hash, not `USING SAMPLE`** (`density_predicate`).
   The tissue graph and the edge data are two separate queries and must select the
   *same* edges, or edge data is drawn where the graph beneath it was sampled away —
@@ -1621,7 +1713,8 @@ rounding, and the `pHYs` chunk surgery in `withPngDpi` (byte-level work that wou
 otherwise fail silently — a malformed chunk still previews fine in a browser while
 the journal's resolution check reads garbage).
 
-Coverage is annotations, export-rectangle state and PNG tagging. **The offscreen
+Coverage is annotations, export-rectangle state, PNG tagging, and the gene/LRM
+list import (`src/listImport.test.js`: parser, refusals, store actions). **The offscreen
 render itself is not covered** — it needs a WebGL context, so `highResExport.js`
 has no automated test, and that is exactly how its stroke-width scaling shipped
 inert without anything failing. The substitute is the two-width stroke-width
