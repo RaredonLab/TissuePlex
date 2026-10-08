@@ -973,11 +973,28 @@ write.csv(
   <p>The <span class="ui">Transcripts</span> layer renders individual detected
   RNA molecules as colored dots, each colored by gene identity.</p>
 
-  <div class="callout warn">
-    <strong class="label">Note:</strong> Transcripts are only rendered when
-    zoomed in far enough to see individual cells. If no dots appear, zoom in
-    further. A counter in the panel shows how many are currently visible.
+  <div class="callout note">
+    <strong class="label">Note:</strong> Transcripts draw at every zoom level.
+    When zoomed out, a random sample is shown (the <span class="ui">sample</span>
+    slider, 10% by default, at most 200,000 dots). The sample is spread evenly
+    across the view, and the same dots stay put as you pan. The counter next to
+    the layer name shows how many are drawn out of how many are in view.
   </div>
+
+  <h3>Quality Filter (Xenium)</h3>
+  <p>Each Xenium transcript has a <strong>Q-Score</strong>, the instrument's
+  estimate of how reliably it was decoded. Like Xenium Explorer, TissuePlex
+  hides transcripts with a Q-Score below 20 by default. On a typical run that
+  is about one transcript in ten.</p>
+  <ul>
+    <li>Tick <span class="ui">show low-quality (Q &lt; 20) in gray</span> under
+    the Transcripts layer to show them. They are drawn gray whatever their gene,
+    as in Xenium Explorer.</li>
+    <li>The counter includes low-quality transcripts only while they are
+    shown.</li>
+    <li>The option appears only for datasets that record a Q-Score (Xenium).
+    Other platforms are unaffected.</li>
+  </ul>
 
   <h3>Gene Filter</h3>
   <p>By default, transcripts from all detected genes are shown, each in its own
@@ -996,8 +1013,40 @@ write.csv(
     <li>Click <span class="ui">clear</span> to reset to all genes.</li>
   </ul>
 
+  <h3>Importing a Gene List</h3>
+  <p>To show a list of genes you already have, such as markers from a Seurat
+  analysis, click <span class="ui">import</span> next to the gene count and choose
+  a CSV file. The selection is <strong>replaced</strong> by the genes in the file.
+  <span class="ui">export</span> saves the genes currently shown in the same
+  format, so a selection can be saved and loaded again later.</p>
+
+  <pre><code>gene,group
+Epcam,epithelium
+Lgr5,stem
+Muc2,goblet</code></pre>
+
+  <ul>
+    <li>The first row must contain a column named <code>gene</code>, in any
+    letter case. Other columns are ignored, so a Xenium Explorer gene-group file
+    (<code>gene,group</code>) imports unchanged.</li>
+    <li>Gene names must match the dataset <strong>exactly</strong>, including
+    letter case: <code>EPCAM</code> does not match <code>Epcam</code>. Names that
+    do not match are skipped.</li>
+    <li>If no name in the file matches, nothing changes and a red message
+    explains why. The same happens for a file with no <code>gene</code> header,
+    and for an Excel workbook. Save those with <em>File → Save As → CSV
+    UTF-8</em>.</li>
+  </ul>
+
+  <div class="callout warn">
+    <strong class="label">Note:</strong> Keep list files outside the dataset
+    folder. A CSV placed in the dataset folder itself is read as cell metadata
+    (see <em>Add Custom Cell Metadata</em>).
+  </div>
+
   <p>Gene-color assignments can be <strong>imported</strong> and
-  <strong>exported</strong> as CSV using the corresponding buttons, useful for
+  <strong>exported</strong> as CSV with the <span class="ui">import
+  palette</span> / <span class="ui">export palette</span> buttons, useful for
   reproducing a color scheme across sessions.</p>
 
   <div class="callout tip">
@@ -1156,6 +1205,36 @@ write.csv(
     click <span class="ui">none</span> to hide all LRMs, search for "Tgfb",
     then re-enable only those mechanisms.
   </div>
+
+  <h3>Importing a Mechanism List</h3>
+  <p>Click <span class="ui">import</span> in the checklist header and choose a
+  CSV file. Only the mechanisms in the file stay active; every other mechanism
+  is unchecked. <span class="ui">export</span> saves the active mechanisms in
+  the same format. Either of two layouts is accepted:</p>
+
+  <pre><code>lrm
+Wnt5a|Fzd1
+Notch1|Dll4</code></pre>
+  <pre><code>ligand,receptor
+Wnt5a,Fzd1
+Notch1,Dll4</code></pre>
+
+  <ul>
+    <li>The first row must contain an <code>lrm</code> column, or both a
+    <code>ligand</code> and a <code>receptor</code> column, in any letter case.
+    If both layouts are present, <code>lrm</code> is used.</li>
+    <li>Names must match the edge file <strong>exactly</strong>, including
+    letter case and direction: <code>Fzd1|Wnt5a</code> is a different mechanism
+    from <code>Wnt5a|Fzd1</code> and will not match.</li>
+    <li>Receptors made of several subunits contain commas, so put them in
+    quotes: <code>Fn1,"Itgav,Itgb3"</code>. Excel adds the quotes itself when
+    it saves a CSV.</li>
+    <li>If nothing in the file matches, or the header is missing, nothing
+    changes and a red message explains why.</li>
+    <li>The imported list belongs to one edge file. Switching the edge source
+    or the dataset makes every mechanism active again; import the file again
+    if you need it.</li>
+  </ul>
 </section>
 
 

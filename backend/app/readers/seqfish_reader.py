@@ -386,10 +386,12 @@ class SeqfishReader(SpatialDatasetReader):
             n = min(round(fraction * total), _MAX_TRANSCRIPTS)
             if n <= 0:
                 return {"transcripts": [], "total": total}
-            sample = duck.reservoir_sample(n) if n < total else ""
+            key = [c for c in ("name", "x", "y", "z") if c in cols]
+            sample = duck.hash_sample_predicate(key, n, total)
             select = ", ".join(f'"{c}"' for c in ("name", "x", "y") if c in cols)
             df = conn.execute(
-                f"SELECT * FROM (SELECT {select} FROM {src} {where}) {sample}", params
+                f"SELECT {select} FROM {src} {duck.where_clause(conditions + [sample])}",
+                params,
             ).df()
 
         df = df.rename(columns={"name": "feature_name",

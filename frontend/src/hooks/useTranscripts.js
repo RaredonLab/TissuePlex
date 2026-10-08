@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 
 /**
+ * Xenium Explorer hides transcripts below this Q-Score by default, and so do we.
+ * It is Phred-scaled: 20 means a 1% estimated decoding error.
+ */
+export const TRANSCRIPT_MIN_QV = 20;
+
+/**
  * Fetches transcripts from the backend, filtered by viewport bbox.
  * Debounced so rapid pan/zoom doesn't hammer the API.
  * In-flight requests are aborted when a newer fetch supersedes them, so stale
@@ -11,11 +17,13 @@ import { useState, useEffect, useRef } from "react";
  *                      Passed to the backend so total reflects selected species only.
  * @param allGenes      the dataset's full gene panel, used only to decide whether
  *                      to state the filter as an allowlist or as its complement.
+ * @param minQv         null = no quality filter; a number = keep Q-Score >= it.
+ *                      The backend ignores it for platforms without a Q-Score.
  *
  * Returns { transcripts, total, loading, error }.
- *   total — pre-sample count in the viewport after gene filtering (from backend).
+ *   total — pre-sample count in the viewport after gene and quality filtering.
  */
-export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = true, fraction = 1.0, selectedGenes = null, allGenes = null) {
+export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = true, fraction = 1.0, selectedGenes = null, allGenes = null, minQv = null) {
   const [transcripts, setTranscripts] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -59,6 +67,9 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
       setError(null);
       try {
         let url = `${apiBase}/spatial/${dataset}/transcripts?fraction=${fraction}`;
+        // Applied server-side before sampling, so the kept transcripts render at
+        // the full sample density rather than as a thinned remainder.
+        if (minQv !== null) url += `&min_qv=${minQv}`;
 
         // Send the selected gene filter so the backend samples within those
         // species only — stated as an allowlist or as its complement, whichever
@@ -114,7 +125,7 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
   // allGenes.length is a dep because it decides the URL *form*: before the panel
   // loads there is no complement to compute, so an early fetch would fall back to
   // the long allowlist and could 414. Re-running once it arrives fixes that.
-  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, genesKey, allGenes?.length]); // eslint-disable-line
+  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, genesKey, allGenes?.length, minQv]); // eslint-disable-line
 
   // Abort in-flight request on unmount
   useEffect(() => {

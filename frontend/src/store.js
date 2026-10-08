@@ -30,6 +30,10 @@ export function makeSettings() {
     // a number is the user's slider override.
     cellBoundaryFraction: null,
     transcriptFraction: 0.1,
+    // Xenium Explorer's default: transcripts with Q-Score < 20 are hidden, and
+    // showing them draws them gray. Only datasets with a Q-Score are affected
+    // (capability `has_transcript_qv`, Xenium only).
+    showLowQualityTranscripts: false,
 
     // Values outside [low, high] map to the palette ends (oob::squish).
     cellColorClamp: { low: null, high: null },
@@ -475,6 +479,7 @@ export const useStore = create((set, get) => ({
   }),
   setTranscriptFraction: (f) =>
     get().patchSettings({ transcriptFraction: Math.max(0.0001, Math.min(1.0, f)) }),
+  setShowLowQualityTranscripts: (v) => get().patchSettings({ showLowQualityTranscripts: !!v }),
 
   setCellColorClamp: (low, high) => get().patchSettings({ cellColorClamp: { low, high } }),
   setEdgeColorClamp: (low, high) => get().patchSettings({ edgeColorClamp: { low, high } }),
@@ -527,6 +532,16 @@ export const useStore = create((set, get) => ({
     const all = get().panels.flatMap((p) => p.lrmCatalogue)
       .map((e) => e.lrm ?? `${e.ligand}|${e.receptor}`);
     get().patchSettings({ hiddenLrms: new Set(all) });
+  },
+  // An imported list *replaces* the selection. The list is an allowlist while
+  // hiddenLrms is a denylist, so the complement is taken against `catalogueIds`
+  // — the union the sidebar shows, which is the same universe hideAllLrms
+  // covers. Mechanisms absent from the catalogue cannot be hidden or shown and
+  // are ignored. setPanelEdgeFile / setPanelDataset clear hiddenLrms, so an
+  // imported list deliberately does not survive a change of edge source.
+  applyLrmList: (keep, catalogueIds) => {
+    const hidden = [...new Set(catalogueIds)].filter((id) => !keep.has(id));
+    get().patchSettings({ hiddenLrms: new Set(hidden) });
   },
 
   // ── Categorical / continuous override (issue #35) ─────────────────────────
@@ -667,6 +682,15 @@ export const useStore = create((set, get) => ({
   // selectedGenes: null = no filter (show all); Set<string> = allowlist (show only these).
   // The selection is dataset-scoped and persists across pan/zoom.
   setSelectedGenes: (genes) => get().patchSettings({ selectedGenes: genes }),
+  // An imported gene list replaces the selection. A list covering every gene in
+  // `universe` collapses to null for the same reason toggleSelectedGene does:
+  // "no filter" stays single-valued and the gene names stay out of the URL.
+  applyGeneList: (genes, universe) => {
+    const all = new Set(universe);
+    const keep = new Set([...genes].filter((g) => all.has(g)));
+    const covers = all.size > 0 && keep.size === all.size;
+    get().patchSettings({ selectedGenes: covers ? null : keep });
+  },
   toggleSelectedGene: (gene) => {
     const s = get();
     {

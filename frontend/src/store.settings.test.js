@@ -467,3 +467,22 @@ describe("#59 — edge filtering is independent of cell filtering", () => {
     expect(settings(0).edgeFilters).not.toBe(settings(1).edgeFilters);
   });
 });
+
+describe("transcript quality filter", () => {
+  it("hides Q-Score < 20 by default, as Xenium Explorer does", () => {
+    expect(settings(0).showLowQualityTranscripts).toBe(false);
+    expect(settings(1).showLowQualityTranscripts).toBe(false);
+  });
+
+  it("is a linked setting like the rest", () => {
+    S().setShowLowQualityTranscripts(true);
+    expect(settings(0).showLowQualityTranscripts).toBe(true);
+    expect(settings(1).showLowQualityTranscripts).toBe(true);
+  });
+
+  it("survives a dataset change, since it names no column", () => {
+    S().setShowLowQualityTranscripts(true);
+    S().setPanelDataset(0, "other");
+    expect(settings(0).showLowQualityTranscripts).toBe(true);
+  });
+});

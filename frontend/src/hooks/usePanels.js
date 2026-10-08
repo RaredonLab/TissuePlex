@@ -42,13 +42,16 @@ export function useUnionCapabilities() {
     const caps = active.map((p) => p.platformCapabilities).filter(Boolean);
     if (caps.length === 0) {
       return { has_morphology: true, has_transcripts: true, has_boundaries: true,
-               unit_label: "cell", mixed: false };
+               has_transcript_qv: false, unit_label: "cell", mixed: false };
     }
     const labels = [...new Set(caps.map((c) => c.unit_label ?? "cell"))];
     return {
       has_morphology:  caps.some((c) => c.has_morphology  ?? true),
       has_transcripts: caps.some((c) => c.has_transcripts ?? true),
       has_boundaries:  caps.some((c) => c.has_boundaries  ?? true),
+      // Defaults false, unlike the others: a Q-Score is a property of a few
+      // formats, not a layer a platform might lack.
+      has_transcript_qv: caps.some((c) => c.has_transcript_qv ?? false),
       unit_label: labels.length === 1 ? labels[0] : "unit",
       mixed: labels.length > 1,
     };
