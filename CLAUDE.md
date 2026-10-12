@@ -1763,6 +1763,14 @@ which it does not cover at all.
   `useState` counter incremented on every OSD `open` event, used as the effect dep
   instead. Also fixes panel 2 in split mode, where `imageSize.w` was already set by
   panel 0 before panel 2's OSD opened.
+- **Colour swatches go through `ColorSwatch` (LayerPanel.jsx), never a hand-copied
+  label + hidden `<input type="color">`.** The input needs `position: relative` on its
+  label. The two transcript swatches were copied without it, so the input's containing
+  block was `<body>`, and inside the scrolled gene list it sat ~2,000 px down the page.
+  Clicking the swatch focused it, the browser scrolled the whole page 2,333 px to reach
+  it, and the app slid off-screen, leaving a black window. `overflow: hidden` does not
+  stop this, because browsers still scroll it programmatically. `index.html` now sets
+  `overflow: clip` on html/body as a backstop, which cannot be scrolled at all.
 - **`Math.min/max` spread on large arrays** (fixed in `useEdgeColors.js`): spreading
   100K+ element arrays causes `RangeError: Maximum call stack size exceeded`. Use a
   `for` loop to find min/max instead of `Math.min(...arr)`.
