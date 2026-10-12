@@ -24,6 +24,36 @@ function hexToRgba(hex) {
   return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16), 255];
 }
 
+/**
+ * A colour swatch that opens the native picker. Every swatch in the sidebar
+ * must use this, not a hand-copied label + hidden input.
+ *
+ * The hidden <input type="color"> needs `position: relative` on its label.
+ * Without it, the input's containing block is <body>, so inside a scrolled list
+ * it sits far down the page, outside the list. Clicking the swatch focuses it,
+ * and the browser scrolls the whole page to reach it, even with
+ * `overflow: hidden`. The entire app slid off-screen and only the dark page
+ * background was left. The two transcript swatches were copied without that one
+ * property while the cell legend had it, which is how only transcripts broke.
+ */
+function ColorSwatch({ rgb, onChange }) {
+  const [r, g, b] = rgb;
+  return (
+    <label title="Click to change color"
+      style={{ cursor: "pointer", flexShrink: 0, position: "relative", display: "flex" }}>
+      <div style={{
+        width: 10, height: 10, borderRadius: 2,
+        background: `rgb(${r},${g},${b})`,
+        outline: "1px solid rgba(255,255,255,0.15)",
+      }} />
+      <input type="color" value={rgbaToHex([r, g, b])}
+        onChange={(e) => onChange(hexToRgba(e.target.value))}
+        style={{ position: "absolute", top: 0, left: 0, opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
+        tabIndex={-1} />
+    </label>
+  );
+}
+
 const SECTION_HEADER = {
   fontSize: 10,
   fontFamily: "monospace",
@@ -465,25 +495,10 @@ function CategoricalLegend({ field, categories = [] }) {
     <div style={{ marginTop: 6 }}>
       {/* Category rows */}
       {categories.map((cat, i) => {
-        const [r, g, b] = resolveColor(cat, i);
-        const hexVal = rgbaToHex([r, g, b]);
         return (
           <div key={cat} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-            {/* Clickable swatch — wraps a hidden <input type="color"> */}
-            <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, position: "relative", display: "flex" }}>
-              <div style={{
-                width: 10, height: 10, borderRadius: 2,
-                background: `rgb(${r},${g},${b})`,
-                outline: "1px solid rgba(255,255,255,0.15)",
-              }} />
-              <input
-                type="color"
-                value={hexVal}
-                onChange={(e) => setCategoryColorOverride(field, cat, hexToRgba(e.target.value))}
-                style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
-                tabIndex={-1}
-              />
-            </label>
+            <ColorSwatch rgb={resolveColor(cat, i)}
+              onChange={(rgba) => setCategoryColorOverride(field, cat, rgba)} />
             <span style={{ fontSize: 10, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
                   title={cat}>{cat}</span>
           </div>
@@ -1392,15 +1407,10 @@ function TranscriptSpeciesSection() {
             <div style={{ fontSize: 11, color: "#555", paddingLeft: 2 }}>no genes selected</div>
           )}
           {selectedList.map((gene) => {
-            const [r, g, b] = resolveColor(gene);
             return (
               <div key={gene} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#e88", padding: "1px 0" }}>
-                <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
-                  <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
-                  <input type="color" value={rgbaToHex([r, g, b])}
-                    onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
-                    style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
-                </label>
+                <ColorSwatch rgb={resolveColor(gene)}
+                  onChange={(rgba) => setTranscriptColorOverride(gene, rgba)} />
                 <span style={{ flex: 1 }}>{gene}</span>
                 <button
                   onClick={() => toggleSelectedGene(gene)}
@@ -1429,17 +1439,12 @@ function TranscriptSpeciesSection() {
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {pickerGenes.map((gene) => {
               const checked = selectedGenes === null || selectedGenes.has(gene);
-              const [r, g, b] = resolveColor(gene);
               return (
                 // Row split into swatch-label + checkbox-label so clicking the
                 // swatch doesn't also toggle the checkbox (nested-label issue).
                 <div key={gene} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3 }}>
-                  <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
-                    <input type="color" value={rgbaToHex([r, g, b])}
-                      onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
-                      style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
-                  </label>
+                  <ColorSwatch rgb={resolveColor(gene)}
+                    onChange={(rgba) => setTranscriptColorOverride(gene, rgba)} />
                   <label style={{ ...LABEL_STYLE, flex: 1, marginBottom: 0 }}>
                     <input
                       type="checkbox"
