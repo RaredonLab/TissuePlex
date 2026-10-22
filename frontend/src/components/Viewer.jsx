@@ -41,6 +41,12 @@ const DEFAULT_EDGE_COLOR = [255, 150, 0, 160];
 const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
 const LOW_QV_COLOR = [128, 128, 128, 255];   // Q-Score < 20, shown on request
 
+// Where a clicked edge is, for the detail lookup: its sending centroid lets the
+// backend prune to the row groups around that cell instead of scanning the
+// whole file's id column.
+const edgeHint = (row) => (row && typeof row.x1 === "number" && typeof row.y1 === "number")
+  ? { x: row.x1, y: row.y1 } : null;
+
 const VIEW_ID = "main";
 
 /**
@@ -502,7 +508,7 @@ function ViewerPanel({ panelIndex }) {
     if (e.shiftKey) {
       const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
       if (edgeInfo?.object) {
-        setSelectedEdge(edgeInfo.object.edge, panelIndex);
+        setSelectedEdge(edgeInfo.object.edge, panelIndex, edgeHint(edgeInfo.object));
         return;
       }
       const cellInfo = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["cell-segments-fill"] });
@@ -523,7 +529,7 @@ function ViewerPanel({ panelIndex }) {
 
     const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
     if (edgeInfo?.object) {
-      setSelectedEdge(edgeInfo.object.edge, panelIndex);
+      setSelectedEdge(edgeInfo.object.edge, panelIndex, edgeHint(edgeInfo.object));
     } else {
       setSelectedEdge(null, panelIndex);
     }
@@ -708,11 +714,9 @@ function ViewerPanel({ panelIndex }) {
     showLowQualityTranscripts ? null : TRANSCRIPT_MIN_QV
   );
 
-  // visibleTranscripts: server already filtered by selectedGenes, so this is a no-op
-  // when a gene filter is active — kept as a safety net and for semantic clarity.
-  const visibleTranscripts = selectedGenes === null
-    ? transcripts
-    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
+  // The hook applies the gene filter itself, in the browser, from the viewport's
+  // unfiltered sample — a species toggle changes the canvas on the next render.
+  const visibleTranscripts = transcripts;
 
   // Expose live shown/total counts to the LayerPanel via the store (panel 0 only).
   // Use visibleTranscripts.length so the stat always reflects the selected species.
@@ -720,13 +724,31 @@ function ViewerPanel({ panelIndex }) {
     patch({ transcriptStats: { shown: visibleTranscripts.length, total: transcriptTotal } });
   }, [visibleTranscripts.length, transcriptTotal]); // eslint-disable-line
 
+  // Explicit categorical/continuous choice for the active color-by column, or
+  // null (auto-detect) when the user has not overridden it — issue #35.
+  const cellCategorical = categoricalOverrides[`cell::${colorBy?.field}`] ?? null;
+  const edgeCategorical = categoricalOverrides[`edge::${edgeColorBy?.field}`] ?? null;
+
+  // Colour values ride on the boundaries response, for exactly the cells in it.
+  // They used to be a separate request returning one value for every cell in
+  // the dataset — see useCellColors.
+  const cellColorSpec = useMemo(() => {
+    if (!cellColorEnabled || !colorBy || colorBy.mode === "off") return null;
+    if (colorBy.mode === "gene_set") return { mode: "gene_set", genes: selectedGenes, allGenes };
+    if (colorBy.mode === "metadata" && colorBy.field) {
+      return { mode: "metadata", field: colorBy.field, categorical: cellCategorical };
+    }
+    return null;
+  }, [cellColorEnabled, colorBy?.mode, colorBy?.field, selectedGenes, allGenes, cellCategorical]);
+
   const {
     cells: cellPolygons,
+    colors: cellColorsRaw,
     total: cellBoundaryTotal,
     loading: cellBoundariesLoading,
   } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries,
-    cellBoundaryFraction, cellFilter
+    cellBoundaryFraction, cellFilter, cellColorSpec
   );
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
 
@@ -746,13 +768,10 @@ function ViewerPanel({ panelIndex }) {
       // One density drives both fetches. It is a rendering-volume control, and
       // the graph has its own opacity for visual weight — a better lever for
       // clutter than sampling, which would misrepresent the structure.
-      graphEnabled: tissueGraphVisible, graphDensity: edgeDensity }
+      graphEnabled: tissueGraphVisible, graphDensity: edgeDensity,
+      // The metadata colour column travels on the rows (see useEdgeColors).
+      colorField: edgeColorBy?.mode === "metadata" ? (edgeColorBy.field || null) : null }
   );
-
-  // Explicit categorical/continuous choice for the active color-by column, or
-  // null (auto-detect) when the user has not overridden it — issue #35.
-  const cellCategorical = categoricalOverrides[`cell::${colorBy?.field}`] ?? null;
-  const edgeCategorical = categoricalOverrides[`edge::${edgeColorBy?.field}`] ?? null;
 
   // ── Shared colour scale ───────────────────────────────────────────────────
   // With two panels showing two datasets, letting each auto-range to its own
@@ -779,8 +798,8 @@ function ViewerPanel({ panelIndex }) {
     colorValues, vmin: cellVmin, vmax: cellVmax,
     type: cellType, categories: cellCategories, loading: cellColorsLoading,
   } = useCellColors(
-    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette,
-    cellColorEnabled, effectiveCellClamp, categoryColorOverrides, cellCategorical
+    cellColorsRaw, colorBy, cellColorPalette, cellColorEnabled,
+    effectiveCellClamp, categoryColorOverrides
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
@@ -1456,6 +1475,7 @@ function ViewerPanel({ panelIndex }) {
           apiBase={apiBase}
           dataset={dataset}
           edgeId={selectedEdge}
+          hint={selection?.hint ?? null}
           edgeFile={edgeFile}
           onClose={() => setSelectedEdge(null, panelIndex)}
         />

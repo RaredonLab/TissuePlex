@@ -39,6 +39,10 @@ services:
       # a two-core VM several times over.
       DUCKDB_THREADS: ${DUCKDB_THREADS:-}
       QUERY_CONCURRENCY: ${QUERY_CONCURRENCY:-}
+      # Memory budget (MB) for the per-viewport LRM score matrices that make an
+      # LRM toggle a few milliseconds instead of a re-scan. Default: 8% of the
+      # memory ceiling, at most 256 MB. Oversized viewports fall back to SQL.
+      SCORE_CACHE_MB: ${SCORE_CACHE_MB:-}
       # Requests slower than this are written to the log file (ms).
       SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-2000}
       # Logs go to $CACHE_DIR/logs/tissueplex.log (rotating, 5 x 5 MB), on the

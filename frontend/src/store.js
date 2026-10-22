@@ -290,8 +290,10 @@ export const useStore = create((set, get) => ({
   setSelectedCell: (cell, panelIndex = 0) =>
     set({ selection: cell ? { panelIndex, kind: "cell", cell } : null,
           neighborhood: null }),
-  setSelectedEdge: (edge, panelIndex = 0) =>
-    set({ selection: edge ? { panelIndex, kind: "edge", edge } : null,
+  // `hint` is the edge's sending centroid in image px, when the click had it;
+  // EdgeInfoPanel passes it along so the detail lookup can prune by position.
+  setSelectedEdge: (edge, panelIndex = 0, hint = null) =>
+    set({ selection: edge ? { panelIndex, kind: "edge", edge, hint } : null,
           neighborhood: null }),
   clearSelection: () => set({ selection: null, neighborhood: null }),
 

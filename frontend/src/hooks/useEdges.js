@@ -25,7 +25,11 @@
  */
 import { useState, useEffect, useRef, useMemo } from "react";
 import { loggedFetch } from "../utils/clientLog";
+import { fetchDelay } from "../utils/viewportFilters";
 
+// For a *moving* viewport only. A fetch whose viewport is unchanged from the
+// last one — an LRM toggle, a filter edit, a colour column change — goes out at
+// once: the debounce exists to coalesce drag events, and a click is one event.
 const DEBOUNCE_MS = 400;
 
 /**
@@ -50,10 +54,15 @@ export function useEdges(
   minStrength, hiddenLrms, lrmCatalogue, density = 1.0,
   edgeFile = "edges.parquet",
   { sendingFilter = null, receivingFilter = null, edgeFilters = null,
-    graphEnabled = false, graphDensity = 1.0 } = {}
+    graphEnabled = false, graphDensity = 1.0, colorField = null } = {}
 ) {
   // Which edge-source parquet to query; appended to every /edges request.
   const efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
+  const viewKey = viewport && imageSize?.w
+    ? `${viewport.xmin},${viewport.ymin},${viewport.xmax},${viewport.ymax}` : "";
+  const structViewRef = useRef(null);
+  const graphViewRef = useRef(null);
+  const scoreViewRef = useRef(null);
 
   // Serialised so the effects can depend on filter *content* rather than object
   // identity, which changes on every render.
@@ -98,6 +107,8 @@ export function useEdges(
       return;
     }
 
+    const delay = fetchDelay(structViewRef.current, viewKey, DEBOUNCE_MS);
+    structViewRef.current = viewKey;
     clearTimeout(structTimerRef.current);
     structTimerRef.current = setTimeout(async () => {
       if (structAbortRef.current) structAbortRef.current.abort();
@@ -108,6 +119,9 @@ export function useEdges(
       const { xmin, ymin, xmax, ymax } = viewport;
       const body = { xmin, ymin, xmax, ymax, density: Math.max(0.01, Math.min(1.0, density)) };
       if (minStrength != null && minStrength > 0) body.min_strength = minStrength;
+      // The metadata colour-by column rides on these rows as `color_value`,
+      // instead of a separate whole-file request (see useEdgeColors).
+      if (colorField) body.color_field = colorField;
       // Filters go to the server so they apply before the density sample;
       // filtering the response instead would sample first and leave a fraction
       // of the subset. The cell layer's own filter is deliberately NOT sent —
@@ -130,10 +144,10 @@ export function useEdges(
       } finally {
         if (structAbortRef.current === ctrl) setLoadingStructural(false);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
 
     return () => clearTimeout(structTimerRef.current);
-  }, [apiBase, dataset, viewport, imageSize, enabled, minStrength, density, efParam, filterKey]); // eslint-disable-line
+  }, [apiBase, dataset, viewport, imageSize, enabled, minStrength, density, efParam, filterKey, colorField]); // eslint-disable-line
 
   // ── Effect 1b: tissue-graph fetch ─────────────────────────────────────────
   // Takes no filter arguments at all, and depends on no filter state — so no
@@ -144,6 +158,8 @@ export function useEdges(
       setGraphEdges([]);
       return;
     }
+    const delay = fetchDelay(graphViewRef.current, viewKey, DEBOUNCE_MS);
+    graphViewRef.current = viewKey;
     clearTimeout(graphTimerRef.current);
     graphTimerRef.current = setTimeout(async () => {
       if (graphAbortRef.current) graphAbortRef.current.abort();
@@ -163,7 +179,7 @@ export function useEdges(
       } catch (e) {
         if (e.name !== "AbortError") setGraphEdges([]);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
     return () => clearTimeout(graphTimerRef.current);
   }, [apiBase, dataset, viewport, imageSize, graphEnabled, graphDensity, efParam]); // eslint-disable-line
 
@@ -199,6 +215,12 @@ export function useEdges(
       return;
     }
 
+    // An LRM toggle leaves the viewport where it is, so it is not debounced:
+    // the server answers it from its cached per-viewport score matrix in a few
+    // milliseconds, and the previous request, if still in flight, is aborted
+    // (which cancels it on the server too).
+    const delay = fetchDelay(scoreViewRef.current, viewKey, DEBOUNCE_MS);
+    scoreViewRef.current = viewKey;
     clearTimeout(scoreTimerRef.current);
     scoreTimerRef.current = setTimeout(async () => {
       if (scoreAbortRef.current) scoreAbortRef.current.abort();
@@ -247,7 +269,7 @@ export function useEdges(
       } finally {
         if (scoreAbortRef.current === ctrl) setLoadingScores(false);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
 
     return () => clearTimeout(scoreTimerRef.current);
   }, [apiBase, dataset, viewport, imageSize, enabled, hiddenLrms, lrmCatalogue, efParam, density]); // eslint-disable-line

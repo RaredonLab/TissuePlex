@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { loggedFetch } from "../utils/clientLog";
+import { fetchDelay, geneListParams } from "../utils/viewportFilters";
 
 /**
  * Fetches cell boundary vertices and groups them into polygon objects.
@@ -15,10 +16,37 @@ import { loggedFetch } from "../utils/clientLog";
  *
  * prevTotalRef seeds to a conservative estimate (50k) so the very first probe
  * is 10% rather than 100%.  After the first response the estimate self-corrects.
+ *
+ * colorSpec — { mode, field, categorical, genes, allGenes } or null. When set,
+ * the request asks the backend to attach `colors` for exactly the cells it
+ * returns, so polygons and their colours arrive together and nothing is ever
+ * fetched for a cell that is not on screen. Returned as `colors`; see
+ * useCellColors.
  */
 
 const TARGET_CELLS = 5_000;
 const SEED_TOTAL   = 50_000; // conservative first-probe estimate
+const VIEWPORT_DEBOUNCE_MS = 200;
+
+/** Query string for the colour spec, or "" when no colours are wanted. */
+function colorParams(spec) {
+  if (!spec || !spec.mode || spec.mode === "off") return "";
+  if (spec.mode === "metadata") {
+    if (!spec.field) return "";
+    let out = `&color_mode=metadata&color_field=${encodeURIComponent(spec.field)}`;
+    if (spec.categorical === true || spec.categorical === false) {
+      out += `&color_categorical=${spec.categorical}`;
+    }
+    return out;
+  }
+  if (spec.mode === "gene_set") {
+    // null = the whole panel (stated by omission); an empty set = colour nothing.
+    if (spec.genes !== null && spec.genes !== undefined && spec.genes.size === 0) return "";
+    return "&color_mode=gene_set"
+      + geneListParams(spec.genes ?? null, spec.allGenes, "color_genes", "color_exclude_genes");
+  }
+  return "";
+}
 
 /**
  * Serialise a metadata filter (issue #45) into query params.
@@ -43,9 +71,10 @@ function filterParams(filter) {
 
 export function useCellBoundaries(
   apiBase, dataset, viewport, imageSize, enabled = true, fraction = null,
-  filter = null
+  filter = null, colorSpec = null
 ) {
   const [cells, setCells]                     = useState([]);
+  const [colors, setColors]                   = useState(null);
   const [total, setTotal]                     = useState(0);
   const [effectiveFraction, setEffective]     = useState(TARGET_CELLS / SEED_TOTAL);
   const [loading, setLoading]                 = useState(false);
@@ -58,6 +87,10 @@ export function useCellBoundaries(
   // dependency — the filter arrives as an object whose identity changes on every
   // render, which would otherwise refetch continuously.
   const filterQS = filterParams(filter);
+  const colorQS = colorParams(colorSpec);
+  const viewKey = viewport && imageSize?.w
+    ? `${viewport.xmin},${viewport.ymin},${viewport.xmax},${viewport.ymax}` : "";
+  const lastViewKeyRef = useRef(null);
 
   // One-shot recalibration.
   //
@@ -77,6 +110,9 @@ export function useCellBoundaries(
       return;
     }
 
+    // Debounce a moving viewport; act on a filter or colour change at once.
+    const delay = fetchDelay(lastViewKeyRef.current, viewKey, VIEWPORT_DEBOUNCE_MS);
+    lastViewKeyRef.current = viewKey;
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       // Cancel any in-flight request before starting a new one
@@ -102,9 +138,9 @@ export function useCellBoundaries(
         } else {
           url += `?${fracParam}`;
         }
-        url += filterQS;
+        url += filterQS + colorQS;
         const res = await loggedFetch("cell-boundaries", { dataset }, url, { signal: ctrl.signal });
-        if (!res.ok) { setCells([]); setTotal(0); return; }
+        if (!res.ok) { setCells([]); setColors(null); setTotal(0); return; }
         const data = await res.json();
 
         // Expect { boundaries: [...], total: N }
@@ -132,7 +168,7 @@ export function useCellBoundaries(
           }
         }
 
-        if (!Array.isArray(rows)) { setCells([]); return; }
+        if (!Array.isArray(rows)) { setCells([]); setColors(null); return; }
 
         // Group flat vertex list by cell_id → polygon arrays
         const byCell = new Map();
@@ -143,16 +179,17 @@ export function useCellBoundaries(
         setCells(
           Array.from(byCell.entries()).map(([cell_id, polygon]) => ({ cell_id, polygon }))
         );
+        setColors(data.colors ?? null);
       } catch (e) {
         if (e.name === "AbortError") return; // silently ignore — a newer fetch is in flight
         setError(e.message);
       } finally {
         if (abortRef.current === ctrl) setLoading(false);
       }
-    }, 200);
+    }, delay);
 
     return () => clearTimeout(timerRef.current);
-  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, filterQS, recalibrate]);
+  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, filterQS, colorQS, recalibrate]);
 
   // Abort in-flight request on unmount
   useEffect(() => {
@@ -162,5 +199,5 @@ export function useCellBoundaries(
     };
   }, []);
 
-  return { cells, total, effectiveFraction, loading, error };
+  return { cells, colors, total, effectiveFraction, loading, error };
 }

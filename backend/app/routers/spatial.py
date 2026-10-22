@@ -256,6 +256,12 @@ async def cell_boundaries(
     filter_min: float = Query(None, description="Inclusive lower bound"),
     filter_max: float = Query(None, description="Inclusive upper bound"),
     filter_missing: bool = Query(False, description="Also keep units with no value"),
+    color_mode: str = Query(None, description="gene_set | metadata: also return colour "
+                            "values for the cells in the response"),
+    color_field: str = Query(None),
+    color_categorical: Optional[bool] = Query(None),
+    color_genes: List[str] = Query(None),
+    color_exclude_genes: List[str] = Query(None),
 ):
     """Cell polygon boundaries filtered by bounding box and, optionally, metadata.
 
@@ -264,18 +270,32 @@ async def cell_boundaries(
     The metadata filter (issue #45) is resolved to a cell-id set and applied inside
     the reader *before* sampling, so restricting to a rare cluster isolates it at
     full density instead of thinning it to almost nothing.
+
+    With `color_mode` the response also carries `colors`: the colour-by values
+    for exactly the cells returned, plus the dataset-wide type / categories /
+    range. One request instead of two, and never a value for a cell that is not
+    on screen. The gene list for `gene_set` follows the transcripts endpoint's
+    rule — allowlist, or its complement, or neither for the whole panel.
     """
     reader = _reader(dataset)
     spec = MetadataFilter.build(
         filter_field, filter_values, filter_min, filter_max, filter_missing)
+    genes = (_resolve_color_genes(dataset, color_genes, color_exclude_genes)
+             if color_mode == "gene_set" else None)
 
     def work():
         cell_ids = reader.filter_cell_ids(spec)
-        return ORJSONResponse(reader.cell_boundaries(
+        result = reader.cell_boundaries(
             bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
             fraction=max(0.0001, min(1.0, fraction)),
             cell_ids=cell_ids,
-        ))
+        )
+        if color_mode in ("gene_set", "metadata"):
+            rows = result.get("boundaries") or []
+            in_view = list({r["cell_id"] for r in rows if "cell_id" in r})
+            result["colors"] = reader.color_values_for(
+                color_mode, color_field, genes, color_categorical, cell_ids=in_view)
+        return ORJSONResponse(result)
 
     try:
         return await run_cancellable(request, work)
@@ -310,13 +330,32 @@ class ColorValuesRequest(BaseModel):
     # None = auto-detect from dtype and cardinality; True/False force the
     # interpretation of a metadata column (issue #35 — integer cluster IDs).
     categorical: Optional[bool] = None
+    # Restrict `values` to these cells (the ones in view), or drop `values`
+    # altogether and return only type / categories / range.
+    cell_ids: Optional[List[str]] = None
+    summary: bool = False
 
 
 @router.post("/{dataset}/color-values")
 async def color_values_post(request: Request, dataset: str, body: ColorValuesRequest):
-    """Per-cell color values for gene_set or metadata coloring."""
+    """Per-cell color values for gene_set or metadata coloring.
+
+    Without `cell_ids` or `summary` this is one value per cell in the *whole*
+    dataset — the biggest single response the app can send. The viewer itself
+    no longer asks for that: colours for the cells in view ride on the
+    cell-boundaries response, and the sidebar asks for `summary`.
+    """
     reader = _reader(dataset)
-    # One value per cell in the *whole* dataset, so on a large run this is the
-    # biggest single response the app sends; orjson matters here.
-    return await run_cancellable(request, lambda: ORJSONResponse(reader.color_values(
-        body.mode, body.field, body.genes, body.categorical)))
+    return await run_cancellable(request, lambda: ORJSONResponse(reader.color_values_for(
+        body.mode, body.field, body.genes, body.categorical,
+        cell_ids=body.cell_ids, summary=body.summary)))
+
+
+def _resolve_color_genes(dataset: str, genes: Optional[list], exclude: Optional[list]) -> list:
+    """Allowlist / complement / all, the same rule the transcripts endpoint uses."""
+    if genes:
+        return list(genes)
+    if exclude:
+        excluded = set(exclude)
+        return [g for g in _genes(dataset) if g not in excluded]
+    return list(_genes(dataset))

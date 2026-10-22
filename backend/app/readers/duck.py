@@ -291,6 +291,27 @@ def connect() -> "_Conn":
     return _Conn()
 
 
+class uninterruptible:
+    """Run a block outside the current request's cancellation scope.
+
+    For work that outlives the request that triggered it — a cache build whose
+    result the *next* request will use. Under the scope, the browser abandoning
+    one toggle would interrupt the build, the following toggle would start it
+    again from zero, and a user clicking quickly would never see it land. The
+    connections opened inside the block hold a concurrency slot as usual; they
+    just cannot be interrupted by the client leaving.
+    """
+    __slots__ = ("_token",)
+
+    def __enter__(self):
+        self._token = _current_scope.set(None)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        _current_scope.reset(self._token)
+        return False
+
+
 def is_cancelled_error(exc: BaseException) -> bool:
     """True when `exc` is the server's own abort of an abandoned query."""
     return isinstance(exc, (QueryCancelled, duckdb.InterruptException))
@@ -406,16 +427,42 @@ def register_ids(conn, ids, name: str = "tp_filter", col: str = "cell_id") -> st
     The metadata filter (issue #45) can keep hundreds of thousands of cells, which
     is far past the point where an ``IN (?, ?, …)`` list is workable — DuckDB has
     to bind every parameter, and the SQL text itself grows to megabytes. Handing
-    the ids over as a one-column frame instead makes it an ordinary hash semi-join.
+    the ids over as a one-column table instead makes it an ordinary hash semi-join.
+
+    The table is built once per id *set* and reused. The sets come from
+    ``filter_cell_ids``, which caches them per filter, so the same object arrives
+    on every pan while a filter is active; converting 500K ids to strings and
+    into a frame on each request cost 0.1–0.2 s of pure overhead per query. The
+    memo is keyed on the set's identity and checks it (``is``), so a recycled
+    ``id()`` can never hand back another filter's ids. An Arrow table rather than
+    a pandas frame, because DuckDB scans Arrow without converting it first.
 
     ``ids`` must not be empty; an empty filter means "nothing matches" and callers
     should short-circuit rather than build a query that cannot return rows.
     """
-    import pandas as pd
-
-    frame = pd.DataFrame({col: [str(i) for i in ids]})
-    conn.register(name, frame)
+    table = _id_table(ids, col)
+    conn.register(name, table)
     return f"IN (SELECT \"{col}\" FROM {name})"
+
+
+_ID_TABLES: "dict[int, tuple]" = {}        # id(ids) → (ids, col, arrow table)
+_ID_TABLES_MAX = 16
+_id_tables_lock = threading.Lock()
+
+
+def _id_table(ids, col: str):
+    import pyarrow as pa
+    key = id(ids)
+    with _id_tables_lock:
+        hit = _ID_TABLES.get(key)
+        if hit is not None and hit[0] is ids and hit[1] == col:
+            return hit[2]
+    table = pa.table({col: pa.array([str(i) for i in ids], type=pa.string())})
+    with _id_tables_lock:
+        if len(_ID_TABLES) >= _ID_TABLES_MAX:
+            _ID_TABLES.pop(next(iter(_ID_TABLES)))
+        _ID_TABLES[key] = (ids, col, table)
+    return table
 
 
 # Sampling is seeded so that re-fetching an unchanged viewport returns the same

@@ -170,10 +170,14 @@ frontend/
       ExportDialog.jsx       Figure export: output size, DPI tag, background, scale bar
       RenderingStatus.jsx    Per-panel loading badge, driven by the store's loadingKeys set
     hooks/
-      useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
-      useCellBoundaries.js   Viewport-bounded cell boundary fetch (skip when fracW >= 0.5)
-      useCellColors.js       POST color-values; maps cell_id → RGBA; supports clamp
-      useEdgeColors.js       lrm_set: client-side from visible_score_sum; metadata: POST edge-color-values
+      useTranscripts.js      Viewport-bounded transcript fetch; the gene filter is applied
+                             in the browser from the unfiltered sample — see Filter
+                             Changes Are Not Pans
+      useCellBoundaries.js   Viewport-bounded cell boundary fetch; carries the colour spec
+                             so `colors` for exactly those cells ride on the response
+      useCellColors.js       Maps the `colors` from the boundaries response to RGBA; no fetch
+      useEdgeColors.js       Both modes client-side: lrm_set from visible_score_sum,
+                             metadata from `color_value` on the rows + a cached summary
       useEdges.js            Viewport-bounded edge fetch; POSTs to /query-grouped
     utils/
       colormap.js            Palette definitions (viridis/plasma/magma/inferno) + valueToColor()
@@ -182,6 +186,9 @@ frontend/
                              Its stroke-width scaling is inert — see Figure Export
       pngExport.js           PNG pHYs (DPI) tagging, blob download, scale-bar rounding
       listImport.js          Gene / LRM list CSV import + export — see its own section
+      viewportFilters.js     Pure helpers: client-side gene filter over the viewport
+                             sample, the debounce-only-a-moving-viewport rule, and the
+                             allowlist/complement gene-list params. Tested.
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -594,9 +601,14 @@ symptom did not look like a filter bug: on a 480-gene Xenium panel one click too
 transcript layer from 200,000 dots to ~360, which reads as "transcripts stopped working".
 Present since v0.2.0 (`c52dbc0`).
 
-**The filter is sent as an allowlist or as its complement, whichever is shorter**
-(`genes=` vs `exclude_genes=`). This is not an optimisation — it is what keeps the
-feature working at all. The list travels in the query string of a GET, and measured
+**The filter is applied in the browser, not by a request** (see *Filter Changes
+Are Not Pans*). The transcripts fetch is the viewport's *unfiltered* sample; a
+species toggle filters it synchronously. A request carries the gene list only in
+two cases — the refetch when the 200K cap thinned the sample, and the `gene_set`
+colour spec on the boundaries request — and then **it is sent as an allowlist or
+as its complement, whichever is shorter** (`genes=` vs `exclude_genes=`,
+`color_genes=` vs `color_exclude_genes=`). This is not an optimisation — it is
+what keeps the feature working at all. The list travels in the query string of a GET, and measured
 against this stack, 479 of 480 genes is a **7,780-byte URL, ~220 bytes under nginx's
 8 KB request-line limit**, while 600 genes returned **414**. Deselecting a handful of
 genes from a large panel is the ordinary case and produces exactly that shape, so a
@@ -610,11 +622,11 @@ Note the two forms are equivalent to each other but **not** to sending no filter
 "no filter" keeps them (measured: 35,013 vs 34,997 rows in one viewport). That predates
 this change and is why the picker never lists control probes.
 
-An **empty** `selectedGenes` Set short-circuits the fetch. It means "show no species",
-but omitting the gene parameter means "no filter" to the backend, so the request used to
-return the full 200K-row cap for Viewer's client-side filter to discard — nothing drew,
-which looked right, while ~20 MB was fetched per pan and the layer badge reported the
-unfiltered total against an empty canvas.
+An **empty** `selectedGenes` Set means "show no species": the hook draws nothing
+and keeps the base sample it has, so re-selecting a gene is instant; it does not
+fetch a base for a viewport it has not seen. (It used to send the request with no
+gene parameter, which the backend reads as "no filter", and throw the 200K rows
+away.)
 
 `useCellColors` `gene_set` mode: if `selectedGenes === null`, uses all `allGenes`;
 otherwise uses `[...selectedGenes]`.
@@ -1067,8 +1079,8 @@ what fraction of the data is actually on screen.
 elsewhere. That makes it spatially uniform, the same on every re-fetch, and
 nested — zooming in only ever adds dots. Cell boundaries hash *cell IDs* before fetching
 rows, so a sampled cell keeps all of its vertices and never renders as a partial polygon.
-CosMx still uses pandas `df.sample`, which is uniform. See the Spatial Query Path section
-for why this is not `USING SAMPLE reservoir`.
+CosMx goes through the same hash sampler since it moved to DuckDB. See the Spatial Query
+Path section for why this is not `USING SAMPLE reservoir`.
 
 **Edge sampling** is the same idea: `density_predicate` hashes the edge id, so each
 edge is kept independently at probability `density`, and no predicate is emitted at all
@@ -1079,6 +1091,32 @@ one row per directed edge (GROUP BY edge, ORDER BY RANDOM()). For a 168M-row par
 (~300K edges × 559 LRMs) this is ~500× fewer rows than the raw query. The `excluded_lrms`
 list is sent in the request body so `visible_lrm_count` and `visible_score_sum` are
 pre-computed server-side.
+
+### Filter Changes Are Not Pans
+
+The rule, in every data hook: **debounce a moving viewport; act on a click at
+once.** `viewportFilters.fetchDelay` returns 0 when the fetch's viewport key is
+unchanged from the last one, and the usual debounce otherwise. A gene toggle, an
+LRM toggle, a metadata filter edit or a colour column change used to wait out a
+200–400 ms debounce meant for drag events, then re-query the server. Now:
+
+- **Transcript species toggles make no request at all.** The fetch is the
+  viewport's *unfiltered* sample; `filterTranscriptsByGene` applies the
+  allowlist synchronously. This is exact, not approximate: the server keeps each
+  row by a seeded hash with probability `fraction`, independent of gene, so the
+  filtered rows of the unfiltered sample *are* the rows a filtered fetch would
+  return. The one exception is when the 200K cap, not `fraction`, sized the
+  sample (whole-tissue zoom on a large run): the helper reports `capped`, and the
+  hook fetches the filtered rows from the server, immediately and abortably, and
+  swaps them in. `total` under a client-side filter is estimated from the keep
+  rate (± sampling noise). Measured in the browser on the breast fixture: three
+  abundant genes unchecked, 183,453 → 101,872 dots, zero requests.
+- **LRM toggles are a request, but a few-millisecond one.** The server keeps the
+  viewport's `(edge, lrm, score)` rows as flat arrays — see *Per-viewport score
+  matrix* — so `/query-scores` is a masked `bincount`, not a re-scan. The
+  request goes out with no debounce; a superseded one is aborted, which cancels
+  it on the server too.
+- **Colour values never cover more than the viewport.** See *Color System*.
 
 ---
 
@@ -1382,9 +1420,8 @@ Four things to know:
   bound; SELECT 35 ms vs 321 ms. On an unsorted file the two are identical, which is why
   this only started to matter once the cache existed. Inlining is safe because every value
   goes through `float()` and non-finite values are rejected — string filters such as gene
-  names still go through `in_predicate()`. `edge_reader.py` still binds its bbox; that
-  costs nothing today because edge parquet is unsorted, but it would have to change before
-  an edge spatial index would pay off.
+  names still go through `in_predicate()`. `edge_reader._bbox_sql` inlines its bounds the
+  same way, which is what lets the edge spatial index pay off.
 - **Small files are skipped** (`SPATIAL_CACHE_MIN_BYTES`, default 64 MB). Below that the
   build cost and extra disk are not repaid. This also keeps the bundled sample datasets
   uncached, so the golden baseline does not depend on whether a cache happens to exist.
@@ -1456,6 +1493,30 @@ Things to preserve when editing these methods:
 
 The `cellColorClamp` / `edgeColorClamp` store values are passed into the color hooks
 and applied as `lo = clamp.low ?? dataMin`, `hi = clamp.high ?? dataMax`.
+
+**No colour request ever covers more than the viewport.** Cell colours ride on
+the boundaries response: `useCellBoundaries` passes the colour spec
+(`color_mode`, `color_field`, `color_categorical`, `color_genes` /
+`color_exclude_genes`) and `spatial.py` attaches `colors` for exactly the cells
+it returned, via `SpatialDatasetReader.color_values_for(cell_ids=…)`, which
+computes the full per-cell result once per (mode, field, genes, override) and
+subsets it. Polygons and their colours land in the same render, so there is no
+flash of uncoloured cells. `POST /color-values` still exists for the sidebar,
+which now sends `summary: true` — type, categories and range only. It used to
+return one value for every cell in the dataset to the viewer and the filter
+panels alike: tens of MB on a million-cell run, a million-entry Map held for as
+long as the colouring was on, and a full pass over it per clamp change.
+
+Edge metadata colours work the same way from the other side: `useEdges` sends
+`color_field` and `query_grouped` returns the per-edge value as `color_value` on
+the rows (one extra `FIRST()` in the aggregate, or a LEFT JOIN on the registered
+`edge-metadata/` frame), while `edge_color_values(summary=True)` →
+`edge_color_summary` supplies the dataset-wide type / categories / min / max /
+p95, cached per column. **Ranges and categories are always those of the whole
+dataset**, so legends and the linked colour scale keep their meaning. One
+corner-case change: an integer column that is null on some edges used to be
+typed from the per-edge `FIRST()` series (float64 with NaN → continuous); the
+summary types it from its DISTINCT non-null values (int → categorical when ≤ 30).
 
 **Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server
@@ -1576,8 +1637,12 @@ subset renders at full density.
 
 **Large id sets go through `duck.register_ids()`, not `IN (?, ?, …)`.** A filter can
 keep hundreds of thousands of cells; binding that many parameters is unworkable and
-the SQL text alone reaches megabytes. Registering a one-column frame makes it an
-ordinary hash semi-join.
+the SQL text alone reaches megabytes. Registering a one-column table makes it an
+ordinary hash semi-join. The table is an Arrow table built once per id *set* and
+memoised on the set's identity (checked with `is`, so a recycled `id()` can never
+return another filter's ids): `filter_cell_ids` hands back the same set object on
+every pan, and converting 500K ids to strings per request was 0.1–0.2 s of pure
+overhead.
 
 Two things that bit during implementation and are easy to reintroduce:
 
@@ -1634,7 +1699,9 @@ inside a `duck.QueryScope` and polls `request.is_disconnected()` every 100 ms;
 on disconnect it calls `interrupt()` on every cursor the call opened and
 returns a 499. Measured: a query that would have taken 300–560 ms stopped
 ~40 ms after the client left. The scope travels in a contextvar, so readers call
-`connect()` exactly as before and need no plumbing. **The timing middleware must
+`connect()` exactly as before and need no plumbing. `duck.uninterruptible()`
+clears it for a block whose result outlives the request — a cache build the
+*next* request will use — so the client leaving does not throw the work away. **The timing middleware must
 stay a pure ASGI middleware** (`logging_setup._TimingMiddleware`): Starlette's
 `BaseHTTPMiddleware` re-wraps the receive channel and `is_disconnected()` never
 fires behind it — the first version of this used `@app.middleware("http")` and
@@ -1681,10 +1748,47 @@ Measured on the 33M-row synthetic file (`scratchpad/make_big_edges.py` shape:
 | query_scores, 10% viewport | 316 ms | 27 ms | 12× |
 | query_grouped, whole tissue | 455 ms | 293 ms | 1.6× |
 
-Whole-tissue views still scan the file (there is nothing to prune), but gain
-from the literal bbox, the records fix and orjson. The index build took 8 s for
-33M rows; expect a minute or two for a 168M-row lab file, during which queries
-use the unsorted file (the log says so).
+The index build took 8 s for 33M rows; expect a minute or two for a 168M-row
+lab file, during which queries use the unsorted file (the log says so).
+
+**Whole-tissue views read a density tier instead.** Nothing can be pruned by
+position at that zoom, but the density predicate is deterministic: the edges
+kept at density ≤ 0.1 are a *fixed* subset of the file, and any density ≤ 0.1
+selects a subset of that subset. So once the sorted file exists, `_from(density)`
+derives a second parquet from it — the ≤ 10% tier, `edges.d10.sorted.parquet`,
+built through `spatial_cache.sorted_path(..., where_sql=…)` — and reads it for
+any query at `_density_cut(density) <= _density_cut(TIER_DENSITY)`. The query's
+own predicate is a no-op on it; the scan is a tenth of the size. Measured on the
+33M-row file at whole-tissue zoom, density 0.1: `query_grouped` 248 → 48 ms,
+`query_structure` 92 → 20 ms, identical edge sets. The tier is used only when
+the file has an `edge` column (the predicate hashes it) and never above
+`TIER_DENSITY` — a query at 0.5 would be answered from a tenth of the data.
+
+### Per-viewport score matrix (`EdgeReader._score_matrix`)
+
+An LRM toggle changes which rows of each in-view edge count, not which edges are
+in view. `query_scores` therefore keeps the viewport's `(edge, lrm, score)` rows
+in memory as three flat arrays, keyed on `(file, bbox, density)` — exactly the
+inputs that decide the row set; filters do not enter because `query_scores`
+never applied them — and answers each toggle with a masked `np.bincount`.
+Measured on the 33M-row file: whole tissue at density 0.1 (3.3M rows, 54 MB)
+284 → 35–76 ms per toggle after a one-time 409 ms build; a 10% viewport 23 → 1 ms.
+
+Things to know:
+
+- **It must agree with the SQL path exactly**, and `edge_pipeline_check`
+  property 4 asserts that it does on every dataset: null scores skipped, NaN
+  propagated, zero-visible edges present in the exclusion form and absent in the
+  inclusion form. The whole-file form (no bbox) and the empty exclusion the
+  golden snapshot probes are left to SQL.
+- **Bounded.** Entries are evicted LRU against `SCORE_CACHE_MB` (default 8% of
+  the memory ceiling, at most 256 MB), and a viewport whose rows would not fit
+  is answered by SQL as before, with a log line saying so.
+- **The build runs under `duck.uninterruptible()`.** It is the *next* toggle
+  that benefits from the matrix; under the request's cancellation scope a user
+  clicking quickly would interrupt the build on every click and never see it
+  land. Concurrent toggles for the same view wait on `_matrix_lock` for the
+  first build rather than each scanning the file.
 
 `query_scores` also takes `density` now and applies the same deterministic
 `density_predicate` as `query_grouped`, *before* its GROUP BY. It used to
@@ -1726,8 +1830,10 @@ On top of that:
   and the DuckDB settings in effect.
 
 Tuning knobs, all optional: `LOG_LEVEL`, `LOG_DIR`, `SLOW_REQUEST_MS`,
-`DUCKDB_THREADS`, `QUERY_CONCURRENCY`. All are passed through by both compose
-files.
+`DUCKDB_THREADS`, `QUERY_CONCURRENCY`, `SCORE_CACHE_MB`. All are passed through
+by both compose files. `frontend/nginx.conf` allows 600 s per proxied request:
+abandoned queries are cancelled server-side, so a long ceiling costs nothing,
+and a short one turned slow-but-correct first requests into 504s.
 
 ## Tile Pyramid
 
@@ -1956,23 +2062,32 @@ which it does not cover at all.
   which edges are returned.
 - **`sample_data` must not contain anything over `SPATIAL_CACHE_MIN_BYTES`** (64 MB), or
   the golden baseline starts depending on whether a cache has been built.
+- **The density tier is only valid at `density <= TIER_DENSITY`.** `_from(density)`
+  checks `_density_cut`, not the float, so 0.1 exactly hits the tier. Pass the query's
+  real density to `_from`; a query that forgot and read the tier at 0.5 would silently
+  draw a fifth of the edges it claims.
+- **`query_scores` has two implementations and they must agree.** The score matrix is
+  the fast one; the SQL aggregate is the reference. `edge_pipeline_check` property 4
+  compares them on every dataset. Change the arithmetic in one and the check fails.
+- **The viewer must never ask for whole-dataset colour values.** `color-values` and
+  `edge-color-values` without `cell_ids` / `summary` return a value per unit in the
+  dataset; the viewer gets its colours from the boundaries response and the grouped
+  edge rows. The sidebar sends `summary: true`.
+- **A gene toggle must not refetch transcripts.** `useTranscripts` keys its base fetch
+  on viewport / fraction / quality only; the gene filter is `filterTranscriptsByGene`
+  over that sample. Adding `genesKey` to the fetch deps reintroduces the round trip.
 
 ---
 
 ## What's Not Built Yet
 
-1. **Whole-tissue edge queries still scan the whole file.** Zoomed-in queries are
-   now pruned (see *Edge Spatial Index*), but at whole-tissue zoom nothing can be
-   skipped, so an LRM toggle on a 168M-row file is still a full scan of three
-   columns. The natural next step is a tiered density cache — a parquet holding
-   only the edges the deterministic density predicate keeps at ≤ 10%, which is a
-   fixed subset — so every query at the default density reads a tenth of the
-   rows. Not built. Two related inefficiencies: `edge_color_values` (metadata and
-   lrm_set modes) and `color_values` for cells return a value for *every* unit in
-   the dataset rather than the viewport, which on a million-cell run is a
-   multi-MB response and a million-entry Map in the browser; and
-   `register_ids` rebuilds a str-id DataFrame per request when an endpoint filter
-   is active (~0.1–0.2 s at 500K ids) — cache the frame per filter spec.
+1. **Whole-tissue edge queries above density 0.1 still scan the whole file.**
+   At or below 0.1 (the default) they read the ≤ 10% tier (see *Edge Spatial
+   Index*); a whole-tissue view at density 0.5 or 1.0 is a full scan, and the
+   first LRM toggle there builds a score matrix from it. A second tier (say
+   ≤ 50%) would be a one-line addition if anyone works that way. The old
+   whole-dataset colour values and the per-request `register_ids` rebuild are
+   both fixed.
 
 2. **Supplemental cell metadata is not shown in the cell info panel** — `CellInfoPanel.jsx`
    renders a hardcoded field list (`cell_id`, x, y, `transcript_counts`, `total_counts`,

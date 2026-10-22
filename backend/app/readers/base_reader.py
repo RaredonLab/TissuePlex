@@ -6,6 +6,7 @@ for normalizing all coordinates to image pixel space before returning data.
 The router layer is platform-agnostic — it only calls the methods defined here.
 """
 import math
+from collections import OrderedDict
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -154,6 +155,52 @@ class SpatialDatasetReader(ABC):
         None auto-detects, True/False force the interpretation (issue #35).
         """
         ...
+
+    # Full colour results, kept for the last few request keys. A viewport-scoped
+    # request (`cell_ids`) pays the per-cell computation once — the metadata
+    # column or the gene-set sum over every cell — and then subsets; the next
+    # pan over the same colouring is a dictionary lookup per cell in view.
+    _COLOR_CACHE_MAX = 2
+
+    def color_values_for(
+        self,
+        mode: str,
+        field: Optional[str] = None,
+        genes: Optional[list[str]] = None,
+        categorical: Optional[bool] = None,
+        cell_ids: Optional[list] = None,
+        summary: bool = False,
+    ) -> dict:
+        """`color_values`, optionally restricted to `cell_ids` or to its summary.
+
+        The viewer used to download one value for every cell in the dataset and
+        hold a Map of them for as long as the colouring was on — tens of MB and
+        a second of main-thread work on a million-cell run, repeated on every
+        clamp change. It now asks only for the cells whose polygons it has, and
+        the sidebar asks for `summary` (type, categories, range) when that is
+        all it needs. The full result is cached here so neither costs a
+        recomputation. Range and categories are always those of the whole
+        dataset, so legends and the linked colour scale keep their meaning.
+        """
+        key = (mode, field, tuple(genes) if genes is not None else None, categorical)
+        cache = self.__dict__.setdefault("_color_cache", OrderedDict())
+        full = cache.get(key)
+        if full is None:
+            full = self.color_values(mode, field, genes, categorical)
+            cache[key] = full
+            while len(cache) > self._COLOR_CACHE_MAX:
+                cache.popitem(last=False)
+        else:
+            cache.move_to_end(key)
+        if cell_ids is None and not summary:
+            return full
+        out = {k: v for k, v in full.items() if k != "values"}
+        if summary:
+            out["values"] = {}
+            return out
+        vals = full.get("values") or {}
+        out["values"] = {c: vals[c] for c in cell_ids if c in vals}
+        return out
 
     # ── Metadata typing, colouring and filtering (platform-agnostic) ──────────
     #

@@ -762,7 +762,8 @@ function CellFilterSection({ unitLabel = "cell" }) {
       fetch(`${apiBase}/spatial/${d}/color-values`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "metadata", field, categorical }),
+        // Type, categories and range only — the filter never needs a value per cell.
+        body: JSON.stringify({ mode: "metadata", field, categorical, summary: true }),
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null)));
   }, [apiBase, datasets.join(" "), categoricalOverrides]); // eslint-disable-line
 
@@ -804,7 +805,8 @@ function EndpointFilterSection() {
       fetch(`${apiBase}/spatial/${d}/color-values`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "metadata", field, categorical }),
+        // Type, categories and range only — the filter never needs a value per cell.
+        body: JSON.stringify({ mode: "metadata", field, categorical, summary: true }),
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null)));
   }, [apiBase, datasets.join(" "), categoricalOverrides]); // eslint-disable-line
 
@@ -865,7 +867,7 @@ function EdgeFilterSection() {
       fetch(`${apiBase}/edges/${dataset}/edge-color-values${ef}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "metadata", field, categorical }),
+        body: JSON.stringify({ mode: "metadata", field, categorical, summary: true }),
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null)));
   }, [apiBase, srcKey, categoricalOverrides]); // eslint-disable-line
 
@@ -1713,7 +1715,8 @@ function EdgeSection() {
       fetch(`${apiBase}/edges/${dataset}/edge-color-values${ef}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "metadata", field, categorical: edgeOverride }),
+        // Summary only: the legend needs the type and categories, not a value per edge.
+        body: JSON.stringify({ mode: "metadata", field, categorical: edgeOverride, summary: true }),
       }).then((r) => (r.ok ? r.json() : null)).catch(() => null)))
       .then((d) => { if (!cancelled && d) setEdgeMeta({ type: d.type, categories: d.categories ?? [] }); });
     return () => { cancelled = true; };

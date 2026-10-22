@@ -188,6 +188,11 @@ class EdgeGroupedQueryRequest(BaseModel):
     # A list rather than one filter — the composition gap deferred in #45.
     edge_filters: Optional[List[MetadataFilterSpec]] = None
 
+    # Edge metadata column whose per-edge value is wanted as `color_value` on
+    # each row — the metadata colour-by, carried on the rows already being
+    # fetched instead of a second whole-file request.
+    color_field: Optional[str] = None
+
     # Superseded. cell_filter applied one cell predicate to *both* endpoints and
     # tied edge visibility to the cell layer's filter; cell and edge filtering are
     # now independent actions. edge_filter is the pre-list singular form. Both are
@@ -287,6 +292,7 @@ async def query_edges_grouped(request: Request, dataset: str, body: EdgeGroupedQ
             sending_ids=sending,
             receiving_ids=receiving,
             edge_filters=[f for f in filters if f is not None],
+            color_field=body.color_field,
         ))
 
     try:
@@ -342,6 +348,8 @@ class EdgeColorRequest(BaseModel):
     field: Optional[str] = None      # for metadata: column name
     # None = auto-detect; True/False force the interpretation (issue #35).
     categorical: Optional[bool] = None
+    # Type / categories / range only, no per-edge values (metadata mode).
+    summary: bool = False
 
 
 @router.post("/{dataset}/edge-color-values")
@@ -355,7 +363,7 @@ async def edge_color_values(request: Request, dataset: str, body: EdgeColorReque
     """
     reader = _reader(dataset, edge_file)
     return await run_cancellable(request, lambda: _json(reader.edge_color_values(
-        body.mode, body.lrms, body.field, body.categorical)))
+        body.mode, body.lrms, body.field, body.categorical, summary=body.summary)))
 
 
 @router.get("/{dataset}/neighborhood/{cell_id:path}")
@@ -402,9 +410,16 @@ def cell_neighborhood(dataset: str, cell_id: str,
 
 @router.get("/{dataset}/edge/{edge_id:path}")
 def edge_detail(dataset: str, edge_id: str,
-                edge_file: str = Query("edges.parquet")):
-    """Return all LRM rows for a single directed edge (for the info panel)."""
-    detail = _reader(dataset, edge_file).edge_detail(edge_id)
+                edge_file: str = Query("edges.parquet"),
+                x: float = Query(None, description="Sending centroid, image px (optional hint)"),
+                y: float = Query(None)):
+    """Return all LRM rows for a single directed edge (for the info panel).
+
+    `x`/`y` locate the edge so the lookup prunes to the row groups around it
+    instead of scanning the whole file's id column; the id still decides.
+    """
+    near = (x, y) if x is not None and y is not None else None
+    detail = _reader(dataset, edge_file).edge_detail(edge_id, near=near)
     if detail is None:
         raise HTTPException(404, f"Edge '{edge_id}' not found")
     return detail
