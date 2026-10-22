@@ -6,6 +6,7 @@ for normalizing all coordinates to image pixel space before returning data.
 The router layer is platform-agnostic — it only calls the methods defined here.
 """
 import math
+from collections import OrderedDict
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -46,6 +47,7 @@ class SpatialDatasetReader(ABC):
         self.path = dataset_path
         self._supp_meta_cache = _UNSET
         self._filter_id_cache: dict = {}
+        self._extent_cache = _UNSET
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
@@ -154,6 +156,52 @@ class SpatialDatasetReader(ABC):
         None auto-detects, True/False force the interpretation (issue #35).
         """
         ...
+
+    # Full colour results, kept for the last few request keys. A viewport-scoped
+    # request (`cell_ids`) pays the per-cell computation once — the metadata
+    # column or the gene-set sum over every cell — and then subsets; the next
+    # pan over the same colouring is a dictionary lookup per cell in view.
+    _COLOR_CACHE_MAX = 2
+
+    def color_values_for(
+        self,
+        mode: str,
+        field: Optional[str] = None,
+        genes: Optional[list[str]] = None,
+        categorical: Optional[bool] = None,
+        cell_ids: Optional[list] = None,
+        summary: bool = False,
+    ) -> dict:
+        """`color_values`, optionally restricted to `cell_ids` or to its summary.
+
+        The viewer used to download one value for every cell in the dataset and
+        hold a Map of them for as long as the colouring was on — tens of MB and
+        a second of main-thread work on a million-cell run, repeated on every
+        clamp change. It now asks only for the cells whose polygons it has, and
+        the sidebar asks for `summary` (type, categories, range) when that is
+        all it needs. The full result is cached here so neither costs a
+        recomputation. Range and categories are always those of the whole
+        dataset, so legends and the linked colour scale keep their meaning.
+        """
+        key = (mode, field, tuple(genes) if genes is not None else None, categorical)
+        cache = self.__dict__.setdefault("_color_cache", OrderedDict())
+        full = cache.get(key)
+        if full is None:
+            full = self.color_values(mode, field, genes, categorical)
+            cache[key] = full
+            while len(cache) > self._COLOR_CACHE_MAX:
+                cache.popitem(last=False)
+        else:
+            cache.move_to_end(key)
+        if cell_ids is None and not summary:
+            return full
+        out = {k: v for k, v in full.items() if k != "values"}
+        if summary:
+            out["values"] = {}
+            return out
+        vals = full.get("values") or {}
+        out["values"] = {c: vals[c] for c in cell_ids if c in vals}
+        return out
 
     # ── Metadata typing, colouring and filtering (platform-agnostic) ──────────
     #
@@ -269,35 +317,87 @@ class SpatialDatasetReader(ABC):
                           ``min_qv`` to a reader that does not declare it.
         """
         return {
-            "has_morphology": True,
+            "has_morphology": self.has_image(),
             "has_transcripts": True,
             "has_boundaries": True,
             "unit_label": "cell",
             "has_transcript_qv": False,
         }
 
+    def has_image(self) -> bool:
+        """Whether the dataset folder holds a morphology image the tiler can open.
+
+        The same discovery the image picker uses (`pyramid.list_image_stems`),
+        so the capability flag and the picker can never disagree. Readers whose
+        platform keeps images somewhere that scan does not reach override
+        `capabilities()` with their own test.
+        """
+        from app.tiling.pyramid import list_image_stems
+        try:
+            return bool(list_image_stems(self.path))
+        except Exception:
+            return False
+
     def data_extent(self) -> Optional[tuple]:
         """Bounding box of this dataset's units in image pixel space.
 
-        Used to size a placeholder canvas for datasets that ship no morphology
-        image — the viewer derives its whole coordinate space from the tile
-        pyramid, so without one there is nothing for deck.gl to draw onto.
+        This is what the viewer's coordinate frame is sized from when there is
+        no morphology image to take it from (see `frame`). Returns
+        (xmin, ymin, xmax, ymax), or None when there is nothing to measure.
 
-        Returns (xmin, ymin, xmax, ymax), or None when there is nothing to
-        measure. The default reads centroids from `cells()`; a reader with a
-        cheaper source should override.
+        The default reads centroids from `cells()`, falling back to boundary
+        vertices for a platform whose units have outlines but no centroids.
+        Cached per reader instance — it is asked for on every `/info`.
         """
+        if self._extent_cache is not _UNSET:
+            return self._extent_cache
+        self._extent_cache = self._measure_extent()
+        return self._extent_cache
+
+    def _measure_extent(self) -> Optional[tuple]:
+        xs: list[float] = []
+        ys: list[float] = []
         try:
-            cells = self.cells()
+            for c in self.cells():
+                x, y = c.get("x_centroid"), c.get("y_centroid")
+                if x is not None and y is not None and math.isfinite(x) and math.isfinite(y):
+                    xs.append(x); ys.append(y)
         except Exception:
-            return None
-        xs = [c["x_centroid"] for c in cells
-              if c.get("x_centroid") is not None and math.isfinite(c["x_centroid"])]
-        ys = [c["y_centroid"] for c in cells
-              if c.get("y_centroid") is not None and math.isfinite(c["y_centroid"])]
-        if not xs or not ys:
+            pass
+        if not xs:
+            try:
+                for v in (self.cell_boundaries(fraction=1.0) or {}).get("boundaries") or []:
+                    x, y = v.get("vertex_x"), v.get("vertex_y")
+                    if x is not None and y is not None and math.isfinite(x) and math.isfinite(y):
+                        xs.append(x); ys.append(y)
+            except Exception:
+                pass
+        if not xs:
             return None
         return (min(xs), min(ys), max(xs), max(ys))
+
+    # Padding past the far corner of the data, so units at the edge are not
+    # flush against the border of the frame.
+    FRAME_MARGIN = 0.05
+
+    def frame(self) -> Optional[dict]:
+        """The data-derived canvas the viewer draws on when it has no image.
+
+        {"width", "height", "source": "data"} in image pixels, anchored at the
+        origin like a tile pyramid is, so deck.gl's pixel coordinates and the
+        frame share one space. Units at negative coordinates still draw; they
+        sit outside the frame, which the viewer allows panning to. None when
+        the dataset has nothing to measure.
+        """
+        ext = self.data_extent()
+        if ext is None:
+            return None
+        _, _, xmax, ymax = ext
+        return {
+            "width": int(max(xmax, 1.0) * (1 + self.FRAME_MARGIN)) + 1,
+            "height": int(max(ymax, 1.0) * (1 + self.FRAME_MARGIN)) + 1,
+            "source": "data",
+        }
 
     # ── Supplemental cell metadata (platform-agnostic) ────────────────────────
     #

@@ -19,10 +19,13 @@ these files is R:
 which produces a leading unnamed column of barcodes that pandas surfaces as
 ``Unnamed: 0``.
 """
+import logging
 from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
+
+log = logging.getLogger("tissueplex.supplemental")
 
 _SUPPORTED = (".csv", ".csv.gz", ".parquet")
 
@@ -40,10 +43,10 @@ def read_table_with_key(path: Path, key: str, log_prefix: str) -> Optional[pd.Da
         try:
             df = pd.read_parquet(path)
         except Exception as exc:
-            print(f"[{log_prefix}] warning: could not read {path.name}: {exc}")
+            log.warning(f"[{log_prefix}] warning: could not read {path.name}: {exc}")
             return None
         if key not in df.columns:
-            print(f"[{log_prefix}] skip {path.name}: no '{key}' column")
+            log.warning(f"[{log_prefix}] skip {path.name}: no '{key}' column")
             return None
         return df
 
@@ -62,7 +65,7 @@ def read_table_with_key(path: Path, key: str, log_prefix: str) -> Optional[pd.Da
     try:
         df = pd.read_csv(path)
     except Exception as exc:
-        print(f"[{log_prefix}] warning: could not read {path.name}: {exc}")
+        log.warning(f"[{log_prefix}] warning: could not read {path.name}: {exc}")
         return None
     if key in df.columns:
         return df
@@ -71,7 +74,7 @@ def read_table_with_key(path: Path, key: str, log_prefix: str) -> Optional[pd.Da
     first = df.columns[0]
     if df[first].dtype == object and df[first].is_unique:
         return df.rename(columns={first: key})
-    print(f"[{log_prefix}] skip {path.name}: cannot identify '{key}' column")
+    log.warning(f"[{log_prefix}] skip {path.name}: cannot identify '{key}' column")
     return None
 
 
@@ -95,10 +98,10 @@ def load_supplemental(
             if coerce_key_to_str:
                 df[key] = df[key].astype(str)
             frames.append(df)
-            print(f"[{log_prefix}] loaded supplemental metadata: {f.name} "
+            log.info(f"[{log_prefix}] loaded supplemental metadata: {f.name} "
                   f"({len(df)} rows, {len(df.columns) - 1} extra columns)")
         except Exception as exc:
-            print(f"[{log_prefix}] warning: could not load {f.name}: {exc}")
+            log.warning(f"[{log_prefix}] warning: could not load {f.name}: {exc}")
 
     if not frames:
         return None

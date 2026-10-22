@@ -93,6 +93,39 @@ def check(ds: str) -> str:
        {r["edge"] for r in er.query_structure(density=0.1)}:
         failures.append(f"[{ds}] sampling is not stable between identical calls")
 
+    # Property 4: the cached score matrix answers an LRM toggle exactly as the
+    # SQL aggregate does. The matrix is what makes a toggle a few milliseconds
+    # instead of a re-scan, and it is a second implementation of the same
+    # arithmetic — null scores skipped, NaN propagated, zero-visible edges
+    # present in the exclusion form and absent in the inclusion form.
+    from app.readers import edge_reader as E
+    rows = er.query_structure(density=1.0)
+    cat = [x["lrm"] for x in er.lrm_catalogue()]
+    if rows and cat:
+        xs = [r["x1"] for r in rows]; ys = [r["y1"] for r in rows]
+        bb = (min(xs), min(ys), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+        def canon(res):
+            return {r["edge"]: (int(r["visible_lrm_count"]),
+                                None if r.get("visible_score_sum") is None
+                                else round(float(r["visible_score_sum"]), 6))
+                    for r in res}
+        for kw in ({"excluded_lrms": cat[:3]}, {"included_lrms": cat[:3]},
+                   {"included_lrms": cat[: max(1, len(cat) // 2)]}):
+            saved = E._SCORE_BUDGET
+            E._SCORE_BUDGET = 0                       # force the SQL path
+            try:
+                sql = canon(er.query_scores(bbox=bb, density=0.1, **kw))
+            finally:
+                E._SCORE_BUDGET = saved
+            with E._score_lock:
+                E._score_entries.clear(); E._score_bytes = 0
+            mat = canon(er.query_scores(bbox=bb, density=0.1, **kw))
+            again = canon(er.query_scores(bbox=bb, density=0.1, **kw))   # cache hit
+            if not (sql == mat == again):
+                failures.append(f"[{ds}] score matrix disagrees with SQL for "
+                                f"{next(iter(kw))} ({len(sql)} vs {len(mat)} edges)")
+
     if ids:
         return f"{baseline:>8,} edges  filter=[{field}] -> {len(ids):,} cells"
     # Reported rather than passed over in silence: with no resolvable filter the

@@ -32,6 +32,23 @@ services:
       # the VM's OOM killer mid-request, restarting the backend. The container
       # limit below does not catch that — it is larger than the VM.
       DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-}
+      # DuckDB worker threads (default: the CPUs the container can see, max 8)
+      # and how many viewport queries may run at once (default: about half
+      # that, min 2). One shared DuckDB instance serves every request, so these
+      # are process-wide caps — the old per-request pools could oversubscribe
+      # a two-core VM several times over.
+      DUCKDB_THREADS: ${DUCKDB_THREADS:-}
+      QUERY_CONCURRENCY: ${QUERY_CONCURRENCY:-}
+      # Memory budget (MB) for the per-viewport LRM score matrices that make an
+      # LRM toggle a few milliseconds instead of a re-scan. Default: 8% of the
+      # memory ceiling, at most 256 MB. Oversized viewports fall back to SQL.
+      SCORE_CACHE_MB: ${SCORE_CACHE_MB:-}
+      # Requests slower than this are written to the log file (ms).
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-2000}
+      # Logs go to $CACHE_DIR/logs/tissueplex.log (rotating, 5 x 5 MB), on the
+      # dzi_cache volume, so they survive a container restart or OOM kill.
+      # Read them with:  docker compose exec backend tail -n 200 /cache/logs/tissueplex.log
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # Highest OME-TIFF level (in px) the tifffile builder loads whole. Only
       # matters for JPEG2000 OME-TIFFs (Xenium, seqFISH DAPI) that libvips can't
       # stream: the largest level within this limit becomes the deepest zoom.

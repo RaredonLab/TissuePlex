@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { loggedFetch } from "../utils/clientLog";
+import { filterTranscriptsByGene, fetchDelay, geneListParams } from "../utils/viewportFilters";
 
 /**
  * Xenium Explorer hides transcripts below this Q-Score by default, and so do we.
@@ -6,134 +8,182 @@ import { useState, useEffect, useRef } from "react";
  */
 export const TRANSCRIPT_MIN_QV = 20;
 
+const VIEWPORT_DEBOUNCE_MS = 200;
+const EMPTY = { rows: [], total: 0 };
+
 /**
- * Fetches transcripts from the backend, filtered by viewport bbox.
- * Debounced so rapid pan/zoom doesn't hammer the API.
- * In-flight requests are aborted when a newer fetch supersedes them, so stale
- * responses from intermediate viewport positions never overwrite current data.
+ * Fetches transcripts for the viewport and applies the gene filter in the browser.
+ *
+ * Two layers, and the split is the point:
+ *
+ *   base   — the viewport's *unfiltered* sample: one request per viewport /
+ *            fraction / quality-threshold change, debounced like a pan.
+ *   genes  — applied to `base` synchronously (`filterTranscriptsByGene`), so a
+ *            click in the species list changes the canvas on the next render
+ *            with no request at all. The server samples by a seeded hash of each
+ *            row, kept with probability `fraction`, so filtering the unfiltered
+ *            sample yields exactly the rows a filtered fetch would — unless the
+ *            200K row cap, not `fraction`, decided the sample size. In that one
+ *            case (whole-tissue zoom on a large run) the filtered rows are
+ *            fetched from the server, immediately and abortably, and replace the
+ *            client-side result when they land.
+ *
+ * A fetch whose viewport is unchanged from the last one (fraction or quality
+ * toggled) is not debounced either: the debounce exists to coalesce drag events.
  *
  * @param fraction      0–1 fraction of viewport transcripts to request.
  * @param selectedGenes null = all species; Set<string> = only those genes.
- *                      Passed to the backend so total reflects selected species only.
  * @param allGenes      the dataset's full gene panel, used only to decide whether
- *                      to state the filter as an allowlist or as its complement.
+ *                      to state a server-side filter as an allowlist or as its
+ *                      complement.
  * @param minQv         null = no quality filter; a number = keep Q-Score >= it.
  *                      The backend ignores it for platforms without a Q-Score.
  *
  * Returns { transcripts, total, loading, error }.
- *   total — pre-sample count in the viewport after gene and quality filtering.
+ *   transcripts — already gene-filtered.
+ *   total       — pre-sample count in the viewport after gene and quality
+ *                 filtering; estimated from the sample's keep rate while a gene
+ *                 filter is served client-side.
  */
 export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = true, fraction = 1.0, selectedGenes = null, allGenes = null, minQv = null) {
-  const [transcripts, setTranscripts] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [base, setBase] = useState(EMPTY);
+  const [exact, setExact] = useState(null);       // { key, rows, total } server-filtered
+  const [loadingBase, setLoadingBase] = useState(false);
+  const [loadingExact, setLoadingExact] = useState(false);
   const [error, setError] = useState(null);
   const timerRef = useRef(null);
   const abortRef = useRef(null);
+  const exactAbortRef = useRef(null);
+  const lastViewKeyRef = useRef(null);
+  const fetchedKeyRef = useRef(null);
 
-  // Stable string representation of the gene set for use as a dep.
   const genesKey = selectedGenes === null ? "" : [...selectedGenes].sort().join(",");
+  const hasView = !!(viewport && imageSize?.w);
+  const viewKey = hasView
+    ? `${viewport.xmin},${viewport.ymin},${viewport.xmax},${viewport.ymax}` : "";
+  const baseKey = `${dataset}|${viewKey}|${fraction}|${minQv}`;
+  // An empty allowlist means "show no species": nothing to fetch for, and the
+  // base is kept so re-selecting a gene is instant.
+  // No viewport means OSD has not opened yet; a fetch then would be unbounded
+  // (the whole dataset) with nothing to draw it on. One always arrives: the
+  // viewer opens an image or, failing that, a frame sized from the data.
+  const wantBase = !!(enabled && dataset && hasView)
+    && !(selectedGenes !== null && selectedGenes.size === 0);
 
+  // ── Base fetch: unfiltered viewport sample ────────────────────────────────
   useEffect(() => {
     if (!enabled || !dataset) {
-      setTranscripts([]);
-      setTotal(0);
-      setLoading(false);
+      setBase(EMPTY);
+      setExact(null);
+      fetchedKeyRef.current = null;
+      setLoadingBase(false);
       return;
     }
+    if (!wantBase) { setLoadingBase(false); return; }
+    if (fetchedKeyRef.current === baseKey) return;   // already have this exact sample
 
-    // An empty allowlist means "show no species" — distinct from null, which
-    // means "no filter". Without this the request omits the gene parameter
-    // entirely, so the backend applies no filter and returns the full 200K-row
-    // cap; Viewer's client-side filter then discards every row. Nothing draws,
-    // which looks right, but a ~20 MB response is fetched and thrown away on
-    // every pan and the layer's shown/total badge reports the unfiltered count
-    // while the canvas is empty.
-    if (selectedGenes !== null && selectedGenes.size === 0) {
-      setTranscripts([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
-
+    const delay = fetchDelay(lastViewKeyRef.current, viewKey, VIEWPORT_DEBOUNCE_MS);
+    lastViewKeyRef.current = viewKey;
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
-      // Cancel any in-flight request before starting a new one
       if (abortRef.current) abortRef.current.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
-      setLoading(true);
+      setLoadingBase(true);
       setError(null);
       try {
         let url = `${apiBase}/spatial/${dataset}/transcripts?fraction=${fraction}`;
         // Applied server-side before sampling, so the kept transcripts render at
         // the full sample density rather than as a thinned remainder.
         if (minQv !== null) url += `&min_qv=${minQv}`;
-
-        // Send the selected gene filter so the backend samples within those
-        // species only — stated as an allowlist or as its complement, whichever
-        // is shorter.
-        //
-        // This is a GET, so the list travels in the URL and long ones are fatal:
-        // measured against this stack, 479 of 480 genes is a 7,780-byte URL, only
-        // ~220 bytes under nginx's 8 KB request-line limit, and 600 genes returns
-        // 414 outright. Deselecting a handful of genes from a large panel is an
-        // ordinary thing to do and produces exactly that shape, so the naive
-        // allowlist breaks on any panel much past 500 genes — a Xenium Prime 5K
-        // run would fail on the first click.
-        //
-        // The complement is small precisely when the allowlist is not, so sending
-        // the smaller of the two bounds the URL at roughly half the panel.
-        if (selectedGenes !== null && selectedGenes.size > 0) {
-          const total = Array.isArray(allGenes) ? allGenes.length : 0;
-          const excluded = total > 0
-            ? allGenes.filter((g) => !selectedGenes.has(g))
-            : [];
-          if (total > 0 && excluded.length < selectedGenes.size) {
-            for (const g of excluded) url += `&exclude_genes=${encodeURIComponent(g)}`;
-          } else {
-            for (const g of selectedGenes) url += `&genes=${encodeURIComponent(g)}`;
-          }
-        }
-
         // Always send bbox when available so the backend can sample uniformly
         // within the viewport. No zoom-out skip — the backend cap handles volume.
-        if (viewport && imageSize?.w) {
+        if (hasView) {
           const { xmin, ymin, xmax, ymax } = viewport;
           url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
-
-        const res = await fetch(url, { signal: ctrl.signal });
-        if (!res.ok) { setTranscripts([]); setTotal(0); return; }
+        const res = await loggedFetch("transcripts", { dataset }, url, { signal: ctrl.signal });
+        if (!res.ok) { setBase(EMPTY); fetchedKeyRef.current = baseKey; return; }
         const data = await res.json();
         // Response is { transcripts: [...], total: N }
         const arr = Array.isArray(data) ? data : (data.transcripts ?? []);
         const tot = typeof data.total === "number" ? data.total : arr.length;
-        setTranscripts(arr);
-        setTotal(tot);
+        setBase({ rows: arr, total: tot });
+        fetchedKeyRef.current = baseKey;
       } catch (e) {
-        if (e.name === "AbortError") return; // silently ignore — a newer fetch is in flight
+        if (e.name === "AbortError") return; // a newer fetch is in flight
         setError(e.message);
-        setTotal(0);
       } finally {
-        if (abortRef.current === ctrl) setLoading(false);
+        if (abortRef.current === ctrl) setLoadingBase(false);
       }
-    }, 200);
+    }, delay);
 
     return () => clearTimeout(timerRef.current);
-  // allGenes.length is a dep because it decides the URL *form*: before the panel
-  // loads there is no complement to compute, so an early fetch would fall back to
-  // the long allowlist and could 414. Re-running once it arrives fixes that.
-  }, [apiBase, dataset, viewport?.xmin, viewport?.ymin, viewport?.xmax, viewport?.ymax, enabled, fraction, genesKey, allGenes?.length, minQv]); // eslint-disable-line
+  }, [apiBase, baseKey, wantBase, enabled, dataset]); // eslint-disable-line
 
-  // Abort in-flight request on unmount
+  // ── Gene filter, in the browser ───────────────────────────────────────────
+  const derived = useMemo(
+    () => filterTranscriptsByGene(base, selectedGenes, fraction),
+    [base, selectedGenes, fraction]);
+
+  // ── Exact fetch, only when the cap thinned the base sample ────────────────
+  // The gene list travels in the URL of a GET, stated as an allowlist or as its
+  // complement, whichever is shorter: 479 of 480 genes is a 7.8 KB URL, ~220
+  // bytes under nginx's 8 KB request line, and 600 genes 414s outright.
+  const exactKey = `${baseKey}|${genesKey}`;
+  const needExact = wantBase && selectedGenes !== null && derived.capped
+    && fetchedKeyRef.current === baseKey;
+  useEffect(() => {
+    if (!needExact) {
+      if (exactAbortRef.current) { exactAbortRef.current.abort(); exactAbortRef.current = null; }
+      setLoadingExact(false);
+      return;
+    }
+    if (exact?.key === exactKey) return;
+    if (exactAbortRef.current) exactAbortRef.current.abort();
+    const ctrl = new AbortController();
+    exactAbortRef.current = ctrl;
+    setLoadingExact(true);
+    (async () => {
+      try {
+        let url = `${apiBase}/spatial/${dataset}/transcripts?fraction=${fraction}`;
+        if (minQv !== null) url += `&min_qv=${minQv}`;
+        url += geneListParams(selectedGenes, allGenes, "genes", "exclude_genes");
+        if (hasView) {
+          const { xmin, ymin, xmax, ymax } = viewport;
+          url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
+        }
+        const res = await loggedFetch("transcripts", { dataset, genes: selectedGenes.size }, url,
+          { signal: ctrl.signal });
+        if (!res.ok) return;
+        const data = await res.json();
+        const arr = Array.isArray(data) ? data : (data.transcripts ?? []);
+        const tot = typeof data.total === "number" ? data.total : arr.length;
+        setExact({ key: exactKey, rows: arr, total: tot });
+      } catch (e) {
+        if (e.name !== "AbortError") setError(e.message);
+      } finally {
+        if (exactAbortRef.current === ctrl) setLoadingExact(false);
+      }
+    })();
+  // allGenes.length decides the URL *form*; re-run once the panel arrives.
+  }, [needExact, exactKey, allGenes?.length]); // eslint-disable-line
+
+  // Abort in-flight requests on unmount
   useEffect(() => {
     return () => {
       clearTimeout(timerRef.current);
       if (abortRef.current) abortRef.current.abort();
+      if (exactAbortRef.current) exactAbortRef.current.abort();
     };
   }, []);
 
-  return { transcripts, total, loading, error };
+  const useExact = needExact && exact?.key === exactKey;
+  return {
+    transcripts: useExact ? exact.rows : derived.rows,
+    total: useExact ? exact.total : derived.total,
+    loading: loadingBase || loadingExact,
+    error,
+  };
 }

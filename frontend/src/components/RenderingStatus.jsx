@@ -13,11 +13,27 @@ import React, { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 
 const ONSET_MS = 400;
+// How long the most recent failed fetch stays on screen. Long enough to read,
+// short enough that a one-off blip does not look like a standing fault.
+const ERROR_MS = 12_000;
 
 export default function RenderingStatus({ panelIndex }) {
   const isLoading = useStore((s) => s.loadingKeys.has(`panel-${panelIndex}`));
   const [visible, setVisible] = useState(false);
   const timerRef = useRef(null);
+
+  // The most recent failed data fetch (utils/clientLog.js). Shown in panel 0
+  // only, so split view does not show it twice. Every hook degrades a failed
+  // request to an empty layer, which is the right behaviour and also exactly
+  // why a dead backend used to look like a hang: nothing said so.
+  const backendError = useStore((s) => s.backendError);
+  const [errorShown, setErrorShown] = useState(null);
+  useEffect(() => {
+    if (!backendError || panelIndex !== 0) return;
+    setErrorShown(backendError);
+    const t = setTimeout(() => setErrorShown(null), ERROR_MS);
+    return () => clearTimeout(t);
+  }, [backendError, panelIndex]);
 
   useEffect(() => {
     clearTimeout(timerRef.current);
@@ -32,9 +48,36 @@ export default function RenderingStatus({ panelIndex }) {
     return () => clearTimeout(timerRef.current);
   }, [isLoading]);
 
-  if (!visible) return null;
+  const errorBadge = errorShown ? (
+    <div
+      title={errorShown.context ? JSON.stringify(errorShown.context) : undefined}
+      style={{
+        position: "absolute",
+        bottom: visible ? 70 : 40,
+        right: 10,
+        maxWidth: 360,
+        background: "rgba(90,20,20,0.85)",
+        color: "#f99",
+        fontFamily: "monospace",
+        fontSize: 11,
+        padding: "5px 10px",
+        borderRadius: 4,
+        pointerEvents: "none",
+        zIndex: 20,
+        userSelect: "none",
+        border: "1px solid rgba(255,120,120,0.35)",
+      }}
+    >
+      ⚠ {errorShown.message}
+      <span style={{ color: "#a66", marginLeft: 6 }}>— logged</span>
+    </div>
+  ) : null;
+
+  if (!visible) return errorBadge;
 
   return (
+    <>
+    {errorBadge}
     <div
       style={{
         position: "absolute",
@@ -74,5 +117,6 @@ export default function RenderingStatus({ panelIndex }) {
       </svg>
       Computing…
     </div>
+    </>
   );
 }

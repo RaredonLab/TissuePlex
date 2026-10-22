@@ -1,12 +1,24 @@
 # TissuePlex
 
-**v0.8.8**
+**v0.9.0**
 
 An interactive spatial transcriptomics viewer for exploring cell-cell communication from [NICHESv2](https://github.com/RaredonLab/NICHESv2) directly on the tissue image.
 
 ![TissuePlex demo](docs/demo.gif)
 
 📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** — step-by-step setup and a reference for every control in the interface. No programming experience assumed.
+
+---
+
+## What's new in v0.9.0
+
+A performance and robustness release aimed at lab laptops and Docker deployments.
+
+- **Gene and mechanism toggles are instant.** Unchecking a transcript species filters in the browser with no request; toggling an LRM is answered from a cached per-viewport score matrix in milliseconds. Only a moving viewport is debounced.
+- **Nothing is processed beyond the field of view.** Edge queries are spatially indexed (a 10% viewport on a 33M-row edge file: 372 → 28 ms), whole-tissue views read a 10% density tier, and colour values arrive only for the cells and edges on screen instead of one value per unit in the dataset.
+- **Datasets without an image render.** A missing DAPI or morphology, or a TIFF the tiler cannot open, no longer blanks the cell segments and edges: every layer draws on a frame sized from the data, and an unreadable image is reported rather than silently fatal. seqFISH coordinate detection no longer needs the DAPI.
+- **The backend survives a laptop.** One shared DuckDB instance with process-wide memory and thread caps, a bounded query queue, and cancellation of queries the browser has abandoned. CosMx transcripts stream through DuckDB instead of re-reading the whole CSV per pan.
+- **Failures are logged to disk.** A rotating log on the cache volume records slow requests, errors with tracebacks, memory pressure before an out-of-memory kill, and any fetch the browser saw fail; a red badge in the viewer shows the most recent one. `docker compose exec backend tail -n 300 /cache/logs/tissueplex.log`.
 
 ---
 
@@ -34,6 +46,7 @@ Spatial transcriptomics platforms (Xenium, seqFISH, Visium, Visium HD, MERSCOPE,
 - **Region drawing and measurement tools** — annotate areas, export cell selections, save PNG screenshots
 - **Supplemental metadata** — drop any CSV or parquet into a `cell-metadata/` folder to add custom color-by columns (clusters, pseudotime, etc.) without touching the original data
 - **Multi-dataset support** — switch between datasets without restarting; each is auto-detected by platform
+- **Works without an image** — a dataset with no morphology or DAPI draws its cells, transcripts and edges on a frame sized from the data; the image is one optional layer among the others
 
 ---
 
@@ -217,7 +230,15 @@ npm run dev   # → http://localhost:5173, proxies /api → :8000
 
 The dev server uses port 5173 so it does not collide with `docker compose`, which binds 3000 for the production frontend.
 
-There is currently no automated test suite, CI, or linter — changes are verified by running the app.
+Tests, run them after any change (there is still no CI or linter):
+
+```bash
+cd frontend && npm test                               # vitest: store, export, list import, viewport filters
+cd backend && python3 tests/golden_snapshot.py        # reader regression guard against a recorded baseline
+cd backend && python3 tests/edge_pipeline_check.py    # edge filter/sampling invariants, score-matrix equivalence
+cd backend && python3 tests/no_image_check.py         # every layer renders in the same place without an image
+cd backend && python3 tests/duckdb_config_check.py    # DUCKDB_MEMORY_LIMIT forms
+```
 
 ---
 
@@ -225,7 +246,8 @@ There is currently no automated test suite, CI, or linter — changes are verifi
 
 ```
 Browser
-  OpenSeadragon   — pan/zoom over OME-TIFF tile pyramid
+  OpenSeadragon   — pan/zoom over the OME-TIFF tile pyramid, or over a blank
+                    frame sized from the data when there is no image
   deck.gl (WebGL) — all data layers; coordinate-synced to OSD
 
 FastAPI backend
@@ -235,7 +257,7 @@ FastAPI backend
   /layers   — generic parquet layer serving
 ```
 
-All data is served directly from parquet files via DuckDB — no database setup or import step. Tile pyramids are built on first access and cached.
+All data is served directly from parquet files via one shared DuckDB instance — no database setup or import step. Tile pyramids and spatial indexes are built on first access and cached; queries the browser abandons are cancelled on the server; everything slow or failed is written to a log file on the cache volume.
 
 ### Adding a new platform
 
@@ -258,7 +280,7 @@ Tracked in [GitHub issues](https://github.com/RaredonLab/TissuePlex/issues).
 - Persisting the categorical choice and the palette across reloads
 - Filtering transcripts, which needs a transcript→cell assignment that several platforms do not ship
 
-Large datasets are handled by a spatial index built automatically on first access, alongside the tile pyramid: files over 64 MB are rewritten sorted by a spatial grid, which makes viewport queries roughly 27× faster on a 40M-row transcript file and also converts seqFISH CSV to parquet along the way. Set `SPATIAL_CACHE=0` to disable it.
+Large datasets are handled by a spatial index built automatically on first access, alongside the tile pyramid: transcript, boundary and edge files over 64 MB are rewritten sorted by a spatial grid, which makes viewport queries roughly 27× faster on a 40M-row transcript file and 13× on a 33M-row edge file, and also converts seqFISH CSV to parquet along the way. Edge files additionally get a 10% density tier for whole-tissue views. Set `SPATIAL_CACHE=0` to disable it.
 
 ---
 

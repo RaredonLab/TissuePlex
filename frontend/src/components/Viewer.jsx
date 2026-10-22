@@ -23,6 +23,8 @@ import { ScatterplotLayer, SolidPolygonLayer, PathLayer, LineLayer } from "@deck
 import { useStore } from "../store";
 import { usePanelSettings, PanelIndexProvider } from "../hooks/usePanelSettings";
 import { useTranscripts, TRANSCRIPT_MIN_QV } from "../hooks/useTranscripts";
+import { BLANK_IMAGE_NAME, blankTileSource, frameUsable } from "../utils/frame";
+import { reportClient } from "../utils/clientLog";
 import { useCellBoundaries } from "../hooks/useCellBoundaries";
 import { useCellColors } from "../hooks/useCellColors";
 import { useEdges } from "../hooks/useEdges";
@@ -40,6 +42,12 @@ import { withPngDpi, downloadBlob } from "../utils/pngExport";
 const DEFAULT_EDGE_COLOR = [255, 150, 0, 160];
 const DEFAULT_AUTOCRINE_COLOR = [255, 150, 0, 200];
 const LOW_QV_COLOR = [128, 128, 128, 255];   // Q-Score < 20, shown on request
+
+// Where a clicked edge is, for the detail lookup: its sending centroid lets the
+// backend prune to the row groups around that cell instead of scanning the
+// whole file's id column.
+const edgeHint = (row) => (row && typeof row.x1 === "number" && typeof row.y1 === "number")
+  ? { x: row.x1, y: row.y1 } : null;
 
 const VIEW_ID = "main";
 
@@ -62,9 +70,6 @@ const isAnnotationLayerId = (id) =>
 /** Below this a drag is a stray click, not an attempt to reframe. */
 const MIN_DRAG_PX = 8;
 
-// Matches pyramid.BLANK_IMAGE_NAME: the placeholder canvas served for datasets
-// with no morphology of their own. Not a real image, so it is not shown as one.
-const BLANK_IMAGE_NAME = "__blank__";
 
 // ── Rotation helpers (pure, module-level) ─────────────────────────────────
 
@@ -193,7 +198,7 @@ function ViewerPanel({ panelIndex }) {
   // pixel size, capabilities, gene panel, LRM vocabulary, value ranges.
   const panel = useStore((s) => s.panels[panelIndex]);
   const {
-    dataset, activeImage, imageSize, platformCapabilities,
+    dataset, activeImage, imageSize, platformCapabilities, frame,
     pixelSize, edgeFile, lrmCatalogue, allGenes,
   } = panel;
   // Convenience: write one or more fields of *this* panel.
@@ -302,6 +307,9 @@ function ViewerPanel({ panelIndex }) {
         patch({
           ...(info.pixel_size ? { pixelSize: parseFloat(info.pixel_size) } : {}),
           ...(info.capabilities ? { platformCapabilities: info.capabilities } : {}),
+          // The data-derived frame: what the layers draw on when there is no
+          // image, or the image cannot be opened. See utils/frame.js.
+          frame: frameUsable(info.frame) ? info.frame : null,
         });
       })
       .catch(() => {});
@@ -337,6 +345,14 @@ function ViewerPanel({ panelIndex }) {
   // ── OpenSeadragon init ────────────────────────────────────────────────────
   const dziUrl = `${apiBase}/tiles/${dataset}/dzi/${activeImage}.dzi`;
 
+  // Set when the image's pyramid could not be opened. The panel then opens the
+  // data frame instead, so every other layer still renders — an unreadable
+  // TIFF used to leave the whole viewer blank with one line in the console.
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => { setImageFailed(false); }, [dziUrl]);
+  const onBlankFrame = activeImage === BLANK_IMAGE_NAME || imageFailed;
+  const frameW = frame?.width, frameH = frame?.height;
+
   useEffect(() => {
     if (!containerRef.current) return;
     if (viewerRef.current) {
@@ -346,10 +362,12 @@ function ViewerPanel({ panelIndex }) {
     // activeImage is null between a dataset switch and DatasetPicker resolving the
     // new dataset's image list. Opening OSD here would request "null.dzi".
     if (!dataset || !activeImage) return;
+    // The data frame needs its size from /info before it can be opened.
+    if (onBlankFrame && !frameUsable(frame)) return;
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
-      tileSources: dziUrl,
+      tileSources: onBlankFrame ? blankTileSource(frame) : dziUrl,
       prefixUrl: "",
       showNavigationControl: true,
       showNavigator: true,
@@ -380,9 +398,18 @@ function ViewerPanel({ panelIndex }) {
       }
     });
 
-    viewer.addHandler("open-failed", (e) =>
-      console.error(`OSD panel ${panelIndex} open failed:`, e.message)
-    );
+    viewer.addHandler("open-failed", (e) => {
+      if (onBlankFrame) {
+        console.error(`OSD panel ${panelIndex} could not open the data frame:`, e.message);
+        return;
+      }
+      // Reported to the log file and the badge, then fall back to the frame
+      // so the data layers draw. This is the "it just shows nothing" case.
+      reportClient("error",
+        `morphology image '${activeImage}' could not be opened (${e.message ?? "open failed"}); showing the data on a blank frame`,
+        { dataset, image: activeImage });
+      setImageFailed(true);
+    });
 
     viewer.addHandler("animation", () => syncRef.current?.(viewer));
     viewer.addHandler("animation-finish", () => syncRef.current?.(viewer));
@@ -394,7 +421,7 @@ function ViewerPanel({ panelIndex }) {
       viewerRef.current = null;
       if (import.meta.env.DEV) delete window[`__osd${panelIndex}`];
     };
-  }, [dziUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dziUrl, onBlankFrame, frameW, frameH]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (viewerRef.current && imageSize.w) {
@@ -502,7 +529,7 @@ function ViewerPanel({ panelIndex }) {
     if (e.shiftKey) {
       const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
       if (edgeInfo?.object) {
-        setSelectedEdge(edgeInfo.object.edge, panelIndex);
+        setSelectedEdge(edgeInfo.object.edge, panelIndex, edgeHint(edgeInfo.object));
         return;
       }
       const cellInfo = deckRef.current.pickObject({ x, y, radius: 6, layerIds: ["cell-segments-fill"] });
@@ -523,7 +550,7 @@ function ViewerPanel({ panelIndex }) {
 
     const edgeInfo = deckRef.current.pickObject({ x, y, radius: 8, layerIds: ["edges-directed", "edges-autocrine", "tissue-graph"] });
     if (edgeInfo?.object) {
-      setSelectedEdge(edgeInfo.object.edge, panelIndex);
+      setSelectedEdge(edgeInfo.object.edge, panelIndex, edgeHint(edgeInfo.object));
     } else {
       setSelectedEdge(null, panelIndex);
     }
@@ -708,11 +735,9 @@ function ViewerPanel({ panelIndex }) {
     showLowQualityTranscripts ? null : TRANSCRIPT_MIN_QV
   );
 
-  // visibleTranscripts: server already filtered by selectedGenes, so this is a no-op
-  // when a gene filter is active — kept as a safety net and for semantic clarity.
-  const visibleTranscripts = selectedGenes === null
-    ? transcripts
-    : transcripts.filter((t) => selectedGenes.has(t.feature_name));
+  // The hook applies the gene filter itself, in the browser, from the viewport's
+  // unfiltered sample — a species toggle changes the canvas on the next render.
+  const visibleTranscripts = transcripts;
 
   // Expose live shown/total counts to the LayerPanel via the store (panel 0 only).
   // Use visibleTranscripts.length so the stat always reflects the selected species.
@@ -720,13 +745,31 @@ function ViewerPanel({ panelIndex }) {
     patch({ transcriptStats: { shown: visibleTranscripts.length, total: transcriptTotal } });
   }, [visibleTranscripts.length, transcriptTotal]); // eslint-disable-line
 
+  // Explicit categorical/continuous choice for the active color-by column, or
+  // null (auto-detect) when the user has not overridden it — issue #35.
+  const cellCategorical = categoricalOverrides[`cell::${colorBy?.field}`] ?? null;
+  const edgeCategorical = categoricalOverrides[`edge::${edgeColorBy?.field}`] ?? null;
+
+  // Colour values ride on the boundaries response, for exactly the cells in it.
+  // They used to be a separate request returning one value for every cell in
+  // the dataset — see useCellColors.
+  const cellColorSpec = useMemo(() => {
+    if (!cellColorEnabled || !colorBy || colorBy.mode === "off") return null;
+    if (colorBy.mode === "gene_set") return { mode: "gene_set", genes: selectedGenes, allGenes };
+    if (colorBy.mode === "metadata" && colorBy.field) {
+      return { mode: "metadata", field: colorBy.field, categorical: cellCategorical };
+    }
+    return null;
+  }, [cellColorEnabled, colorBy?.mode, colorBy?.field, selectedGenes, allGenes, cellCategorical]);
+
   const {
     cells: cellPolygons,
+    colors: cellColorsRaw,
     total: cellBoundaryTotal,
     loading: cellBoundariesLoading,
   } = useCellBoundaries(
     apiBase, dataset, viewport, imageSize, cellSegmentsVisible && hasBoundaries,
-    cellBoundaryFraction, cellFilter
+    cellBoundaryFraction, cellFilter, cellColorSpec
   );
   useEffect(() => { cellPolygonsRef.current = cellPolygons; }, [cellPolygons]);
 
@@ -746,13 +789,10 @@ function ViewerPanel({ panelIndex }) {
       // One density drives both fetches. It is a rendering-volume control, and
       // the graph has its own opacity for visual weight — a better lever for
       // clutter than sampling, which would misrepresent the structure.
-      graphEnabled: tissueGraphVisible, graphDensity: edgeDensity }
+      graphEnabled: tissueGraphVisible, graphDensity: edgeDensity,
+      // The metadata colour column travels on the rows (see useEdgeColors).
+      colorField: edgeColorBy?.mode === "metadata" ? (edgeColorBy.field || null) : null }
   );
-
-  // Explicit categorical/continuous choice for the active color-by column, or
-  // null (auto-detect) when the user has not overridden it — issue #35.
-  const cellCategorical = categoricalOverrides[`cell::${colorBy?.field}`] ?? null;
-  const edgeCategorical = categoricalOverrides[`edge::${edgeColorBy?.field}`] ?? null;
 
   // ── Shared colour scale ───────────────────────────────────────────────────
   // With two panels showing two datasets, letting each auto-range to its own
@@ -779,8 +819,8 @@ function ViewerPanel({ panelIndex }) {
     colorValues, vmin: cellVmin, vmax: cellVmax,
     type: cellType, categories: cellCategories, loading: cellColorsLoading,
   } = useCellColors(
-    apiBase, dataset, colorBy, allGenes, selectedGenes, cellColorPalette,
-    cellColorEnabled, effectiveCellClamp, categoryColorOverrides, cellCategorical
+    cellColorsRaw, colorBy, cellColorPalette, cellColorEnabled,
+    effectiveCellClamp, categoryColorOverrides
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
@@ -902,42 +942,38 @@ function ViewerPanel({ panelIndex }) {
     updateTriggers: { getFillColor: [transcriptColorOverrides] },
   });
 
-  const allDirectedEdges = useMemo(() => {
-    const seenPairs = new Set();
-    const result = [];
-    for (const row of edges) {
-      if (row.is_autocrine) continue;
-      const pair = [row.sending_cell, row.receiving_cell].sort().join("\0");
-      if (!seenPairs.has(pair)) {
-        seenPairs.add(pair);
-        result.push(row);
-      }
-    }
-    return result;
-  }, [edges]);
-
   // Both layers apply the LRM filter identically. Autocrine used to skip the
   // visible_lrm_count test, so hiding every mechanism removed the directed edges
   // and left a ring on every cell — which reads as the autocrine layer ignoring
   // the controls entirely.
   const hasVisibleLrms = (r) => (r.visible_lrm_count ?? r.lrm_count ?? 0) > 0;
-  const { directedEdges, autocrineCells } = useMemo(() => ({
-    directedEdges: edges.filter((r) => !r.is_autocrine && hasVisibleLrms(r)),
-    autocrineCells: edges
-      .filter((r) => r.is_autocrine && hasVisibleLrms(r))
-      .map((r) => ({ ...r, x: r.x1, y: r.y1 })),
-  }), [edges]);
+  // One pass over the edge rows, and no per-row object copies. This used to be
+  // four materialised arrays per update — a filtered copy, a spread copy with
+  // the perpendicular offset, a spread copy for autocrine rings, and one
+  // triangle object per arrowhead — each a few hundred thousand objects on a
+  // dense view. The offset and the triangle are now computed inside the deck.gl
+  // accessors below, which visit each row exactly once per attribute update
+  // anyway; the rows themselves are shared with useEdges' array.
+  const { directedEdges, autocrineCells } = useMemo(() => {
+    const directed = [], autocrine = [];
+    for (const r of edges) {
+      if (!hasVisibleLrms(r)) continue;
+      (r.is_autocrine ? autocrine : directed).push(r);
+    }
+    return { directedEdges: directed, autocrineCells: autocrine };
+  }, [edges]);
 
-  const directedEdgesWithOffset = useMemo(() => {
-    if (!edgeDirectional) return directedEdges;
-    return directedEdges.map((f) => {
-      const dx = f.x2 - f.x1, dy = f.y2 - f.y1;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const px = (-dy / len) * edgeOffset;
-      const py = (dx / len) * edgeOffset;
-      return { ...f, sx: f.x1 + px, sy: f.y1 + py, tx: f.x2 + px, ty: f.y2 + py };
-    });
-  }, [directedEdges, edgeDirectional, edgeOffset]);
+  // Perpendicular offset of a directed edge, applied to its own left so A→B and
+  // B→A separate into two parallel lines (see the module notes on ⇌ notation).
+  // Returns [sx, sy, tx, ty] in image pixels; the identity when not directional.
+  const offsetEnds = useCallback((f) => {
+    if (!edgeDirectional) return [f.x1, f.y1, f.x2, f.y2];
+    const dx = f.x2 - f.x1, dy = f.y2 - f.y1;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const px = (-dy / len) * edgeOffset;
+    const py = (dx / len) * edgeOffset;
+    return [f.x1 + px, f.y1 + py, f.x2 + px, f.y2 + py];
+  }, [edgeDirectional, edgeOffset]);
 
   const getDirectedEdgeColor = useCallback((d) => {
     if (edgeColorValues) {
@@ -955,27 +991,30 @@ function ViewerPanel({ panelIndex }) {
     return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_AUTOCRINE_COLOR;
   }, [edgeColorValues, selectedEdge]);
 
-  const arrowheadTriangles = useMemo(() => {
-    if (!showArrowheads || !edgeDirectional) return [];
-    const arrowLen = Math.max(4, edgeWidth * 4 * arrowheadScale);
+  // Arrowhead geometry, in image pixels. `arrowLen` is a world length, so at
+  // whole-tissue zoom an arrowhead is a fraction of a screen pixel: invisible,
+  // but still tessellated and uploaded for every edge. Below ~1.5 screen px the
+  // layer is skipped outright — nothing visible changes, and on a dense view it
+  // removes the single most expensive layer from the frame.
+  const arrowLen = Math.max(4, edgeWidth * 4 * arrowheadScale);
+  const arrowScreenPx = arrowLen * Math.pow(2, deckViewState.zoom);
+  const arrowheadsDrawable = showArrowheads && edgeDirectional && arrowScreenPx >= 1.5;
+  const arrowheadPolygon = useCallback((f) => {
+    const [sx, sy, tx, ty] = offsetEnds(f);
     const cos150 = Math.cos((5 * Math.PI) / 6);
     const sin150 = Math.sin((5 * Math.PI) / 6);
-    return directedEdgesWithOffset.map((f) => {
-      const dx = f.tx - f.sx, dy = f.ty - f.sy;
-      const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const ux = dx / len, uy = dy / len;
-      const lx = ux * cos150 - uy * sin150, ly = ux * sin150 + uy * cos150;
-      const tip = [f.tx, f.ty];
-      const outerBase = [f.tx + lx * arrowLen, f.ty + ly * arrowLen];
-      if (arrowStyle === "half") {
-        const backBase = [f.tx - ux * arrowLen, f.ty - uy * arrowLen];
-        return { polygon: [tip, outerBase, backBase], edge: f.edge };
-      }
-      const rx = ux * cos150 + uy * sin150, ry = -ux * sin150 + uy * cos150;
-      const innerBase = [f.tx + rx * arrowLen, f.ty + ry * arrowLen];
-      return { polygon: [tip, outerBase, innerBase], edge: f.edge };
-    });
-  }, [directedEdgesWithOffset, showArrowheads, edgeDirectional, edgeWidth, arrowheadScale, arrowStyle]);
+    const dx = tx - sx, dy = ty - sy;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const lx = ux * cos150 - uy * sin150, ly = ux * sin150 + uy * cos150;
+    const tip = [tx, ty];
+    const outerBase = [tx + lx * arrowLen, ty + ly * arrowLen];
+    if (arrowStyle === "half") {
+      return [tip, outerBase, [tx - ux * arrowLen, ty - uy * arrowLen]];
+    }
+    const rx = ux * cos150 + uy * sin150, ry = -ux * sin150 + uy * cos150;
+    return [tip, outerBase, [tx + rx * arrowLen, ty + ry * arrowLen]];
+  }, [offsetEnds, arrowLen, arrowStyle]);
 
   const tissueGraphLayer = new LineLayer({
     id: "tissue-graph",
@@ -994,12 +1033,12 @@ function ViewerPanel({ panelIndex }) {
 
   const edgeDirectedLayer = new LineLayer({
     id: "edges-directed",
-    data: directedEdgesWithOffset,
+    data: directedEdges,
     modelMatrix: rotModelMatrix,
     visible: edgesVisible,
     opacity: edgesOpacity,
-    getSourcePosition: (d) => edgeDirectional ? [d.sx, d.sy] : [d.x1, d.y1],
-    getTargetPosition: (d) => edgeDirectional ? [d.tx, d.ty] : [d.x2, d.y2],
+    getSourcePosition: (d) => { const e = offsetEnds(d); return [e[0], e[1]]; },
+    getTargetPosition: (d) => { const e = offsetEnds(d); return [e[2], e[3]]; },
     getColor: getDirectedEdgeColor,
     getWidth: edgeWidth,
     widthMinPixels: 1,
@@ -1009,18 +1048,20 @@ function ViewerPanel({ panelIndex }) {
     highlightColor: [255, 255, 100, 255],
     updateTriggers: {
       getColor: [edgeColorValues, selectedEdge],
-      getSourcePosition: [edgeDirectional],
-      getTargetPosition: [edgeDirectional],
+      getSourcePosition: [edgeDirectional, edgeOffset],
+      getTargetPosition: [edgeDirectional, edgeOffset],
     },
   });
 
   const edgeArrowheadLayer = new SolidPolygonLayer({
     id: "edges-arrowheads",
-    data: arrowheadTriangles,
+    // Same rows as the line layer; the triangle is derived per row in
+    // getPolygon rather than materialised as a second array of objects.
+    data: arrowheadsDrawable ? directedEdges : [],
     modelMatrix: rotModelMatrix,
-    visible: edgesVisible && showArrowheads && edgeDirectional,
+    visible: edgesVisible && arrowheadsDrawable,
     opacity: edgesOpacity,
-    getPolygon: (d) => d.polygon,
+    getPolygon: arrowheadPolygon,
     filled: true,
     extruded: false,
     getFillColor: (d) => {
@@ -1031,7 +1072,10 @@ function ViewerPanel({ panelIndex }) {
       return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_EDGE_COLOR;
     },
     pickable: false,
-    updateTriggers: { getFillColor: [edgeColorValues, selectedEdge] },
+    updateTriggers: {
+      getFillColor: [edgeColorValues, selectedEdge],
+      getPolygon: [edgeDirectional, edgeOffset, arrowLen, arrowStyle],
+    },
   });
 
   const edgeAutocrineLayer = new ScatterplotLayer({
@@ -1040,7 +1084,8 @@ function ViewerPanel({ panelIndex }) {
     modelMatrix: rotModelMatrix,
     visible: edgesVisible && showAutocrine,
     opacity: edgesOpacity,
-    getPosition: (d) => [d.x, d.y],
+    // An autocrine row's sending centroid is the cell itself (x1 == x2).
+    getPosition: (d) => [d.x1, d.y1],
     getRadius: autocrineRadius,
     radiusMinPixels: 5,
     radiusMaxPixels: 60,
@@ -1451,6 +1496,7 @@ function ViewerPanel({ panelIndex }) {
           apiBase={apiBase}
           dataset={dataset}
           edgeId={selectedEdge}
+          hint={selection?.hint ?? null}
           edgeFile={edgeFile}
           onClose={() => setSelectedEdge(null, panelIndex)}
         />

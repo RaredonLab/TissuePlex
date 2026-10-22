@@ -42,6 +42,14 @@ sits in an absolutely-positioned canvas on top, with its viewport synced to OSD 
 custom `syncDeckFromOSD` function on every OSD viewport-change event. All data is
 returned in image pixel coordinates (native_coord / pixel_size).
 
+**The frame is not the image.** Every layer draws in one pixel space, and OSD needs a
+tile source with a width and height before deck.gl can be placed over it — but that
+source need not be a morphology image. `/spatial/{ds}/info` reports a `frame`
+(width, height) sized from the data extent, and the viewer opens an in-browser blank
+tile source of that size (`utils/frame.js`) whenever the dataset has no image *or*
+the image's pyramid fails to open. The morphology is one optional layer among the
+others; no data layer depends on it. See *Rendering Without an Image*.
+
 ---
 
 ## Platform Support & Reader Architecture
@@ -86,7 +94,9 @@ and boundary layers rather than returning empty arrays for them.
   not yet parsed)
 - CosMx: cells, transcripts, genes, metadata color-values implemented;
   gene-set color-values stub (requires transcript aggregation per cell);
-  `has_boundaries: False` (boundaries are per-FOV label TIFFs)
+  `has_boundaries: False` (boundaries are per-FOV label TIFFs). Transcripts
+  stream through DuckDB and the spatial cache like MERSCOPE and seqFISH — they
+  used to `pd.read_csv` the whole multi-GB transcript file on every pan.
 - seqFISH (Spatial Genomics GenePS): fully implemented for the current **v2** layout —
   cells, transcripts, boundaries, expression, and both color-value modes. Legacy **v1**
   reads cells and transcripts but declares `has_boundaries: False`, because v1 ships only
@@ -105,7 +115,12 @@ implementations return the dict form — the docstring is the thing that is wron
 ```
 backend/
   app/
-    main.py                  FastAPI entry point, CORS, router registration
+    main.py                  FastAPI entry point, CORS, router registration;
+                             ORJSONResponse is the default response class
+    logging_setup.py         Rotating log file under CACHE_DIR, request timing,
+                             memory watchdog, POST /client-log — see Observability
+    concurrency.py           run_cancellable(): runs a reader call on a worker
+                             thread and interrupts DuckDB if the client disconnects
     routers/
       tiles.py               DZI descriptor + tile serving; auto-builds pyramid on first request
       spatial.py             Platform-agnostic router: all /spatial/... endpoints
@@ -121,7 +136,9 @@ backend/
       xenium_reader.py       Xenium implementation (inherits SpatialDatasetReader)
       seqfish_reader.py      seqFISH / Spatial Genomics GenePS; v2 full, v1 partial.
                              Mixed µm/pixel coordinate handling — see its own section.
-      duck.py                Shared DuckDB query helpers used by the spatial readers
+      duck.py                Shared DuckDB helpers: ONE shared database, per-request
+                             cursors, the query semaphore and the cancellation scope —
+                             see Query Concurrency and Memory
       metadata_filter.py     Categorical-vs-continuous typing + the MetadataFilter
                              subsetting spec; shared by cells and edges (#35, #45)
       spatial_cache.py       Spatially-sorted parquet cache (build on first access)
@@ -137,12 +154,17 @@ backend/
       supplemental.py        Shared cell-metadata/ + edge-metadata/ loader (key-agnostic)
       layer_reader.py        generic parquet reader
     tiling/
-      pyramid.py             OME-TIFF → DZI; pyvips streaming primary, tifffile+Pillow fallback
+      pyramid.py             OME-TIFF → DZI; pyvips streaming primary, tifffile+Pillow
+                             fallback. Also `list_image_stems`, the image discovery the
+                             picker and `has_morphology` share with `_find_source`
   requirements.txt           pinned deps; cffi<2.0 required for pyvips 2.2.3 compatibility
   Dockerfile
   tests/
     golden_snapshot.py       Reader regression guard — see Development Workflow
     golden_baseline.json     Recorded baseline (238 probes / 8 datasets)
+    edge_pipeline_check.py   Issue #59 invariants + score-matrix equivalence
+    no_image_check.py        Strips every image from every fixture and asserts no
+                             layer moves — see Rendering Without an Image
 
 frontend/
   src/
@@ -161,10 +183,14 @@ frontend/
       ExportDialog.jsx       Figure export: output size, DPI tag, background, scale bar
       RenderingStatus.jsx    Per-panel loading badge, driven by the store's loadingKeys set
     hooks/
-      useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
-      useCellBoundaries.js   Viewport-bounded cell boundary fetch (skip when fracW >= 0.5)
-      useCellColors.js       POST color-values; maps cell_id → RGBA; supports clamp
-      useEdgeColors.js       lrm_set: client-side from visible_score_sum; metadata: POST edge-color-values
+      useTranscripts.js      Viewport-bounded transcript fetch; the gene filter is applied
+                             in the browser from the unfiltered sample — see Filter
+                             Changes Are Not Pans
+      useCellBoundaries.js   Viewport-bounded cell boundary fetch; carries the colour spec
+                             so `colors` for exactly those cells ride on the response
+      useCellColors.js       Maps the `colors` from the boundaries response to RGBA; no fetch
+      useEdgeColors.js       Both modes client-side: lrm_set from visible_score_sum,
+                             metadata from `color_value` on the rows + a cached summary
       useEdges.js            Viewport-bounded edge fetch; POSTs to /query-grouped
     utils/
       colormap.js            Palette definitions (viridis/plasma/magma/inferno) + valueToColor()
@@ -173,6 +199,11 @@ frontend/
                              Its stroke-width scaling is inert — see Figure Export
       pngExport.js           PNG pHYs (DPI) tagging, blob download, scale-bar rounding
       listImport.js          Gene / LRM list CSV import + export — see its own section
+      viewportFilters.js     Pure helpers: client-side gene filter over the viewport
+                             sample, the debounce-only-a-moving-viewport rule, and the
+                             allowlist/complement gene-list params. Tested.
+      frame.js               The data-sized blank tile source the viewer opens when
+                             there is no image, or the image cannot be opened
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -585,9 +616,14 @@ symptom did not look like a filter bug: on a 480-gene Xenium panel one click too
 transcript layer from 200,000 dots to ~360, which reads as "transcripts stopped working".
 Present since v0.2.0 (`c52dbc0`).
 
-**The filter is sent as an allowlist or as its complement, whichever is shorter**
-(`genes=` vs `exclude_genes=`). This is not an optimisation — it is what keeps the
-feature working at all. The list travels in the query string of a GET, and measured
+**The filter is applied in the browser, not by a request** (see *Filter Changes
+Are Not Pans*). The transcripts fetch is the viewport's *unfiltered* sample; a
+species toggle filters it synchronously. A request carries the gene list only in
+two cases — the refetch when the 200K cap thinned the sample, and the `gene_set`
+colour spec on the boundaries request — and then **it is sent as an allowlist or
+as its complement, whichever is shorter** (`genes=` vs `exclude_genes=`,
+`color_genes=` vs `color_exclude_genes=`). This is not an optimisation — it is
+what keeps the feature working at all. The list travels in the query string of a GET, and measured
 against this stack, 479 of 480 genes is a **7,780-byte URL, ~220 bytes under nginx's
 8 KB request-line limit**, while 600 genes returned **414**. Deselecting a handful of
 genes from a large panel is the ordinary case and produces exactly that shape, so a
@@ -601,11 +637,11 @@ Note the two forms are equivalent to each other but **not** to sending no filter
 "no filter" keeps them (measured: 35,013 vs 34,997 rows in one viewport). That predates
 this change and is why the picker never lists control probes.
 
-An **empty** `selectedGenes` Set short-circuits the fetch. It means "show no species",
-but omitting the gene parameter means "no filter" to the backend, so the request used to
-return the full 200K-row cap for Viewer's client-side filter to discard — nothing drew,
-which looked right, while ~20 MB was fetched per pan and the layer badge reported the
-unfiltered total against an empty canvas.
+An **empty** `selectedGenes` Set means "show no species": the hook draws nothing
+and keeps the base sample it has, so re-selecting a gene is instant; it does not
+fetch a base for a viewport it has not seen. (It used to send the request with no
+gene parameter, which the backend reads as "no filter", and throw the 200K rows
+away.)
 
 `useCellColors` `gene_set` mode: if `selectedGenes === null`, uses all `allGenes`;
 otherwise uses `[...selectedGenes]`.
@@ -687,6 +723,17 @@ cell segment outlines (structure) vs cell fill color (expression).
 - `lrm_count` — total LRM rows for this edge (used by tissue graph — show all structural pairs regardless of LRM filter)
 - `visible_lrm_count` — LRMs not in `hiddenLrms` (used by directed edges — hide edge when 0)
 - `visible_score_sum` — SUM(score) for non-excluded LRMs (used for client-side lrm_set color mapping)
+
+**The edge layers share one array and compute geometry in accessors.** `useEdges`
+returns the structural rows as-is when no LRM filter is active (consumers fall back
+`visible_lrm_count ?? lrm_count` and `visible_score_sum ?? score_sum`), and `Viewer`
+makes one pass splitting them into directed and autocrine rows. The perpendicular
+offset and the arrowhead triangle are computed inside the deck.gl accessors
+(`offsetEnds`, `arrowheadPolygon`) with `updateTriggers`, not materialised as arrays
+of new objects — that used to be four copies of every edge object per update.
+**Arrowheads are skipped when sub-pixel**: `arrowLen` is a world length, so below
+~1.5 screen px (`arrowheadsDrawable`) the layer gets no data; nothing visible
+changes and the most expensive layer leaves the frame at whole-tissue zoom.
 
 **Directional rendering**: A→B and B→A are offset perpendicular to the edge axis so they
 appear as two distinct parallel lines. Offset amount is tunable (`edgeOffset`, default 4px).
@@ -990,12 +1037,60 @@ Other things worth knowing:
   concurrent WebGL contexts, so leaking one per export would eventually kill the
   live viewer.
 
+## Rendering Without an Image
+
+A lab member reported that a dataset without its DAPI or morphology could not load
+its cell segments or edges. Confirmed, with three causes behind one symptom, all
+rooted in the viewer taking its coordinate frame from the tile pyramid: no image,
+no `imageSize`, no deck.gl canvas, no layers.
+
+| Case | Before | Now |
+|---|---|---|
+| No image file | v0.8.3 served a blank *pyramid* sized from the cell centroids; worked on Xenium | the browser opens a blank tile source sized from `/info` → `frame`; no pyramid, no tile requests |
+| seqFISH with no DAPI | cells and transcripts drawn in a 49 px corner, boundaries 10× away | `_reference_size()` falls back to the GeoJSON boundary extent (pixels), so unit detection still works |
+| Image present but unopenable | OSD `open-failed` logged to the console, everything blank, *and* the boundary/transcript hooks fetched the whole dataset unbounded | the panel reports it (badge + log) and opens the data frame; the hooks wait for a viewport |
+
+How it fits together:
+
+- **Backend.** `SpatialDatasetReader.frame()` → `{width, height, source: "data"}`
+  from `data_extent()` (cell centroids, or boundary vertices when there are no
+  centroids; cached per reader; 5% margin, anchored at the origin like a pyramid).
+  `/info` carries it. `has_morphology` on the base class is now
+  `has_image()`, the same discovery the picker uses, so Xenium no longer reports a
+  morphology it does not have. The blank-pyramid code (`__blank__`,
+  `ensure_blank_pyramid`, `tiles._ensure_blank`) is gone.
+- **Frontend.** `DatasetPicker` starts `images` as `null` (unresolved) and sets
+  `activeImage` to `BLANK_IMAGE_NAME` when the list resolves empty. `ViewerPanel`
+  opens `blankTileSource(frame)` for that sentinel, and also on `open-failed` for a
+  real image (`imageFailed`, reset per `dziUrl`), after `reportClient`ing the
+  failure. OSD's `open` event still sets `imageSize` either way, so nothing
+  downstream changed. The morphology opacity row is hidden by the capability flag.
+- **Hooks wait for a viewport.** `useTranscripts` and `useCellBoundaries` used to
+  fetch without one — unbounded, the whole dataset — which was wasted on exactly
+  the failing path. One always arrives now.
+
+`backend/tests/no_image_check.py` is the guard: it copies every fixture to a
+scratch root without its image files, serves that through the real routers, and
+asserts `/images` is empty, `has_morphology` is false, `/info` has a frame, and
+**every layer's extent is identical to the same layer read with the image
+present** (a seqFISH pixel-size change — DAPI OME-XML value vs the documented
+0.107 fallback — rescales micron tables by 0.15% and is allowed and reported).
+That equality test is what caught the seqFISH case.
+
+Two things that remain image-dependent, by nature: seqFISH's `pixel_size` comes
+from the DAPI OME-XML and falls back to the constant without it; and the Space
+Ranger coordinate contract still assumes the image the viewer shows is the hires
+PNG (see that section).
+
 ## Morphology Image Discovery
 
 `GET /spatial/{dataset}/images` returns bare filename **stems** (no extension, no directory
-prefix) for every `.ome.tiff` / `.ome.tif` / `.tiff` / `.tif` in the dataset root **and one
-level of subdirectories**. This is what makes Xenium's multi-channel `morphology_focus/`
-set selectable alongside the top-level `morphology.ome.tif`:
+prefix) for every `.ome.tiff` / `.ome.tif` / `.tiff` / `.tif` / `.png` in the dataset
+root **and one level of subdirectories**. The discovery itself is
+`pyramid.list_image_stems`, which also backs the base class's `has_image()`, so the
+picker, the capability flag and the tile builder agree by construction. This is what
+makes Xenium's multi-channel `morphology_focus/` set selectable alongside the top-level
+`morphology.ome.tif`:
 
 ```
 dataset_dir/
@@ -1006,9 +1101,9 @@ dataset_dir/
 ```
 
 `pyramid.py::_find_source()` resolves a stem back to a path by searching the **same two
-locations in the same order** — root first, then subdirectories. These two functions are a
-matched pair: if you change the search order or depth in one, change it in the other, or
-the picker will list images the tile builder cannot open.
+locations in the same order** — root first, then subdirectories. The two live in one
+module because they are a matched pair: if you change the search order or depth in one,
+change it in the other, or the picker will list images the tile builder cannot open.
 
 Hidden directories are skipped so `.dzi_cache` is never scanned. Stems are de-duplicated,
 and root-level files are added first, so a root file always wins a name collision with a
@@ -1047,8 +1142,8 @@ what fraction of the data is actually on screen.
 elsewhere. That makes it spatially uniform, the same on every re-fetch, and
 nested — zooming in only ever adds dots. Cell boundaries hash *cell IDs* before fetching
 rows, so a sampled cell keeps all of its vertices and never renders as a partial polygon.
-CosMx still uses pandas `df.sample`, which is uniform. See the Spatial Query Path section
-for why this is not `USING SAMPLE reservoir`.
+CosMx goes through the same hash sampler since it moved to DuckDB. See the Spatial Query
+Path section for why this is not `USING SAMPLE reservoir`.
 
 **Edge sampling** is the same idea: `density_predicate` hashes the edge id, so each
 edge is kept independently at probability `density`, and no predicate is emitted at all
@@ -1059,6 +1154,32 @@ one row per directed edge (GROUP BY edge, ORDER BY RANDOM()). For a 168M-row par
 (~300K edges × 559 LRMs) this is ~500× fewer rows than the raw query. The `excluded_lrms`
 list is sent in the request body so `visible_lrm_count` and `visible_score_sum` are
 pre-computed server-side.
+
+### Filter Changes Are Not Pans
+
+The rule, in every data hook: **debounce a moving viewport; act on a click at
+once.** `viewportFilters.fetchDelay` returns 0 when the fetch's viewport key is
+unchanged from the last one, and the usual debounce otherwise. A gene toggle, an
+LRM toggle, a metadata filter edit or a colour column change used to wait out a
+200–400 ms debounce meant for drag events, then re-query the server. Now:
+
+- **Transcript species toggles make no request at all.** The fetch is the
+  viewport's *unfiltered* sample; `filterTranscriptsByGene` applies the
+  allowlist synchronously. This is exact, not approximate: the server keeps each
+  row by a seeded hash with probability `fraction`, independent of gene, so the
+  filtered rows of the unfiltered sample *are* the rows a filtered fetch would
+  return. The one exception is when the 200K cap, not `fraction`, sized the
+  sample (whole-tissue zoom on a large run): the helper reports `capped`, and the
+  hook fetches the filtered rows from the server, immediately and abortably, and
+  swaps them in. `total` under a client-side filter is estimated from the keep
+  rate (± sampling noise). Measured in the browser on the breast fixture: three
+  abundant genes unchecked, 183,453 → 101,872 dots, zero requests.
+- **LRM toggles are a request, but a few-millisecond one.** The server keeps the
+  viewport's `(edge, lrm, score)` rows as flat arrays — see *Per-viewport score
+  matrix* — so `/query-scores` is a masked `bincount`, not a re-scan. The
+  request goes out with no debounce; a superseded one is aborted, which cancels
+  it on the server too.
+- **Colour values never cover more than the viewport.** See *Color System*.
 
 ---
 
@@ -1088,9 +1209,9 @@ Three things about this layout bite:
   dataset root, so no genuine Space Ranger output was ever detected.
 - **`tissue_positions.parquet` and `scalefactors_json.json` are per bin.** The top-level
   `spatial/` folder holds images only.
-- **Morphology is a PNG.** The tile pipeline was TIFF-only; `_SOURCE_EXTS` and
-  `spatial._TIFF_EXTS` now include `.png`, and `_build_dzi_pillow()` handles it when
-  libvips is unavailable (the tifffile fallback cannot open a PNG).
+- **Morphology is a PNG.** The tile pipeline was TIFF-only; `pyramid._SOURCE_EXTS`
+  now includes `.png`, and `_build_dzi_pillow()` handles it when libvips is
+  unavailable (the tifffile fallback cannot open a PNG).
 
 **Bins are served as square polygons.** A bin is literally a square of side
 `spot_diameter_fullres`, so `cell_boundaries()` emits four vertices per bin instead of
@@ -1289,6 +1410,11 @@ Other things worth knowing:
 
 - `pixel_size` comes from `PhysicalSizeX` in the **DAPI OME-XML** — not a manifest, unlike
   every other platform. Falls back to 0.107 (the documented GenePS value).
+- **The image width the unit test compares against has a fallback.** Without the DAPI,
+  `_reference_size()` uses the GeoJSON boundary extent — a pixel-space table on every
+  v2 export — or the v1 label mask's dimensions. Before that fallback a dataset shipped
+  without its DAPI treated every table as pixels, which put cells and transcripts at a
+  hundredth of their size while the boundaries sat where they belonged.
 - `cell_area` is deliberately left in **µm²** to match Xenium, which never converts it, so
   the "µm²" label in `CellInfoPanel` is true on every platform.
 - Cell identity comes from each GeoJSON feature's `id`, which equals `label`.
@@ -1362,9 +1488,8 @@ Four things to know:
   bound; SELECT 35 ms vs 321 ms. On an unsorted file the two are identical, which is why
   this only started to matter once the cache existed. Inlining is safe because every value
   goes through `float()` and non-finite values are rejected — string filters such as gene
-  names still go through `in_predicate()`. `edge_reader.py` still binds its bbox; that
-  costs nothing today because edge parquet is unsorted, but it would have to change before
-  an edge spatial index would pay off.
+  names still go through `in_predicate()`. `edge_reader._bbox_sql` inlines its bounds the
+  same way, which is what lets the edge spatial index pay off.
 - **Small files are skipped** (`SPATIAL_CACHE_MIN_BYTES`, default 64 MB). Below that the
   build cost and extra disk are not repaid. This also keeps the bundled sample datasets
   uncached, so the golden baseline does not depend on whether a cache happens to exist.
@@ -1436,6 +1561,30 @@ Things to preserve when editing these methods:
 
 The `cellColorClamp` / `edgeColorClamp` store values are passed into the color hooks
 and applied as `lo = clamp.low ?? dataMin`, `hi = clamp.high ?? dataMax`.
+
+**No colour request ever covers more than the viewport.** Cell colours ride on
+the boundaries response: `useCellBoundaries` passes the colour spec
+(`color_mode`, `color_field`, `color_categorical`, `color_genes` /
+`color_exclude_genes`) and `spatial.py` attaches `colors` for exactly the cells
+it returned, via `SpatialDatasetReader.color_values_for(cell_ids=…)`, which
+computes the full per-cell result once per (mode, field, genes, override) and
+subsets it. Polygons and their colours land in the same render, so there is no
+flash of uncoloured cells. `POST /color-values` still exists for the sidebar,
+which now sends `summary: true` — type, categories and range only. It used to
+return one value for every cell in the dataset to the viewer and the filter
+panels alike: tens of MB on a million-cell run, a million-entry Map held for as
+long as the colouring was on, and a full pass over it per clamp change.
+
+Edge metadata colours work the same way from the other side: `useEdges` sends
+`color_field` and `query_grouped` returns the per-edge value as `color_value` on
+the rows (one extra `FIRST()` in the aggregate, or a LEFT JOIN on the registered
+`edge-metadata/` frame), while `edge_color_values(summary=True)` →
+`edge_color_summary` supplies the dataset-wide type / categories / min / max /
+p95, cached per column. **Ranges and categories are always those of the whole
+dataset**, so legends and the linked colour scale keep their meaning. One
+corner-case change: an integer column that is null on some edges used to be
+typed from the per-edge `FIRST()` series (float64 with NaN → continuous); the
+summary types it from its DISTINCT non-null values (int → categorical when ≤ 30).
 
 **Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server
@@ -1556,8 +1705,12 @@ subset renders at full density.
 
 **Large id sets go through `duck.register_ids()`, not `IN (?, ?, …)`.** A filter can
 keep hundreds of thousands of cells; binding that many parameters is unworkable and
-the SQL text alone reaches megabytes. Registering a one-column frame makes it an
-ordinary hash semi-join.
+the SQL text alone reaches megabytes. Registering a one-column table makes it an
+ordinary hash semi-join. The table is an Arrow table built once per id *set* and
+memoised on the set's identity (checked with `is`, so a recycled `id()` can never
+return another filter's ids): `filter_cell_ids` hands back the same set object on
+every pan, and converting 500K ids to strings per request was 0.1–0.2 s of pure
+overhead.
 
 Two things that bit during implementation and are easy to reintroduce:
 
@@ -1578,6 +1731,177 @@ transcript→cell assignment at all (seqFISH v2 dropped the column), so the filt
 nothing to join on and would work on some datasets and not others.
 
 ---
+
+## Query Concurrency and Memory (readers/duck.py, concurrency.py)
+
+Three things decide whether the backend survives a laptop, and all three live
+in `duck.py`:
+
+**One DuckDB database, many cursors.** `duck.connect()` used to call
+`duckdb.connect()` — a *new in-memory database instance* per request, with its
+own buffer pool, its own thread pool, and its own copy of `memory_limit`. Five
+requests in flight (two panels, several layers each, plus the ones the browser
+had already abandoned) were five databases each entitled to 60% of RAM. That is
+how a backend that "respected" its memory cap was still killed by the VM's OOM
+killer. There is now one shared database (`_database()`), and `connect()`
+returns a cursor on it, which is DuckDB's documented way to use one database
+from several threads. Isolation per request is still real: each cursor has its
+own transaction and its own `register`ed frames (verified — a frame registered
+on one cursor is not visible from another), so `register_ids` is unaffected.
+`memory_limit` and `threads` are now process-wide caps, and `threads` defaults
+to the CPUs the container can actually see (capped at 8) instead of a flat 4.
+
+**A bounded query semaphore.** FastAPI runs sync endpoints on a 40-thread pool,
+so a user panning on a slow machine could stack dozens of full-file scans that
+all competed for the same cores. `QUERY_CONCURRENCY` (default about half the
+threads, min 2) queries run at once; the rest queue in order. `connect()`
+acquires a slot for exactly as long as the connection is open.
+
+**Cancellation.** The browser aborts a fetch the moment a newer viewport
+supersedes it, but that abort stopped at the socket: the query ran to
+completion for a view nobody would see. The hot endpoints (`query-grouped`,
+`query-structure`, `query-scores`, `edge-color-values`, `transcripts`,
+`cell-boundaries`, `color-values`) are now `async` and go through
+`concurrency.run_cancellable`, which runs the reader call on a worker thread
+inside a `duck.QueryScope` and polls `request.is_disconnected()` every 100 ms;
+on disconnect it calls `interrupt()` on every cursor the call opened and
+returns a 499. Measured: a query that would have taken 300–560 ms stopped
+~40 ms after the client left. The scope travels in a contextvar, so readers call
+`connect()` exactly as before and need no plumbing. `duck.uninterruptible()`
+clears it for a block whose result outlives the request — a cache build the
+*next* request will use — so the client leaving does not throw the work away. **The timing middleware must
+stay a pure ASGI middleware** (`logging_setup._TimingMiddleware`): Starlette's
+`BaseHTTPMiddleware` re-wraps the receive channel and `is_disconnected()` never
+fires behind it — the first version of this used `@app.middleware("http")` and
+three aborted requests all ran to completion.
+
+The hot endpoints also return `ORJSONResponse` *explicitly*. Returning a plain
+list lets FastAPI run `jsonable_encoder` over it first, measured at 0.8 s for
+200K records — longer than the DuckDB query it wrapped — and then the stdlib
+JSON encoder (0.14 s); orjson does the whole thing in ~10 ms and writes NaN/Inf
+as null natively. `EdgeReader._records` likewise replaced the per-value Python
+`isfinite` loop (six million calls on a 500K-edge viewport) with a vectorised
+check per float column.
+
+## Edge Spatial Index and the Prunable BBox (readers/edge_reader.py)
+
+`EdgeReader` now goes through `spatial_cache` like the transcript and boundary
+readers: a one-time background rewrite of the edge file sorted by a coarse grid
+on `x1`/`y1`, cached under `CACHE_DIR` as `edges.sorted.parquet` (or
+`edges__<name>.sorted.parquet` for files in `edges/` — the `cache_name` override
+exists because two edge sources would otherwise collide on the stem "edge" and
+rebuild each other's cache on alternate requests). Files under 64 MB are left
+alone, which keeps the bundled datasets and the golden baseline untouched.
+
+**Sorting alone does nothing here, and that was measured.** The layer's
+predicate is `(x1,y1) in box OR (x2,y2) in box`, and DuckDB cannot prune
+parquet row groups through an OR over two different column pairs: on a 33M-row
+*sorted* file a 10% viewport still scanned every row group (231 ms vs 270 ms
+unsorted). `_bbox_sql` therefore prepends a prunable *envelope* — `x1,y1`
+within the box grown by the file's longest edge (`max_edge_length()`, one query
+per file, cached per instance). Any edge whose receiving end is in view has its
+sending end within that distance of the box, so the envelope is a superset and
+the exact OR test after it changes nothing; but it is a plain conjunction on one
+column pair, which is what zone maps can use. Bounds are inlined as literals,
+not bound as `?`, for the reason documented at `duck.bbox_predicate`.
+
+Measured on the 33M-row synthetic file (`scratchpad/make_big_edges.py` shape:
+22.5K cells, 200K edges, 500 LRMs), per query, this machine:
+
+| | before | after | |
+|---|---|---|---|
+| query_grouped, 10% viewport | 372 ms | 28 ms | 13× |
+| query_grouped, 2% viewport | 351 ms | 18 ms | 20× |
+| query_grouped, 10% + sending filter | 494 ms | 31 ms | 16× |
+| query_scores, 10% viewport | 316 ms | 27 ms | 12× |
+| query_grouped, whole tissue | 455 ms | 293 ms | 1.6× |
+
+The index build took 8 s for 33M rows; expect a minute or two for a 168M-row
+lab file, during which queries use the unsorted file (the log says so).
+
+**Whole-tissue views read a density tier instead.** Nothing can be pruned by
+position at that zoom, but the density predicate is deterministic: the edges
+kept at density ≤ 0.1 are a *fixed* subset of the file, and any density ≤ 0.1
+selects a subset of that subset. So once the sorted file exists, `_from(density)`
+derives a second parquet from it — the ≤ 10% tier, `edges.d10.sorted.parquet`,
+built through `spatial_cache.sorted_path(..., where_sql=…)` — and reads it for
+any query at `_density_cut(density) <= _density_cut(TIER_DENSITY)`. The query's
+own predicate is a no-op on it; the scan is a tenth of the size. Measured on the
+33M-row file at whole-tissue zoom, density 0.1: `query_grouped` 248 → 48 ms,
+`query_structure` 92 → 20 ms, identical edge sets. The tier is used only when
+the file has an `edge` column (the predicate hashes it) and never above
+`TIER_DENSITY` — a query at 0.5 would be answered from a tenth of the data.
+
+### Per-viewport score matrix (`EdgeReader._score_matrix`)
+
+An LRM toggle changes which rows of each in-view edge count, not which edges are
+in view. `query_scores` therefore keeps the viewport's `(edge, lrm, score)` rows
+in memory as three flat arrays, keyed on `(file, bbox, density)` — exactly the
+inputs that decide the row set; filters do not enter because `query_scores`
+never applied them — and answers each toggle with a masked `np.bincount`.
+Measured on the 33M-row file: whole tissue at density 0.1 (3.3M rows, 54 MB)
+284 → 35–76 ms per toggle after a one-time 409 ms build; a 10% viewport 23 → 1 ms.
+
+Things to know:
+
+- **It must agree with the SQL path exactly**, and `edge_pipeline_check`
+  property 4 asserts that it does on every dataset: null scores skipped, NaN
+  propagated, zero-visible edges present in the exclusion form and absent in the
+  inclusion form. The whole-file form (no bbox) and the empty exclusion the
+  golden snapshot probes are left to SQL.
+- **Bounded.** Entries are evicted LRU against `SCORE_CACHE_MB` (default 8% of
+  the memory ceiling, at most 256 MB), and a viewport whose rows would not fit
+  is answered by SQL as before, with a log line saying so.
+- **The build runs under `duck.uninterruptible()`.** It is the *next* toggle
+  that benefits from the matrix; under the request's cancellation scope a user
+  clicking quickly would interrupt the build on every click and never see it
+  land. Concurrent toggles for the same view wait on `_matrix_lock` for the
+  first build rather than each scanning the file.
+
+`query_scores` also takes `density` now and applies the same deterministic
+`density_predicate` as `query_grouped`, *before* its GROUP BY. It used to
+aggregate and ship scores for every edge in the viewport while the layer drew a
+tenth of them; because the predicate hashes the edge id, the sampled structural
+edges always find their scores. The frontend sends it; the default is 1.0, so
+the golden probes and older clients are unchanged.
+
+## Observability (app/logging_setup.py)
+
+The backend wrote nothing but `print()`s to stdout, which inside Docker is
+`docker logs` and is gone the moment the container is recreated — and a backend
+that has just been OOM-killed and restarted is exactly the one whose output you
+wanted. When a trainee reported "it just stopped", there was nothing to read.
+
+Every log record now goes to a rotating file (`$CACHE_DIR/logs/tissueplex.log`,
+5 × 5 MB; the `dzi_cache` volume, so it survives restarts) as well as stdout.
+The readers' `print`s became `logging.getLogger("tissueplex.<platform>")` calls.
+On top of that:
+
+- `_TimingMiddleware` logs any request slower than `SLOW_REQUEST_MS` (default
+  2000) with its query string and the process RSS, every 4xx/5xx, and unhandled
+  exceptions with their traceback.
+- A watchdog thread logs when RSS passes 70% / 85% of the memory ceiling (the
+  min of the cgroup limit and physical RAM), so an OOM kill leaves a trail
+  leading up to it rather than a silent gap.
+- `POST /client-log` accepts reports from the browser (rate-limited, 60/min).
+  `frontend/src/utils/clientLog.js` wraps every data hook's `fetch`
+  (`loggedFetch`): a non-ok response or a network failure is reported with the
+  endpoint, dataset, status and duration — aborts are not — and
+  `installGlobalErrorReporting()` in `main.jsx` catches uncaught errors and
+  unhandled rejections. Reports are de-duplicated per message for 10 s and
+  capped at 30/min client-side.
+- The most recent failed fetch is also written to `store.backendError`, and
+  `RenderingStatus` shows it as a red badge for 12 s (panel 0 only). This is
+  the visible half of the fix: the hooks still degrade a failure to an empty
+  layer, which is right, but it is no longer silent.
+- `GET /health` reports `rss_mb`, `memory_ceiling_mb`, `uptime_s`, `log_file`
+  and the DuckDB settings in effect.
+
+Tuning knobs, all optional: `LOG_LEVEL`, `LOG_DIR`, `SLOW_REQUEST_MS`,
+`DUCKDB_THREADS`, `QUERY_CONCURRENCY`, `SCORE_CACHE_MB`. All are passed through
+by both compose files. `frontend/nginx.conf` allows 600 s per proxied request:
+abandoned queries are cancelled server-side, so a long ceiling costs nothing,
+and a short one turned slow-but-correct first requests into 504s.
 
 ## Tile Pyramid
 
@@ -1668,6 +1992,9 @@ auth, no user accounts, and no per-dataset permissions.
 `backend/app/main.py` (`APP_VERSION`, served by `/health`), and the line under the
 title in `README.md`. The sidebar badge compares the first two and turns red when
 they disagree, so a half-bump is visible but only once the app is running.
+`frontend/package-lock.json` carries the package version too (top two `version`
+keys); it had sat at 0.8.4 through four releases, so bump it as well. The README
+also has a *What's new* section per release.
 
 Every other `v0.x.y` in the tree is a *historical* reference — "shipped in v0.8.4",
 "present since v0.2.0" — and must not be swept along by a bump.
@@ -1682,6 +2009,10 @@ cd backend && python3 tests/golden_snapshot.py --record # adopt intentional chan
 ```
 
 Datasets absent from a checkout are skipped, so it works with only the committed fixtures.
+The baseline was re-recorded with the laptop-performance pass: it had drifted by seven
+probes before that pass (the Q-Score capability flag and the hash sampler, both from
+v0.8.8, were never recorded), plus CosMx `tx_full`, whose sample moved when CosMx
+transcripts switched from `df.sample` to the shared hash sampler (`total` unchanged).
 Two determinism rules keep it honest: record-list digests are order-independent (because
 `query_grouped` uses `ORDER BY RANDOM()`), and sampling is seeded (`duck.SAMPLE_SEED`).
 If a probe changes and you cannot explain why, that is the point of the tool.
@@ -1697,8 +2028,9 @@ Two further backend checks exist alongside the golden snapshot, both covering
 things it structurally cannot:
 
 ```bash
-cd backend && python3 tests/edge_pipeline_check.py    # issue #59 invariants
+cd backend && python3 tests/edge_pipeline_check.py    # issue #59 invariants + score matrix
 cd backend && python3 tests/duckdb_config_check.py    # DUCKDB_MEMORY_LIMIT forms
+cd backend && python3 tests/no_image_check.py         # every layer renders without an image
 ```
 
 `edge_pipeline_check` asserts, on every dataset with edges and at several
@@ -1774,9 +2106,14 @@ which it does not cover at all.
 - **`Math.min/max` spread on large arrays** (fixed in `useEdgeColors.js`): spreading
   100K+ element arrays causes `RangeError: Maximum call stack size exceeded`. Use a
   `for` loop to find min/max instead of `Math.min(...arr)`.
-- **`list_images` and `_find_source` are a matched pair.** They must search the same
-  locations in the same order (root, then one subdirectory level). Changing the depth or
-  order in one without the other makes the picker list images the tile builder can't open.
+- **`list_image_stems` and `_find_source` are a matched pair** (both in `pyramid.py`).
+  They must search the same locations in the same order (root, then one subdirectory
+  level). Changing the depth or order in one without the other makes the picker list
+  images the tile builder can't open.
+- **No data layer may depend on the image.** `imageSize` comes from whatever OSD
+  opened — an image or the data frame — and the hooks key on the viewport. Gating a
+  fetch or a layer on `activeImage`, the DZI, or `has_morphology` reintroduces the
+  "no DAPI, no cells" bug. `no_image_check.py` is the test to run.
 - **Edge color clamp has two different defaults, by design.** `Viewer.jsx` auto-sets
   `edgeColorClamp.high` from the p95 of `visible_score_sum` so the initial view isn't
   washed out by outliers. But `useEdgeColors` computes its own fallback `hi` as `max`, not
@@ -1789,17 +2126,45 @@ which it does not cover at all.
   deployment where the URL is reachable by someone untrusted.
 - `zarr==2.18.2` is still pinned in requirements.txt although the readers use parquet and
   HDF5, not zarr. Likely stale; verify before removing.
+- **`duck.connect()` returns a cursor on one shared database, and must stay that way.**
+  Calling `duckdb.connect()` directly anywhere reintroduces a per-request database with
+  its own memory limit and thread pool — the OOM path described under *Query Concurrency
+  and Memory*. Use it as a context manager; it holds a concurrency slot while open.
+- **The request-timing middleware is a pure ASGI class on purpose.** `@app.middleware("http")`
+  (Starlette's `BaseHTTPMiddleware`) breaks `request.is_disconnected()` downstream, which
+  silently disables query cancellation. Verified, not theoretical.
+- **The edge bbox must keep its envelope conjunct.** `_bbox_sql` = prunable envelope on
+  `x1,y1` AND the exact OR test. Dropping the envelope keeps the results and loses the
+  entire spatial index (DuckDB does not prune through the OR); dropping the OR changes
+  which edges are returned.
+- **`sample_data` must not contain anything over `SPATIAL_CACHE_MIN_BYTES`** (64 MB), or
+  the golden baseline starts depending on whether a cache has been built.
+- **The density tier is only valid at `density <= TIER_DENSITY`.** `_from(density)`
+  checks `_density_cut`, not the float, so 0.1 exactly hits the tier. Pass the query's
+  real density to `_from`; a query that forgot and read the tier at 0.5 would silently
+  draw a fifth of the edges it claims.
+- **`query_scores` has two implementations and they must agree.** The score matrix is
+  the fast one; the SQL aggregate is the reference. `edge_pipeline_check` property 4
+  compares them on every dataset. Change the arithmetic in one and the check fails.
+- **The viewer must never ask for whole-dataset colour values.** `color-values` and
+  `edge-color-values` without `cell_ids` / `summary` return a value per unit in the
+  dataset; the viewer gets its colours from the boundaries response and the grouped
+  edge rows. The sidebar sends `summary: true`.
+- **A gene toggle must not refetch transcripts.** `useTranscripts` keys its base fetch
+  on viewport / fraction / quality only; the gene filter is `filterTranscriptsByGene`
+  over that sample. Adding `genesKey` to the fetch deps reintroduces the round trip.
 
 ---
 
 ## What's Not Built Yet
 
-1. **Edge queries are not spatially indexed.** `transcripts()` and `cell_boundaries()`
-   now go through `spatial_cache` (see the Spatial Query Path section), but `EdgeReader`
-   does not. Two things would need to change: sort `edges.parquet` on `x1`/`y1`, and stop
-   binding its bbox as `?` parameters, which defeats row-group pruning. Less urgent than
-   it was for transcripts, because `query_grouped` already collapses the row count
-   server-side.
+1. **Whole-tissue edge queries above density 0.1 still scan the whole file.**
+   At or below 0.1 (the default) they read the ≤ 10% tier (see *Edge Spatial
+   Index*); a whole-tissue view at density 0.5 or 1.0 is a full scan, and the
+   first LRM toggle there builds a score matrix from it. A second tier (say
+   ≤ 50%) would be a one-line addition if anyone works that way. The old
+   whole-dataset colour values and the per-request `register_ids` rebuild are
+   both fixed.
 
 2. **Supplemental cell metadata is not shown in the cell info panel** — `CellInfoPanel.jsx`
    renders a hardcoded field list (`cell_id`, x, y, `transcript_counts`, `total_counts`,
