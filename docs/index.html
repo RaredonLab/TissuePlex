@@ -1565,6 +1565,16 @@ Notch1,Dll4</code></pre>
       normal and happens once.</td>
     </tr>
     <tr>
+      <td>My dataset has no DAPI / morphology image, or the badge says the
+      image <span class="ui">could not be opened</span></td>
+      <td>Both are handled. Without an image the cells, transcripts and edges
+      are drawn on a plain dark frame sized from the data, and there is no
+      Morphology row. If an image exists but cannot be read, the viewer reports
+      it (badge and log file) and draws the data on the same frame, so nothing
+      else is lost. The log line names the file; re-exporting it as a standard
+      OME-TIFF, or removing it, resolves the badge.</td>
+    </tr>
+    <tr>
       <td>Error: port 3000 is already in use</td>
       <td>Another application is using that port. Stop the other application, or
       edit <code>docker-compose.yml</code> and change the host port (e.g.

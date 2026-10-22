@@ -42,6 +42,14 @@ sits in an absolutely-positioned canvas on top, with its viewport synced to OSD 
 custom `syncDeckFromOSD` function on every OSD viewport-change event. All data is
 returned in image pixel coordinates (native_coord / pixel_size).
 
+**The frame is not the image.** Every layer draws in one pixel space, and OSD needs a
+tile source with a width and height before deck.gl can be placed over it — but that
+source need not be a morphology image. `/spatial/{ds}/info` reports a `frame`
+(width, height) sized from the data extent, and the viewer opens an in-browser blank
+tile source of that size (`utils/frame.js`) whenever the dataset has no image *or*
+the image's pyramid fails to open. The morphology is one optional layer among the
+others; no data layer depends on it. See *Rendering Without an Image*.
+
 ---
 
 ## Platform Support & Reader Architecture
@@ -146,12 +154,17 @@ backend/
       supplemental.py        Shared cell-metadata/ + edge-metadata/ loader (key-agnostic)
       layer_reader.py        generic parquet reader
     tiling/
-      pyramid.py             OME-TIFF → DZI; pyvips streaming primary, tifffile+Pillow fallback
+      pyramid.py             OME-TIFF → DZI; pyvips streaming primary, tifffile+Pillow
+                             fallback. Also `list_image_stems`, the image discovery the
+                             picker and `has_morphology` share with `_find_source`
   requirements.txt           pinned deps; cffi<2.0 required for pyvips 2.2.3 compatibility
   Dockerfile
   tests/
     golden_snapshot.py       Reader regression guard — see Development Workflow
     golden_baseline.json     Recorded baseline (238 probes / 8 datasets)
+    edge_pipeline_check.py   Issue #59 invariants + score-matrix equivalence
+    no_image_check.py        Strips every image from every fixture and asserts no
+                             layer moves — see Rendering Without an Image
 
 frontend/
   src/
@@ -189,6 +202,8 @@ frontend/
       viewportFilters.js     Pure helpers: client-side gene filter over the viewport
                              sample, the debounce-only-a-moving-viewport rule, and the
                              allowlist/complement gene-list params. Tested.
+      frame.js               The data-sized blank tile source the viewer opens when
+                             there is no image, or the image cannot be opened
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -1022,12 +1037,60 @@ Other things worth knowing:
   concurrent WebGL contexts, so leaking one per export would eventually kill the
   live viewer.
 
+## Rendering Without an Image
+
+A lab member reported that a dataset without its DAPI or morphology could not load
+its cell segments or edges. Confirmed, with three causes behind one symptom, all
+rooted in the viewer taking its coordinate frame from the tile pyramid: no image,
+no `imageSize`, no deck.gl canvas, no layers.
+
+| Case | Before | Now |
+|---|---|---|
+| No image file | v0.8.3 served a blank *pyramid* sized from the cell centroids; worked on Xenium | the browser opens a blank tile source sized from `/info` → `frame`; no pyramid, no tile requests |
+| seqFISH with no DAPI | cells and transcripts drawn in a 49 px corner, boundaries 10× away | `_reference_size()` falls back to the GeoJSON boundary extent (pixels), so unit detection still works |
+| Image present but unopenable | OSD `open-failed` logged to the console, everything blank, *and* the boundary/transcript hooks fetched the whole dataset unbounded | the panel reports it (badge + log) and opens the data frame; the hooks wait for a viewport |
+
+How it fits together:
+
+- **Backend.** `SpatialDatasetReader.frame()` → `{width, height, source: "data"}`
+  from `data_extent()` (cell centroids, or boundary vertices when there are no
+  centroids; cached per reader; 5% margin, anchored at the origin like a pyramid).
+  `/info` carries it. `has_morphology` on the base class is now
+  `has_image()`, the same discovery the picker uses, so Xenium no longer reports a
+  morphology it does not have. The blank-pyramid code (`__blank__`,
+  `ensure_blank_pyramid`, `tiles._ensure_blank`) is gone.
+- **Frontend.** `DatasetPicker` starts `images` as `null` (unresolved) and sets
+  `activeImage` to `BLANK_IMAGE_NAME` when the list resolves empty. `ViewerPanel`
+  opens `blankTileSource(frame)` for that sentinel, and also on `open-failed` for a
+  real image (`imageFailed`, reset per `dziUrl`), after `reportClient`ing the
+  failure. OSD's `open` event still sets `imageSize` either way, so nothing
+  downstream changed. The morphology opacity row is hidden by the capability flag.
+- **Hooks wait for a viewport.** `useTranscripts` and `useCellBoundaries` used to
+  fetch without one — unbounded, the whole dataset — which was wasted on exactly
+  the failing path. One always arrives now.
+
+`backend/tests/no_image_check.py` is the guard: it copies every fixture to a
+scratch root without its image files, serves that through the real routers, and
+asserts `/images` is empty, `has_morphology` is false, `/info` has a frame, and
+**every layer's extent is identical to the same layer read with the image
+present** (a seqFISH pixel-size change — DAPI OME-XML value vs the documented
+0.107 fallback — rescales micron tables by 0.15% and is allowed and reported).
+That equality test is what caught the seqFISH case.
+
+Two things that remain image-dependent, by nature: seqFISH's `pixel_size` comes
+from the DAPI OME-XML and falls back to the constant without it; and the Space
+Ranger coordinate contract still assumes the image the viewer shows is the hires
+PNG (see that section).
+
 ## Morphology Image Discovery
 
 `GET /spatial/{dataset}/images` returns bare filename **stems** (no extension, no directory
-prefix) for every `.ome.tiff` / `.ome.tif` / `.tiff` / `.tif` in the dataset root **and one
-level of subdirectories**. This is what makes Xenium's multi-channel `morphology_focus/`
-set selectable alongside the top-level `morphology.ome.tif`:
+prefix) for every `.ome.tiff` / `.ome.tif` / `.tiff` / `.tif` / `.png` in the dataset
+root **and one level of subdirectories**. The discovery itself is
+`pyramid.list_image_stems`, which also backs the base class's `has_image()`, so the
+picker, the capability flag and the tile builder agree by construction. This is what
+makes Xenium's multi-channel `morphology_focus/` set selectable alongside the top-level
+`morphology.ome.tif`:
 
 ```
 dataset_dir/
@@ -1038,9 +1101,9 @@ dataset_dir/
 ```
 
 `pyramid.py::_find_source()` resolves a stem back to a path by searching the **same two
-locations in the same order** — root first, then subdirectories. These two functions are a
-matched pair: if you change the search order or depth in one, change it in the other, or
-the picker will list images the tile builder cannot open.
+locations in the same order** — root first, then subdirectories. The two live in one
+module because they are a matched pair: if you change the search order or depth in one,
+change it in the other, or the picker will list images the tile builder cannot open.
 
 Hidden directories are skipped so `.dzi_cache` is never scanned. Stems are de-duplicated,
 and root-level files are added first, so a root file always wins a name collision with a
@@ -1146,9 +1209,9 @@ Three things about this layout bite:
   dataset root, so no genuine Space Ranger output was ever detected.
 - **`tissue_positions.parquet` and `scalefactors_json.json` are per bin.** The top-level
   `spatial/` folder holds images only.
-- **Morphology is a PNG.** The tile pipeline was TIFF-only; `_SOURCE_EXTS` and
-  `spatial._TIFF_EXTS` now include `.png`, and `_build_dzi_pillow()` handles it when
-  libvips is unavailable (the tifffile fallback cannot open a PNG).
+- **Morphology is a PNG.** The tile pipeline was TIFF-only; `pyramid._SOURCE_EXTS`
+  now includes `.png`, and `_build_dzi_pillow()` handles it when libvips is
+  unavailable (the tifffile fallback cannot open a PNG).
 
 **Bins are served as square polygons.** A bin is literally a square of side
 `spot_diameter_fullres`, so `cell_boundaries()` emits four vertices per bin instead of
@@ -1347,6 +1410,11 @@ Other things worth knowing:
 
 - `pixel_size` comes from `PhysicalSizeX` in the **DAPI OME-XML** — not a manifest, unlike
   every other platform. Falls back to 0.107 (the documented GenePS value).
+- **The image width the unit test compares against has a fallback.** Without the DAPI,
+  `_reference_size()` uses the GeoJSON boundary extent — a pixel-space table on every
+  v2 export — or the v1 label mask's dimensions. Before that fallback a dataset shipped
+  without its DAPI treated every table as pixels, which put cells and transcripts at a
+  hundredth of their size while the boundaries sat where they belonged.
 - `cell_area` is deliberately left in **µm²** to match Xenium, which never converts it, so
   the "µm²" label in `CellInfoPanel` is true on every platform.
 - Cell identity comes from each GeoJSON feature's `id`, which equals `label`.
@@ -1957,8 +2025,9 @@ Two further backend checks exist alongside the golden snapshot, both covering
 things it structurally cannot:
 
 ```bash
-cd backend && python3 tests/edge_pipeline_check.py    # issue #59 invariants
+cd backend && python3 tests/edge_pipeline_check.py    # issue #59 invariants + score matrix
 cd backend && python3 tests/duckdb_config_check.py    # DUCKDB_MEMORY_LIMIT forms
+cd backend && python3 tests/no_image_check.py         # every layer renders without an image
 ```
 
 `edge_pipeline_check` asserts, on every dataset with edges and at several
@@ -2034,9 +2103,14 @@ which it does not cover at all.
 - **`Math.min/max` spread on large arrays** (fixed in `useEdgeColors.js`): spreading
   100K+ element arrays causes `RangeError: Maximum call stack size exceeded`. Use a
   `for` loop to find min/max instead of `Math.min(...arr)`.
-- **`list_images` and `_find_source` are a matched pair.** They must search the same
-  locations in the same order (root, then one subdirectory level). Changing the depth or
-  order in one without the other makes the picker list images the tile builder can't open.
+- **`list_image_stems` and `_find_source` are a matched pair** (both in `pyramid.py`).
+  They must search the same locations in the same order (root, then one subdirectory
+  level). Changing the depth or order in one without the other makes the picker list
+  images the tile builder can't open.
+- **No data layer may depend on the image.** `imageSize` comes from whatever OSD
+  opened — an image or the data frame — and the hooks key on the viewport. Gating a
+  fetch or a layer on `activeImage`, the DZI, or `has_morphology` reintroduces the
+  "no DAPI, no cells" bug. `no_image_check.py` is the test to run.
 - **Edge color clamp has two different defaults, by design.** `Viewer.jsx` auto-sets
   `edgeColorClamp.high` from the p95 of `visible_score_sum` so the initial view isn't
   washed out by outliers. But `useEdgeColors` computes its own fallback `hi` as `max`, not

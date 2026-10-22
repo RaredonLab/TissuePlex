@@ -64,7 +64,11 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
   const baseKey = `${dataset}|${viewKey}|${fraction}|${minQv}`;
   // An empty allowlist means "show no species": nothing to fetch for, and the
   // base is kept so re-selecting a gene is instant.
-  const wantBase = !!(enabled && dataset) && !(selectedGenes !== null && selectedGenes.size === 0);
+  // No viewport means OSD has not opened yet; a fetch then would be unbounded
+  // (the whole dataset) with nothing to draw it on. One always arrives: the
+  // viewer opens an image or, failing that, a frame sized from the data.
+  const wantBase = !!(enabled && dataset && hasView)
+    && !(selectedGenes !== null && selectedGenes.size === 0);
 
   // ── Base fetch: unfiltered viewport sample ────────────────────────────────
   useEffect(() => {

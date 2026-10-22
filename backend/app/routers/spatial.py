@@ -77,75 +77,27 @@ def list_platforms():
 def dataset_info(dataset: str):
     """Experiment metadata, platform identifier, and capability flags."""
     r = _reader(dataset)
-    return {**r.info(), "capabilities": r.capabilities()}
-
-
-# Order matters: the compound .ome.* suffixes must be tried before the bare ones
-# so "morphology.ome.tif" yields the stem "morphology", not "morphology.ome".
-# PNG is here because Visium HD ships tissue_hires_image.png rather than a TIFF.
-_TIFF_EXTS = (".ome.tiff", ".ome.tif", ".tiff", ".tif", ".png")
-
-
-def _strip_tiff_ext(name: str) -> Optional[str]:
-    """Return the filename stem if it is a supported image, else None."""
-    for ext in _TIFF_EXTS:
-        if name.lower().endswith(ext):
-            return name[: -len(ext)]
-    return None
+    # `frame` is the data-derived canvas (pixel width/height from the unit
+    # extent). The viewer draws on it whenever there is no morphology image, or
+    # the image's pyramid cannot be opened, so the data layers never depend on
+    # an image existing. Cached per reader after the first call.
+    return {**r.info(), "capabilities": r.capabilities(), "frame": r.frame()}
 
 
 @router.get("/{dataset}/images")
 def list_images(dataset: str):
-    """Base names of available morphology images (OME-TIFF / TIFF) in a dataset folder.
+    """Base names of available morphology images in a dataset folder.
 
-    Searches the dataset root and one level of subdirectories, so multi-channel
-    sets such as Xenium's ``morphology_focus/`` are selectable alongside the
-    top-level ``morphology.ome.tif``.
-
-    Returns bare filename stems with no extension and no directory prefix;
-    ``pyramid._find_source`` resolves a stem back to a path by searching the
-    same two locations in the same order.
+    Delegates to `pyramid.list_image_stems`, which lives beside `_find_source` so
+    the picker never lists a stem the tile builder cannot open. Returns [] for a
+    dataset with no image; the viewer then renders every other layer on a frame
+    sized from the data (`/info` → `frame`) rather than on nothing.
     """
     path = DATA_ROOT / dataset
     if not path.exists():
         raise HTTPException(404, f"Dataset '{dataset}' not found")
-
-    names: list[str] = []
-    seen: set[str] = set()
-
-    def _add(f: Path) -> None:
-        stem = _strip_tiff_ext(f.name)
-        if stem and stem not in seen:
-            seen.add(stem)
-            names.append(stem)
-
-    # Root-level images first, so a top-level stem always wins a name collision
-    # with a subdirectory file — matching _find_source's resolution order.
-    for f in sorted(path.iterdir()):
-        if f.is_file():
-            _add(f)
-
-    # One subdirectory level; skip hidden dirs so .dzi_cache is never scanned.
-    for sub in sorted(path.iterdir()):
-        if sub.is_dir() and not sub.name.startswith("."):
-            for f in sorted(sub.iterdir()):
-                if f.is_file():
-                    _add(f)
-
-    # Morphology variants first, then alphabetical
-    names.sort(key=lambda n: (not n.startswith("morphology"), n))
-
-    if not names:
-        # No morphology of its own. The viewer takes its coordinate space from the
-        # tile pyramid, so without an image nothing renders at all — offer a
-        # placeholder canvas sized to the data instead of an empty list.
-        from app.tiling.pyramid import BLANK_IMAGE_NAME
-        try:
-            if _reader(dataset).data_extent() is not None:
-                names.append(BLANK_IMAGE_NAME)
-        except Exception:
-            pass
-    return names
+    from app.tiling.pyramid import list_image_stems
+    return list_image_stems(path)
 
 
 @router.get("/{dataset}/genes")

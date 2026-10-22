@@ -105,7 +105,10 @@ export function useCellBoundaries(
   const calibratedRef = useRef(null);
 
   useEffect(() => {
-    if (!enabled || !dataset) {
+    // Without a viewport the request would be unbounded — every cell in the
+    // dataset — with nothing to draw it on. The viewer always opens something
+    // (an image, or a frame sized from the data), so one is never long coming.
+    if (!enabled || !dataset || !viewport || !imageSize?.w) {
       setLoading(false);
       return;
     }

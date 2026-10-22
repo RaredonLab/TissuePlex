@@ -84,6 +84,7 @@ class SeqfishReader(SpatialDatasetReader):
         self._layout_cache = _UNSET
         self._pixel_size_cache: Optional[float] = None
         self._image_size_cache: Optional[tuple] = None
+        self._ref_size_cache = _UNSET
         self._cxg_cache = _UNSET
         self._cells_full_cache = _UNSET
         self._divisor_log: set = set()
@@ -202,6 +203,62 @@ class SeqfishReader(SpatialDatasetReader):
             return None
         return self._image_size_cache
 
+    def _reference_size(self) -> Optional[tuple]:
+        """(width, height) in *pixels* that the µm-or-px decision is measured against.
+
+        The DAPI image when there is one. Without it, the unit test below used
+        to return 1.0 for every table — cells and transcripts (microns on every
+        GenePS v2 export seen) were then drawn at a hundredth of their size in
+        one corner while the boundaries (pixels) sat where they belonged, so a
+        dataset shipped without its DAPI rendered its segments and edges
+        nowhere near its cells. The GeoJSON boundaries are a pixel-space table
+        whatever else is present, so their extent stands in for the image; on
+        the v1 layout the label mask's dimensions do.
+        """
+        size = self._image_size()
+        if size:
+            return size
+        if self._ref_size_cache is not _UNSET:
+            return self._ref_size_cache
+        ref: Optional[tuple] = None
+        lay = self._layout()
+        path = lay.get("boundaries")
+        if path is not None:
+            try:
+                with open(path) as fh:
+                    gj = json.load(fh)
+                mx = my = 0.0
+                for feat in gj.get("features") or []:
+                    geom = feat.get("geometry") or {}
+                    coords, gtype = geom.get("coordinates"), geom.get("type")
+                    if not coords:
+                        continue
+                    rings = ([coords[0]] if gtype == "Polygon"
+                             else [part[0] for part in coords] if gtype == "MultiPolygon"
+                             else [])
+                    for ring in rings:
+                        for pt in ring:
+                            if len(pt) >= 2:
+                                mx = max(mx, float(pt[0])); my = max(my, float(pt[1]))
+                if mx > 0 and my > 0:
+                    ref = (mx, my)
+            except Exception as exc:
+                log.warning(f"could not measure boundary extent from {path.name}: {exc}")
+        if ref is None and lay.get("mask") is not None:
+            try:
+                import tifffile
+                with tifffile.TiffFile(lay["mask"]) as tif:
+                    shape = tif.series[0].shape
+                ref = (int(shape[-1]), int(shape[-2]))
+            except Exception as exc:
+                log.warning(f"could not read mask dimensions from {lay['mask'].name}: {exc}")
+        if ref is not None:
+            log.info(f"{self.path.name}: no DAPI image; using the "
+                     f"{'boundary extent' if lay.get('boundaries') else 'label mask'} "
+                     f"({ref[0]:.0f} x {ref[1]:.0f} px) as the pixel reference")
+        self._ref_size_cache = ref
+        return ref
+
     # ── Unit detection ────────────────────────────────────────────────────────
 
     def _units_divisor(self, max_x: float, max_y: float, label: str) -> float:
@@ -211,9 +268,10 @@ class SeqfishReader(SpatialDatasetReader):
         max/width ratio lands near `pixel_size`. A table already in pixels spans
         the image itself, so the ratio lands near 1.0. Pick whichever hypothesis
         the observed ratio is closer to, in log space so the comparison is
-        scale-free.
+        scale-free. "Image width" is `_reference_size`, which has a fallback for
+        datasets shipped without their DAPI.
         """
-        size = self._image_size()
+        size = self._reference_size()
         ps = self.pixel_size
         if not size or max_x <= 0 or ps <= 0:
             return 1.0

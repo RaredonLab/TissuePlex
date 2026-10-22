@@ -23,6 +23,8 @@ import { ScatterplotLayer, SolidPolygonLayer, PathLayer, LineLayer } from "@deck
 import { useStore } from "../store";
 import { usePanelSettings, PanelIndexProvider } from "../hooks/usePanelSettings";
 import { useTranscripts, TRANSCRIPT_MIN_QV } from "../hooks/useTranscripts";
+import { BLANK_IMAGE_NAME, blankTileSource, frameUsable } from "../utils/frame";
+import { reportClient } from "../utils/clientLog";
 import { useCellBoundaries } from "../hooks/useCellBoundaries";
 import { useCellColors } from "../hooks/useCellColors";
 import { useEdges } from "../hooks/useEdges";
@@ -68,9 +70,6 @@ const isAnnotationLayerId = (id) =>
 /** Below this a drag is a stray click, not an attempt to reframe. */
 const MIN_DRAG_PX = 8;
 
-// Matches pyramid.BLANK_IMAGE_NAME: the placeholder canvas served for datasets
-// with no morphology of their own. Not a real image, so it is not shown as one.
-const BLANK_IMAGE_NAME = "__blank__";
 
 // ── Rotation helpers (pure, module-level) ─────────────────────────────────
 
@@ -199,7 +198,7 @@ function ViewerPanel({ panelIndex }) {
   // pixel size, capabilities, gene panel, LRM vocabulary, value ranges.
   const panel = useStore((s) => s.panels[panelIndex]);
   const {
-    dataset, activeImage, imageSize, platformCapabilities,
+    dataset, activeImage, imageSize, platformCapabilities, frame,
     pixelSize, edgeFile, lrmCatalogue, allGenes,
   } = panel;
   // Convenience: write one or more fields of *this* panel.
@@ -308,6 +307,9 @@ function ViewerPanel({ panelIndex }) {
         patch({
           ...(info.pixel_size ? { pixelSize: parseFloat(info.pixel_size) } : {}),
           ...(info.capabilities ? { platformCapabilities: info.capabilities } : {}),
+          // The data-derived frame: what the layers draw on when there is no
+          // image, or the image cannot be opened. See utils/frame.js.
+          frame: frameUsable(info.frame) ? info.frame : null,
         });
       })
       .catch(() => {});
@@ -343,6 +345,14 @@ function ViewerPanel({ panelIndex }) {
   // ── OpenSeadragon init ────────────────────────────────────────────────────
   const dziUrl = `${apiBase}/tiles/${dataset}/dzi/${activeImage}.dzi`;
 
+  // Set when the image's pyramid could not be opened. The panel then opens the
+  // data frame instead, so every other layer still renders — an unreadable
+  // TIFF used to leave the whole viewer blank with one line in the console.
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => { setImageFailed(false); }, [dziUrl]);
+  const onBlankFrame = activeImage === BLANK_IMAGE_NAME || imageFailed;
+  const frameW = frame?.width, frameH = frame?.height;
+
   useEffect(() => {
     if (!containerRef.current) return;
     if (viewerRef.current) {
@@ -352,10 +362,12 @@ function ViewerPanel({ panelIndex }) {
     // activeImage is null between a dataset switch and DatasetPicker resolving the
     // new dataset's image list. Opening OSD here would request "null.dzi".
     if (!dataset || !activeImage) return;
+    // The data frame needs its size from /info before it can be opened.
+    if (onBlankFrame && !frameUsable(frame)) return;
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
-      tileSources: dziUrl,
+      tileSources: onBlankFrame ? blankTileSource(frame) : dziUrl,
       prefixUrl: "",
       showNavigationControl: true,
       showNavigator: true,
@@ -386,9 +398,18 @@ function ViewerPanel({ panelIndex }) {
       }
     });
 
-    viewer.addHandler("open-failed", (e) =>
-      console.error(`OSD panel ${panelIndex} open failed:`, e.message)
-    );
+    viewer.addHandler("open-failed", (e) => {
+      if (onBlankFrame) {
+        console.error(`OSD panel ${panelIndex} could not open the data frame:`, e.message);
+        return;
+      }
+      // Reported to the log file and the badge, then fall back to the frame
+      // so the data layers draw. This is the "it just shows nothing" case.
+      reportClient("error",
+        `morphology image '${activeImage}' could not be opened (${e.message ?? "open failed"}); showing the data on a blank frame`,
+        { dataset, image: activeImage });
+      setImageFailed(true);
+    });
 
     viewer.addHandler("animation", () => syncRef.current?.(viewer));
     viewer.addHandler("animation-finish", () => syncRef.current?.(viewer));
@@ -400,7 +421,7 @@ function ViewerPanel({ panelIndex }) {
       viewerRef.current = null;
       if (import.meta.env.DEV) delete window[`__osd${panelIndex}`];
     };
-  }, [dziUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dziUrl, onBlankFrame, frameW, frameH]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (viewerRef.current && imageSize.w) {

@@ -47,6 +47,7 @@ class SpatialDatasetReader(ABC):
         self.path = dataset_path
         self._supp_meta_cache = _UNSET
         self._filter_id_cache: dict = {}
+        self._extent_cache = _UNSET
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
@@ -316,35 +317,87 @@ class SpatialDatasetReader(ABC):
                           ``min_qv`` to a reader that does not declare it.
         """
         return {
-            "has_morphology": True,
+            "has_morphology": self.has_image(),
             "has_transcripts": True,
             "has_boundaries": True,
             "unit_label": "cell",
             "has_transcript_qv": False,
         }
 
+    def has_image(self) -> bool:
+        """Whether the dataset folder holds a morphology image the tiler can open.
+
+        The same discovery the image picker uses (`pyramid.list_image_stems`),
+        so the capability flag and the picker can never disagree. Readers whose
+        platform keeps images somewhere that scan does not reach override
+        `capabilities()` with their own test.
+        """
+        from app.tiling.pyramid import list_image_stems
+        try:
+            return bool(list_image_stems(self.path))
+        except Exception:
+            return False
+
     def data_extent(self) -> Optional[tuple]:
         """Bounding box of this dataset's units in image pixel space.
 
-        Used to size a placeholder canvas for datasets that ship no morphology
-        image — the viewer derives its whole coordinate space from the tile
-        pyramid, so without one there is nothing for deck.gl to draw onto.
+        This is what the viewer's coordinate frame is sized from when there is
+        no morphology image to take it from (see `frame`). Returns
+        (xmin, ymin, xmax, ymax), or None when there is nothing to measure.
 
-        Returns (xmin, ymin, xmax, ymax), or None when there is nothing to
-        measure. The default reads centroids from `cells()`; a reader with a
-        cheaper source should override.
+        The default reads centroids from `cells()`, falling back to boundary
+        vertices for a platform whose units have outlines but no centroids.
+        Cached per reader instance — it is asked for on every `/info`.
         """
+        if self._extent_cache is not _UNSET:
+            return self._extent_cache
+        self._extent_cache = self._measure_extent()
+        return self._extent_cache
+
+    def _measure_extent(self) -> Optional[tuple]:
+        xs: list[float] = []
+        ys: list[float] = []
         try:
-            cells = self.cells()
+            for c in self.cells():
+                x, y = c.get("x_centroid"), c.get("y_centroid")
+                if x is not None and y is not None and math.isfinite(x) and math.isfinite(y):
+                    xs.append(x); ys.append(y)
         except Exception:
-            return None
-        xs = [c["x_centroid"] for c in cells
-              if c.get("x_centroid") is not None and math.isfinite(c["x_centroid"])]
-        ys = [c["y_centroid"] for c in cells
-              if c.get("y_centroid") is not None and math.isfinite(c["y_centroid"])]
-        if not xs or not ys:
+            pass
+        if not xs:
+            try:
+                for v in (self.cell_boundaries(fraction=1.0) or {}).get("boundaries") or []:
+                    x, y = v.get("vertex_x"), v.get("vertex_y")
+                    if x is not None and y is not None and math.isfinite(x) and math.isfinite(y):
+                        xs.append(x); ys.append(y)
+            except Exception:
+                pass
+        if not xs:
             return None
         return (min(xs), min(ys), max(xs), max(ys))
+
+    # Padding past the far corner of the data, so units at the edge are not
+    # flush against the border of the frame.
+    FRAME_MARGIN = 0.05
+
+    def frame(self) -> Optional[dict]:
+        """The data-derived canvas the viewer draws on when it has no image.
+
+        {"width", "height", "source": "data"} in image pixels, anchored at the
+        origin like a tile pyramid is, so deck.gl's pixel coordinates and the
+        frame share one space. Units at negative coordinates still draw; they
+        sit outside the frame, which the viewer allows panning to. None when
+        the dataset has nothing to measure.
+        """
+        ext = self.data_extent()
+        if ext is None:
+            return None
+        _, _, xmax, ymax = ext
+        return {
+            "width": int(max(xmax, 1.0) * (1 + self.FRAME_MARGIN)) + 1,
+            "height": int(max(ymax, 1.0) * (1 + self.FRAME_MARGIN)) + 1,
+            "source": "data",
+        }
 
     # ── Supplemental cell metadata (platform-agnostic) ────────────────────────
     #

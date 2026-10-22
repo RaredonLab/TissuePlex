@@ -174,8 +174,9 @@ export function sanitiseSettings(next, allowed, sameDataset) {
 export function makePanel() {
   return {
     dataset: null,
-    activeImage: null,
-    imageSize: { w: null, h: null },     // from the DZI descriptor, when OSD opens
+    activeImage: null,                   // image stem, or BLANK_IMAGE_NAME for "no image"
+    imageSize: { w: null, h: null },     // from OSD when it opens (image or data frame)
+    frame: null,                         // /info -> frame: {width, height} from the data extent
     platformCapabilities: null,          // /spatial/{ds}/info -> has_transcripts, unit_label, …
     pixelSize: 1.0,                      // µm per image pixel; drives measurement + zoom match
     edgeFile: "edges.parquet",

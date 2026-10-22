@@ -138,6 +138,12 @@ If `edges.parquet` is absent, the Edges layer is hidden — all other layers wor
 
 **Blank viewer / no image**: The tile pyramid may still be building. Wait 15–30 seconds and refresh.
 
+**A dataset has no DAPI or morphology image**: that is fine. The viewer draws the
+cells, transcripts and edges on a dark frame sized from the data; the Morphology
+row simply does not appear. If an image *is* present but cannot be opened (a
+corrupt or unsupported TIFF), a red badge says so and the data is drawn on the
+same frame — the log file below records which file failed and why.
+
 **Dataset not listed**: Check that `DATA_PATH` points to the parent folder (not the dataset folder itself), and that the dataset directory contains the platform sentinel file (see table above).
 
 **Port conflict**: If port 3000 or 8000 is already in use, change the host ports in `docker-compose.yml` and rebuild.
