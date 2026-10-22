@@ -5,7 +5,7 @@ from fastapi.responses import ORJSONResponse
 from app import logging_setup
 from app.routers import tiles, spatial, edges, layers
 
-APP_VERSION = "0.8.8"
+APP_VERSION = "0.9.0"
 
 # ORJSONResponse as the default: orjson serialises a 200K-row edge response in
 # ~10 ms where the stdlib took ~150 ms, and it writes NaN/Inf as null natively.

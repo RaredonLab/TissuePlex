@@ -1992,6 +1992,9 @@ auth, no user accounts, and no per-dataset permissions.
 `backend/app/main.py` (`APP_VERSION`, served by `/health`), and the line under the
 title in `README.md`. The sidebar badge compares the first two and turns red when
 they disagree, so a half-bump is visible but only once the app is running.
+`frontend/package-lock.json` carries the package version too (top two `version`
+keys); it had sat at 0.8.4 through four releases, so bump it as well. The README
+also has a *What's new* section per release.
 
 Every other `v0.x.y` in the tree is a *historical* reference — "shipped in v0.8.4",
 "present since v0.2.0" — and must not be swept along by a bump.
