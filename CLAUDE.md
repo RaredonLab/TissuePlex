@@ -64,7 +64,8 @@ The backend uses an abstract reader pattern. All platform readers inherit from
 before returning data. The frontend always receives pixel coordinates.
 
 **Capability flags**: `capabilities()` on the base class returns
-`{has_morphology, has_transcripts, has_boundaries, unit_label}`. The frontend reads these
+`{has_morphology, has_transcripts, has_boundaries, unit_label, has_transcript_qv}`
+(the last is Xenium only; see Transcript Quality Filter). The frontend reads these
 from `/spatial/{dataset}/info` and hides layers a platform cannot serve. Readers override
 it to declare what they lack — this is how spot-based platforms suppress the transcript
 and boundary layers rather than returning empty arrays for them.
@@ -154,8 +155,10 @@ frontend/
                              dataset/image picker, transcript species filter
       CellInfoPanel.jsx      Floating panel on cell click; shows color-by value highlight
       EdgeInfoPanel.jsx      Floating panel on edge/autocrine click
-      AnnotationToolbar.jsx  Region drawing + measurement tools; ⊞ Split / □ Single toggle;
+      AnnotationToolbar.jsx  Region drawing + measurement tools; ▭ Rectangle framing;
+                             Save PNG / Export…; ⊞ Split / □ Single toggle;
                              ⇔ Match zoom; per-panel rotation (⟲ / angle / ⟳)
+      ExportDialog.jsx       Figure export: output size, DPI tag, background, scale bar
       RenderingStatus.jsx    Per-panel loading badge, driven by the store's loadingKeys set
     hooks/
       useTranscripts.js      Viewport-bounded transcript fetch (bbox always sent; skip at low zoom)
@@ -166,6 +169,10 @@ frontend/
     utils/
       colormap.js            Palette definitions (viridis/plasma/magma/inferno) + valueToColor()
       geneColor.js           Deterministic gene → color mapping
+      highResExport.js       Offscreen deck.gl render of one region at arbitrary size.
+                             Its stroke-width scaling is inert — see Figure Export
+      pngExport.js           PNG pHYs (DPI) tagging, blob download, scale-bar rounding
+      listImport.js          Gene / LRM list CSV import + export — see its own section
   vite.config.js             Dev server proxies /api → localhost:8000
   nginx.conf                 Production: proxies /api/ → backend:8000/
   Dockerfile                 Multi-stage: node build → nginx serve
@@ -187,6 +194,9 @@ sample_data/                 Partially gitignored — default data mount for loc
                              columns derived from the edge file, one clearly-named
                              invented flag, plus a README in each folder saying which
                              is which. Nothing here is analysis output.
+  example_lists/             Demo gene / LRM list CSVs for the sidebar import
+                             buttons. Not a dataset, and kept out of dataset
+                             folders on purpose (root CSVs load as cell metadata).
 r/                           NICHESv2 → edges.parquet. See r/README.md.
   niches_xenium.R            Xenium — coordinates already µm; read this one first
   niches_seqfish.R           seqFISH — dense CSV counts, per-version coordinate units
@@ -480,6 +490,11 @@ makes that consumer silently stale, which is far worse than a redundant render.
 - **LRM filter**: `hiddenLrms` (Set of "ligand|receptor" strings), `lrmCatalogue`
 - **Selection**: `selectedCell`, `selectedEdge`
 - **Annotations**: `regions`, `measurements`, `activeRegion`, `annotationMode`
+  (`pan` / `region` / `measure` / `rectangle`)
+- **Figure export**: `exportRects` — at most one framing rectangle per panel,
+  `{panelIndex, corners (image px), rotation}`. Panel-scoped like annotations;
+  see the Figure Export section for why the corners are stored in image space
+  and why the rotation travels with them.
 - **Sampling**: `transcriptFraction` (default 0.1) and `cellBoundaryFraction`
   (`null` = auto) control how much of the viewport each hook requests;
   `transcriptStats` / `cellBoundaryStats` hold live `{shown, total}` counts that the
@@ -516,6 +531,29 @@ responses — each returns an empty array on 404/500 so a missing file never cau
 a render crash.
 
 ---
+
+## Transcript Quality Filter (Q-Score)
+
+Copies Xenium Explorer: transcripts with `qv < 20` are hidden by default, and
+`showLowQualityTranscripts` (a per-panel setting, default false) shows them drawn
+**gray** (`LOW_QV_COLOR` in Viewer.jsx), whatever their gene. The threshold is
+`TRANSCRIPT_MIN_QV` in `useTranscripts.js`. `qv` is Phred-scaled 0–40.
+
+- **Filtered server-side, before the count and the sample** (`min_qv` on
+  `/spatial/{ds}/transcripts`, `XeniumReader.transcripts(min_qv=)`). This follows the
+  same rule as the metadata filters, so the kept subset renders at full sample density,
+  and `total` is the post-filter count.
+- **Capability-gated.** Xenium declares `has_transcript_qv` (true when
+  `transcripts.parquet` has `qv`). The router passes `min_qv` only to readers that
+  declare it, so in split view a MERSCOPE or seqFISH panel ignores the setting rather
+  than erroring. The sidebar checkbox appears only when some visible panel has the
+  flag, and `useUnionCapabilities` defaults it to false. seqFISH v1's `qv` is
+  deliberately not wired in, because its scale is not Xenium's.
+- **Verified against Xenium's own number.** On Rat-PPLR, `qv >= 20 AND is_gene` gives
+  117,408,409 transcripts, exactly `num_transcripts_high_quality` in `experiment.xenium`.
+  The layer total is 6,305 higher because "no gene filter" still includes control
+  probes (see below). A fixture may be far noisier than real data: 73% of
+  `mouse_ileum_tiny` is below 20, against 11.6% on Rat-PPLR.
 
 ## Transcript Gene Filter (selectedGenes)
 
@@ -571,6 +609,57 @@ unfiltered total against an empty canvas.
 
 `useCellColors` `gene_set` mode: if `selectedGenes === null`, uses all `allGenes`;
 otherwise uses `[...selectedGenes]`.
+
+---
+
+## Gene / LRM List Import (utils/listImport.js)
+
+`import` / `export` chips in the Transcript species section and the LRM Mechanisms
+header. Entirely client-side: the vocabularies are already in the browser, so
+nothing is uploaded and nothing is written under the read-only `/data`.
+
+**The format copies Xenium Explorer's gene-group upload**, deliberately strict:
+
+| Section | Required header (any case) | Values |
+|---|---|---|
+| Transcript species | `gene` | exact gene names |
+| LRM Mechanisms | `lrm`, or `ligand` + `receptor` | exact `ligand\|receptor` |
+
+Extra columns are ignored, so an XE `gene,group` file works unchanged (`group` is
+not used). Values match **exactly, case and direction included**. A reversed
+pair is a different mechanism and does not match. Whitespace around values is
+the only thing trimmed. `lrm` wins when both LRM forms are present. Export
+writes `lrm,ligand,receptor`, so it re-imports through the `lrm` path.
+
+Decisions made with the user, so don't "improve" them without asking:
+- **Import replaces** the selection. It does not merge.
+- **No match report.** On success the section's own "N / M" counter is the
+  feedback. Refusals are shown on a red line and change nothing: an Excel
+  workbook (detected from the file's first bytes, so renaming it to .csv doesn't
+  get through), a missing header, a header with no rows under it, and **zero
+  matches**. Zero matches is refused because applying it would blank the layer,
+  which reads as a rendering bug.
+- **The gene list drives transcripts only.** It does not select LRMs whose
+  ligand/receptor is in the list. As before, it also feeds `gene_set` cell color.
+- **An imported LRM list does not outlive its edge file.** `setPanelEdgeFile` /
+  `setPanelDataset` already clear `hiddenLrms`, and that is the intended behavior.
+
+Two things that are easy to get wrong:
+- **Use the RFC 4180 parser, never `split(",")`.** Complex mechanisms name
+  several subunits joined by commas (`niches_common.R` splits on `[,&+]`), so a
+  quoted `"Itgav,Itgb3"` must stay one field. The two palette importers still
+  use a naive split; that is fine for `gene,#hex` but not for this.
+- **`applyLrmList` takes the complement**, because the import is an allowlist
+  and `hiddenLrms` is a denylist. The complement is taken against the *union*
+  catalogue the sidebar shows, the same universe `hideAllLrms` covers.
+  `applyGeneList` collapses a list that covers every gene to `null`, matching
+  `toggleSelectedGene`.
+
+**Keep list files out of dataset folders.** A CSV in a dataset root is loaded as
+supplemental *cell metadata* (`_load_supplemental_metadata`): a gene list there
+would be outer-joined into the cells table as fake cell ids. That is why the
+demo lists live in `sample_data/example_lists/`, which no reader detects as a
+dataset. Tests: `src/listImport.test.js`.
 
 ---
 
@@ -766,6 +855,141 @@ OSD reinitialization, not just on an angle change.
 
 ---
 
+## Figure Export (▭ Rectangle + high-resolution PNG)
+
+Two separate capture paths, deliberately not merged:
+
+- **Save PNG** — unchanged one-click capture of the panel at screen resolution,
+  compositing the OSD morphology canvas and the deck.gl canvas. Fine for a slide
+  or a bug report; it cannot exceed the browser canvas size.
+- **Export…** — opens `ExportDialog` and re-renders the region offscreen at any
+  pixel size. This is the publication path.
+
+**"500 DPI" is not a property a PNG has.** DPI only becomes a number once a print
+width is fixed, so the dialog's real control is *output pixel width* — 7 in at
+500 DPI is 3,500 px. The DPI field fixes the intended print size and is written
+into the file's `pHYs` chunk (`utils/pngExport.js`) because journals run
+automated resolution checks against that metadata; a genuinely high-resolution
+figure with no tag still gets rejected. Both are shown together with the
+resulting print size so the relationship stays visible.
+
+### Stroke width does not scale with export size — known, measured, unfixed
+
+Every data layer constrains stroke width / dot radius in *screen* pixels —
+`widthMinPixels 0.5` … `widthMaxPixels 8`, `radiusMaxPixels 60`, and so on. At
+ordinary zoom those clamps, not the world-space widths, are what decide how thick
+a line actually looks.
+
+`highResExport.js::scaleClampProps` is *intended* to multiply every pixel clamp by
+`exportScale / screenScale` so an export is a faithful enlargement.
+**It does not currently take effect.** Measured on two exports of the same region,
+mean stroke width (ink area ÷ line crossings, which is insensitive to how dense
+the graph is):
+
+| luminance threshold | 1250 px | 1750 px | ratio |
+|---|---|---|---|
+| > 10 | 9.44 px | 8.48 px | 0.90 |
+| > 25 | 5.87 px | 5.05 px | 0.86 |
+| > 60 | 3.65 px | 3.52 px | 0.97 |
+
+The ratio would be **1.40** if the clamps were being scaled, and **1.00** if
+widths were fixed in output pixels. It is ~1.0, so **strokes are pinned in output
+pixels** and the clamp scaling is inert. The cause was not identified; the likely
+suspect is the `cloneLayer` path in `highResExport.js` not applying the overrides
+under deck.gl v9. Do not trust `scaleClampProps` to be doing anything until this
+is re-measured.
+
+Practical consequences, in order of how likely they are to bite:
+
+- **The bigger the export, the thinner the lines look relative to the image.**
+  Line weight in print is `pixels / DPI`, so at a fixed print width, more pixels
+  means a physically thinner stroke.
+- **Panels exported at different pixel widths have mismatched line weights.** This
+  is the one that matters for a multi-panel figure, and nothing in the UI explains
+  it. Export every panel of one figure at the same pixel width.
+- It is **benign, even preferable, for a crop-later workflow**: a crop out of a
+  large export keeps sensible line weight, where proportional scaling would make
+  crops chunky.
+
+**The tempting fix is wrong.** deck.gl's numeric `useDevicePixels` would scale
+everything automatically, but it anchors line weight to *export* width — the wrong
+anchor when the exported image is cropped before use. The right fix is to make
+line weight an **explicit control in the export dialog**, decoupled from both the
+screen view and the pixel count. Not built.
+
+Until then, edge clarity is tuned through **edge opacity, edge density, and
+switching the tissue graph off** — not through export size. Measured on a real
+export: dropping the tissue graph and raising edge opacity moved the grey:coloured
+ink ratio from 38:1 to 1.3:1, which is a far larger effect than any line-width
+change would have been.
+
+World quantities (`edgeOffset`, arrowhead length, polygons) do scale correctly on
+their own, and always did — they are geometry, not clamps.
+
+**The check to run** after touching any of this: export the same region at two
+pixel widths and compare mean stroke width. The ratio tells you unambiguously
+which regime you are in.
+
+**Vector layers only; no morphology.** The data layers are geometry, so
+re-rendering them at 3,500 px is genuinely sharp. The morphology raster is not:
+it cannot exceed the source OME-TIFF's native pixels for that region, so
+including it would cap the whole figure at the tile pyramid's resolution.
+Compositing it properly means a hidden OSD instance fetching the right pyramid
+level, which was deliberately deferred rather than shipping a blurry upscale.
+The background is painted on the 2D composite canvas rather than through deck's
+`clearColor`, which keeps the result identical across deck.gl versions and lets
+the scale-bar margin match. Default is **black**, matching the live viewer.
+
+**Sampling is untouched.** `edgeDensity` and the transcript / boundary fractions
+apply exactly as displayed, because the export draws the layers already in
+memory. Sampling is seeded and edge density is a deterministic hash, so the
+export reproduces the panel rather than drawing a fresh random subset. The
+dialog reports the region size so the figure legend can record it.
+
+**Rotation: "export what you see."** The rectangle is axis-aligned on *screen*,
+but its corners are stored in **image space**, which is pan-invariant — the deck
+rotation matrix pivots on the viewport centre, which moves on every pan, so
+anything stored in rotated view space would drift across the tissue. The two are
+reconciled by forward-rotating the corners about the export centre: rotating the
+quad by the angle it was captured at yields an axis-aligned rectangle again
+whatever pivot is used. The rectangle therefore stores `rotation` and the export
+uses *that*, not the panel's current angle — otherwise rotating after drawing
+would silently skew the output. The dialog says so when the two differ.
+
+**The rectangle can outlive the data under it.** It survives panning, but every
+data hook is viewport-bounded, so a rectangle the user has panned away from would
+export whatever is still in memory and produce a half-empty figure that reads as
+a rendering bug. `getExportGeometry` projects the corners back to screen and
+returns `inView`; the dialog warns rather than exporting silently.
+
+Other things worth knowing:
+
+- **The in-progress drag is local component state, never the store.** A store
+  write per mousemove would push a re-render through every sidebar section
+  subscribed via `usePanelSettings` — the same storm `IGNORED_KEYS` exists to
+  stop. Only the finished rectangle is shared.
+- **▭ Rectangle is not ⬡ Region.** Region selects *cells* for CSV export and is
+  a click-vertex polygon; Rectangle frames an *image* and is a drag. Keeping them
+  separate is why the two "selections" do not get confused.
+- `exportRects` holds at most one rectangle per panel and is scoped like
+  annotations (`panelIndex`), for the same reason: the corners are image pixels
+  of one dataset. `clearAnnotations(panelIndex)` clears it too.
+- Only the data layers are exported. The neighbourhood highlight, in-progress
+  polygon, measurement markers and the framing rectangle itself are interaction
+  aids; committed regions and measurements are behind an "include annotations"
+  toggle.
+- **"include annotations" is a confusing label and has misled a user already.**
+  In this app "annotations" means the *drawing tools'* output — ⬡ Region polygons
+  and ⟷ Measure lines — not cell metadata, clusters or anything biological. With
+  nothing drawn, the toggle changes nothing at all: two exports either side of it
+  came back byte-identical, which reads as a broken checkbox rather than an empty
+  one. Worth renaming to "include drawn regions & measurements", and worth having
+  the dialog disable it, with a reason, when the panel has neither.
+- Output is capped at 16,384 px (the usual WebGL texture limit) with a warning
+  past 8,000. The offscreen `Deck` is always `finalize()`d — browsers cap
+  concurrent WebGL contexts, so leaking one per export would eventually kill the
+  live viewer.
+
 ## Morphology Image Discovery
 
 `GET /spatial/{dataset}/images` returns bare filename **stems** (no extension, no directory
@@ -818,15 +1042,17 @@ controlled by user-adjustable sampling fractions:
 Each hook reports live `{shown, total}` counts into the store so the LayerPanel can show
 what fraction of the data is actually on screen.
 
-**Transcript sampling**: the backend uses `df.sample(n=...)` (random, not `head`) so the
-returned transcripts are spatially uniform across the viewport rather than biased toward
-whatever region appears first in the parquet row order. Cell boundaries sample *unique
-cell IDs* before filtering rows, so a sampled cell keeps all of its vertices and never
-renders as a partial polygon.
+**Transcript sampling** keeps each row whose seeded hash of its identity falls below
+`n / total` (`duck.hash_sample_predicate`): `transcript_id` on Xenium, position + gene
+elsewhere. That makes it spatially uniform, the same on every re-fetch, and
+nested — zooming in only ever adds dots. Cell boundaries hash *cell IDs* before fetching
+rows, so a sampled cell keeps all of its vertices and never renders as a partial polygon.
+CosMx still uses pandas `df.sample`, which is uniform. See the Spatial Query Path section
+for why this is not `USING SAMPLE reservoir`.
 
-**Edge sampling** uses DuckDB `USING SAMPLE ... (bernoulli)` on the grouped result, so
-each edge is included independently at probability `density` — spatially uniform, and
-no sampling clause is emitted at all when `density = 1.0`.
+**Edge sampling** is the same idea: `density_predicate` hashes the edge id, so each
+edge is kept independently at probability `density`, and no predicate is emitted at all
+when `density = 1.0`.
 
 **Edge aggregation**: `useEdges` POSTs to `/edges/{dataset}/query-grouped` which returns
 one row per directed edge (GROUP BY edge, ORDER BY RANDOM()). For a 168M-row parquet
@@ -1087,7 +1313,7 @@ locally, gitignored, and must not be redistributed from this repo.
 
 `transcripts()` and `cell_boundaries()` query parquet through DuckDB rather than loading
 it into pandas. `readers/duck.py` holds the shared pieces — `connect()`, `scan()`,
-`columns()`, `bbox_predicate()`, `in_predicate()`, `reservoir_sample()`, `to_records()` —
+`columns()`, `bbox_predicate()`, `in_predicate()`, `hash_sample_predicate()`, `to_records()` —
 so every reader builds queries the same way. `EdgeReader` predates it and has its own
 equivalent helpers; the two should converge.
 
@@ -1156,9 +1382,9 @@ Four things to know:
   filename derives from the source stem alone, so without that check a file sorted on one
   column pair would be served for a query on another — sorted by the wrong axis, silently.
 
-Row *order* differs between a sorted file and its source, so seeded reservoir sampling
-draws a different subset. Totals and filter results are unaffected; it is only why
-enabling the cache moves the sampled golden probes.
+Sampling hashes each row's identity, not its position in the file, so the sorted cache
+and its source yield the same sample. Under the reservoir sampler that preceded it, the
+cache moved the sampled golden probes.
 
 Things to preserve when editing these methods:
 
@@ -1172,8 +1398,19 @@ Things to preserve when editing these methods:
   bundled breast dataset before this changed.
 - **Sampling is seeded** (`duck.SAMPLE_SEED`). Re-fetching an unchanged viewport must return
   the same rows or the layer visibly flickers.
-- **`USING SAMPLE` goes on a subquery** wrapping the filtered SELECT. Applied alongside a
-  WHERE clause, DuckDB may sample before filtering.
+- **Do not use `USING SAMPLE reservoir` for anything drawn on screen.** In DuckDB 1.2.2 it
+  is not uniform, single-threaded or not. On the 132M-row Rat-PPLR Xenium run it gave the
+  sparse left 500 µm of the slide 1,641 of 200K dots against 19 expected, with tiles
+  ranging 0.68–59× their fair share. The near-empty slide margin rendered as a dense,
+  straight-edged stripe that looked like tissue. `duck.hash_sample_predicate` replaced it:
+  20 dots against 19, tiles 0.81–1.25×, same result on every repeat fetch, and identical
+  dots where two panned viewports overlap.
+  The check to re-run after touching sampling: compare per-500 µm-tile sample counts with
+  true counts on a large real dataset. The fixtures are too small to show the bias. The
+  unused raw `/edges/{dataset}/query` endpoint still has a reservoir pre-sample.
+- **The kept count is approximate.** A hash cut-off keeps `n` rows in expectation, so the
+  200K transcript cap can be overshot by a fraction of a percent. Nothing depends on the
+  count being exact, and `total` stays the pre-sample count.
 - **Edge density is a deterministic hash, not `USING SAMPLE`** (`density_predicate`).
   The tissue graph and the edge data are two separate queries and must select the
   *same* edges, or edge data is drawn where the graph beneath it was sampled away —
@@ -1470,7 +1707,19 @@ always a subset of it, and that sampling is stable between identical calls.
 
 `src/store.annotations.test.js` is the first of them. Store logic is plain JS, so
 these need no DOM and no jsdom dependency — reducers can be exercised directly
-through `useStore.getState()`. Coverage is currently annotations only.
+through `useStore.getState()`. `src/export.test.js` covers the export rectangle's
+panel scoping the same way, plus the two pure parts of figure export: scale-bar
+rounding, and the `pHYs` chunk surgery in `withPngDpi` (byte-level work that would
+otherwise fail silently — a malformed chunk still previews fine in a browser while
+the journal's resolution check reads garbage).
+
+Coverage is annotations, export-rectangle state, PNG tagging, and the gene/LRM
+list import (`src/listImport.test.js`: parser, refusals, store actions). **The offscreen
+render itself is not covered** — it needs a WebGL context, so `highResExport.js`
+has no automated test, and that is exactly how its stroke-width scaling shipped
+inert without anything failing. The substitute is the two-width stroke-width
+measurement described in the Figure Export section, run against real exported
+PNGs; it needs only Pillow and numpy and it is what caught the bug.
 
 There is still **no CI and no linter** — no `.github/workflows`, no ESLint or Python lint
 config. The snapshot is a guard, not a test suite: it catches "this changed" but does not
@@ -1514,6 +1763,14 @@ which it does not cover at all.
   `useState` counter incremented on every OSD `open` event, used as the effect dep
   instead. Also fixes panel 2 in split mode, where `imageSize.w` was already set by
   panel 0 before panel 2's OSD opened.
+- **Colour swatches go through `ColorSwatch` (LayerPanel.jsx), never a hand-copied
+  label + hidden `<input type="color">`.** The input needs `position: relative` on its
+  label. The two transcript swatches were copied without it, so the input's containing
+  block was `<body>`, and inside the scrolled gene list it sat ~2,000 px down the page.
+  Clicking the swatch focused it, the browser scrolled the whole page 2,333 px to reach
+  it, and the app slid off-screen, leaving a black window. `overflow: hidden` does not
+  stop this, because browsers still scroll it programmatically. `index.html` now sets
+  `overflow: clip` on html/body as a backstop, which cannot be scrolled at all.
 - **`Math.min/max` spread on large arrays** (fixed in `useEdgeColors.js`): spreading
   100K+ element arrays causes `RangeError: Maximum call stack size exceeded`. Use a
   `for` loop to find min/max instead of `Math.min(...arr)`.
@@ -1578,6 +1835,18 @@ which it does not cover at all.
 9. **Authentication** — no application-level auth. Caddy `basicauth` is available for
    cloud deployments (`docs/cloud-deploy.md`) but is **opt-in and off by default**. There
    are no user accounts and no per-dataset permissions.
+
+10. **Export line-weight control, and the inert clamp scaling behind it.** Stroke
+    width is currently pinned in output pixels — see *Figure Export*. Deliberately
+    left alone rather than patched: the obvious fix anchors line weight to export
+    width, which is wrong for a crop-later workflow, and the current accidental
+    behaviour happens to suit that workflow. The real fix is an explicit line-weight
+    setting in `ExportDialog`, at which point the clamp scaling can be made to work
+    or removed outright. Until then, edge clarity is an opacity/density question.
+
+11. **Morphology in figure export** (Phase 2). `Export…` draws vector layers only.
+    Compositing the tile image under them needs a hidden OSD instance fetching the
+    right pyramid level, and inherits that image's native resolution as a ceiling.
 
 ### Open GitHub issues
 

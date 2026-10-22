@@ -224,9 +224,11 @@ class MerscopeReader(SpatialDatasetReader):
             n = min(round(fraction * total), _MAX_TRANSCRIPTS)
             if n <= 0:
                 return {"transcripts": [], "total": total}
-            sample = duck.reservoir_sample(n) if n < total else ""
+            # MERSCOPE's `transcript_id` names the gene's target transcript, not
+            # the detection, so it is not a row key; position + gene is.
+            sample = duck.hash_sample_predicate(select_cols, n, total)
             df = conn.execute(
-                f"SELECT * FROM (SELECT {select} FROM {src} {where}) {sample}",
+                f"SELECT {select} FROM {src} {duck.where_clause(conditions + [sample])}",
                 params).df()
 
         df = df.rename(columns={xcol: "x_location", ycol: "y_location",

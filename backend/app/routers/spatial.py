@@ -151,6 +151,8 @@ def transcripts(
     genes: list[str] = Query(None),
     exclude_genes: list[str] = Query(None),
     fraction: float = Query(1.0),
+    min_qv: float = Query(None, ge=0, description="Keep only transcripts with Q-Score >= this "
+                          "(Xenium Explorer hides < 20). Ignored for platforms without a Q-Score."),
 ):
     """Transcript records filtered by bounding box and/or gene list.
 
@@ -175,10 +177,17 @@ def transcripts(
         # means the latter. Excluding every gene must therefore yield no rows, not
         # all of them, so fall back to a sentinel that matches nothing.
         genes = (genes or []) + remaining if genes else (remaining or ["\0"])
+    # The Q-Score filter reaches only readers that declare it. In split view the
+    # client sends one setting to both panels, and a MERSCOPE or seqFISH panel
+    # beside a Xenium one simply has nothing to filter on.
+    extra = {}
+    if min_qv is not None and reader.capabilities().get("has_transcript_qv"):
+        extra["min_qv"] = min_qv
     return reader.transcripts(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
         genes=genes,
         fraction=fraction,
+        **extra,
     )
 
 

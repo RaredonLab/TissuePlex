@@ -10,6 +10,10 @@ const MODES = [
   { id: "pan",    label: "Pan",        title: "Pan & zoom (default)" },
   { id: "region", label: "⬡ Region",   title: "Draw annotation region — click vertices, double-click to close" },
   { id: "measure",label: "⟷ Measure",  title: "Measure distance — click two points" },
+  // Distinct from ⬡ Region on purpose: Region selects *cells* for CSV export,
+  // Rectangle frames an *image* for figure export. Overloading one tool with
+  // both meanings would be the confusing option.
+  { id: "rectangle", label: "▭ Rectangle", title: "Drag a rectangle to frame a figure for high-resolution export" },
 ];
 
 const BTN = {
@@ -24,9 +28,10 @@ const BTN = {
 
 const SEP = { width: 1, background: "#333", margin: "2px 2px" };
 
-export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
+export default function AnnotationToolbar({ onScreenshot, onExport, panelIndex = 0 }) {
   const {
     annotationMode, setAnnotationMode, clearAnnotations, regions, measurements,
+    exportRects,
     panelCount, setPanelCount,
     requestZoomMatch,
     panelRotations, setPanelRotation,
@@ -37,7 +42,10 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
   // surprise, and the button greying out because the *other* panel is empty
   // would be worse.
   const mine = (a) => a.filter((x) => (x.panelIndex ?? 0) === panelIndex);
-  const hasAnnotations = mine(regions).length > 0 || mine(measurements).length > 0;
+  // The framing rectangle counts: Clear removes it too, so the button has to be
+  // reachable when it is the only thing this panel has.
+  const hasAnnotations = mine(regions).length > 0 || mine(measurements).length > 0
+    || mine(exportRects ?? []).length > 0;
   const isSplit = panelCount >= 2;
   const rotation = panelRotations[panelIndex] ?? 0;
 
@@ -77,9 +85,21 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
 
       <div style={SEP} />
 
-      <button title="Save screenshot as PNG" onClick={onScreenshot} style={{ ...BTN, color: "#888" }}>
+      {/* Two deliberately separate actions. Save PNG stays a one-click capture
+          of the view at screen resolution; Export… opens the figure dialog,
+          where the output size, DPI tag, background and scale bar are chosen. */}
+      <button title="Save screenshot as PNG at screen resolution" onClick={onScreenshot} style={{ ...BTN, color: "#888" }}>
         Save PNG
       </button>
+      {onExport && (
+        <button
+          title="Export a high-resolution figure — uses the ▭ Rectangle framing if one is drawn, otherwise the whole view"
+          onClick={onExport}
+          style={{ ...BTN, color: "#888" }}
+        >
+          Export…
+        </button>
+      )}
 
       {/* ── Rotation controls ─────────────────────────────── */}
       <div style={SEP} />
@@ -168,7 +188,7 @@ export default function AnnotationToolbar({ onScreenshot, panelIndex = 0 }) {
         <>
           <div style={SEP} />
           <button
-            title="Clear this panel's annotations and measurements"
+            title="Clear this panel's annotations, measurements and export rectangle"
             onClick={() => clearAnnotations(panelIndex)}
             style={{ ...BTN, color: "#c44" }}
           >

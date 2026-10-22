@@ -478,14 +478,15 @@
       "total": 36
     },
     "bounds_half": {
-      "digest": "12202c48c61571a9",
-      "n": 450,
-      "n_cells": 18,
+      "digest": "de3cbc69f8b37d22",
+      "n": 500,
+      "n_cells": 20,
       "total": 36
     },
     "capabilities": {
       "has_boundaries": true,
       "has_morphology": true,
+      "has_transcript_qv": true,
       "has_transcripts": true,
       "unit_label": "cell"
     },
@@ -906,14 +907,14 @@
       "total": 602
     },
     "tx_bbox_half": {
-      "digest": "e8f25ce5cb6b26b7",
+      "digest": "cdf74aeb86c395ea",
       "keys": [
         "feature_name",
         "qv",
         "x_location",
         "y_location"
       ],
-      "n": 301,
+      "n": 310,
       "total": 602
     },
     "tx_full": {
@@ -1347,13 +1348,13 @@
       "total": 1512
     },
     "tx_bbox_half": {
-      "digest": "31024d3a61b1ba36",
+      "digest": "56c07b2dcae74dd7",
       "keys": [
         "feature_name",
         "x_location",
         "y_location"
       ],
-      "n": 756,
+      "n": 755,
       "total": 1512
     },
     "tx_full": {

@@ -9,6 +9,11 @@ import { DatasetPicker } from "./DatasetPicker";
 import { APP_VERSION } from "../App";
 import { legendGradient, QUAL_PALETTE } from "../utils/colormap";
 import { geneColor } from "../utils/geneColor";
+import { downloadBlob } from "../utils/pngExport";
+import {
+  ListImportError, readFileText, readGeneList, readLrmList,
+  geneListCsv, lrmListCsv, lrmId,
+} from "../utils/listImport";
 
 // ── Color conversion helpers ──────────────────────────────────────────────────
 function rgbaToHex([r, g, b]) {
@@ -17,6 +22,36 @@ function rgbaToHex([r, g, b]) {
 function hexToRgba(hex) {
   const h = hex.replace("#", "");
   return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16), 255];
+}
+
+/**
+ * A colour swatch that opens the native picker. Every swatch in the sidebar
+ * must use this, not a hand-copied label + hidden input.
+ *
+ * The hidden <input type="color"> needs `position: relative` on its label.
+ * Without it, the input's containing block is <body>, so inside a scrolled list
+ * it sits far down the page, outside the list. Clicking the swatch focuses it,
+ * and the browser scrolls the whole page to reach it, even with
+ * `overflow: hidden`. The entire app slid off-screen and only the dark page
+ * background was left. The two transcript swatches were copied without that one
+ * property while the cell legend had it, which is how only transcripts broke.
+ */
+function ColorSwatch({ rgb, onChange }) {
+  const [r, g, b] = rgb;
+  return (
+    <label title="Click to change color"
+      style={{ cursor: "pointer", flexShrink: 0, position: "relative", display: "flex" }}>
+      <div style={{
+        width: 10, height: 10, borderRadius: 2,
+        background: `rgb(${r},${g},${b})`,
+        outline: "1px solid rgba(255,255,255,0.15)",
+      }} />
+      <input type="color" value={rgbaToHex([r, g, b])}
+        onChange={(e) => onChange(hexToRgba(e.target.value))}
+        style={{ position: "absolute", top: 0, left: 0, opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
+        tabIndex={-1} />
+    </label>
+  );
 }
 
 const SECTION_HEADER = {
@@ -460,25 +495,10 @@ function CategoricalLegend({ field, categories = [] }) {
     <div style={{ marginTop: 6 }}>
       {/* Category rows */}
       {categories.map((cat, i) => {
-        const [r, g, b] = resolveColor(cat, i);
-        const hexVal = rgbaToHex([r, g, b]);
         return (
           <div key={cat} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
-            {/* Clickable swatch — wraps a hidden <input type="color"> */}
-            <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, position: "relative", display: "flex" }}>
-              <div style={{
-                width: 10, height: 10, borderRadius: 2,
-                background: `rgb(${r},${g},${b})`,
-                outline: "1px solid rgba(255,255,255,0.15)",
-              }} />
-              <input
-                type="color"
-                value={hexVal}
-                onChange={(e) => setCategoryColorOverride(field, cat, hexToRgba(e.target.value))}
-                style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }}
-                tabIndex={-1}
-              />
-            </label>
+            <ColorSwatch rgb={resolveColor(cat, i)}
+              onChange={(rgba) => setCategoryColorOverride(field, cat, rgba)} />
             <span style={{ fontSize: 10, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}
                   title={cat}>{cat}</span>
           </div>
@@ -1090,7 +1110,11 @@ function LayerRowBase({ label, color, visible, opacity, onToggle, onOpacity }) {
 }
 
 function TranscriptLayerRow() {
-  const { layers, setLayerProp, transcriptFraction, setTranscriptFraction } = usePanelSettings();
+  const {
+    layers, setLayerProp, transcriptFraction, setTranscriptFraction,
+    showLowQualityTranscripts, setShowLowQualityTranscripts,
+  } = usePanelSettings();
+  const hasQv = useUnionCapabilities().has_transcript_qv;
   // Summed across the visible panels: with two datasets, "how much is on
   // screen" is the total of both, and one number is less noise than two.
   const transcriptStats = useSummedStat("transcriptStats");
@@ -1144,6 +1168,18 @@ function TranscriptLayerRow() {
               {transcriptFraction >= 0.995 ? "100%" : `${Math.round(transcriptFraction * 100)}%`}
             </span>
           </div>
+          {/* Xenium Explorer's quality filter: Q < 20 hidden by default, gray when shown. */}
+          {hasQv && (
+            <label style={{ ...LABEL_STYLE, fontSize: 10, marginTop: 4 }}
+              title="Q-Score is Xenium's decoding quality (Phred-scaled). Like Xenium Explorer, transcripts below 20 are hidden by default; when shown they are drawn gray. Counts above include them only when shown.">
+              <input type="checkbox" checked={showLowQualityTranscripts}
+                onChange={(e) => setShowLowQualityTranscripts(e.target.checked)}
+                style={{ accentColor: "#888", width: 11, height: 11, cursor: "pointer" }} />
+              <span style={{ color: showLowQualityTranscripts ? "#aaa" : "#666" }}>
+                show low-quality (Q &lt; 20) in gray
+              </span>
+            </label>
+          )}
         </div>
       )}
     </div>
@@ -1248,7 +1284,7 @@ function CellSegmentsRow({ unitTitle = "Cell" }) {
 // ── Transcript species section ────────────────────────────────────────────────
 function TranscriptSpeciesSection() {
   const {
-    selectedGenes, setSelectedGenes, toggleSelectedGene,
+    selectedGenes, setSelectedGenes, toggleSelectedGene, applyGeneList,
     transcriptColorOverrides, setTranscriptColorOverride,
     mergeTranscriptColorOverrides, resetTranscriptColorOverrides,
   } = usePanelSettings();
@@ -1262,6 +1298,10 @@ function TranscriptSpeciesSection() {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
   const fileInputRef = useRef(null);
+  // Matched against the same union the picker lists, so an imported gene is
+  // exactly a gene that has a checkbox here.
+  const geneImport = useListImport((text) =>
+    applyGeneList(readGeneList(text, allGenes), allGenes), datasets.join(" "));
 
   const filterActive = selectedGenes !== null;
   const selectedList = filterActive ? [...selectedGenes].sort() : [];
@@ -1342,10 +1382,23 @@ function TranscriptSpeciesSection() {
             clear
           </button>
         )}
+        <button onClick={geneImport.open} style={CHIP_STYLE}
+          title={'Show only the genes in a CSV file. The first row must contain a "gene" column; names must match exactly.'}>
+          import
+        </button>
+        <button
+          onClick={() => downloadCsv(geneListCsv(filterActive ? selectedList : allGenes),
+            `${datasets[0] ?? "tissueplex"}_genes.csv`)}
+          style={CHIP_STYLE}
+          title="Save the shown genes as a CSV that can be imported again">
+          export
+        </button>
         <button onClick={() => setExpanded((e) => !e)} style={CHIP_STYLE}>
           {expanded ? "▲" : filterActive ? "edit ▼" : "select ▼"}
         </button>
+        {geneImport.input}
       </div>
+      <ListImportErrorLine error={geneImport.error} onDismiss={geneImport.clearError} />
 
       {/* Compact selected-gene list (filter active, picker closed) */}
       {filterActive && !expanded && (
@@ -1354,15 +1407,10 @@ function TranscriptSpeciesSection() {
             <div style={{ fontSize: 11, color: "#555", paddingLeft: 2 }}>no genes selected</div>
           )}
           {selectedList.map((gene) => {
-            const [r, g, b] = resolveColor(gene);
             return (
               <div key={gene} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#e88", padding: "1px 0" }}>
-                <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
-                  <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
-                  <input type="color" value={rgbaToHex([r, g, b])}
-                    onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
-                    style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
-                </label>
+                <ColorSwatch rgb={resolveColor(gene)}
+                  onChange={(rgba) => setTranscriptColorOverride(gene, rgba)} />
                 <span style={{ flex: 1 }}>{gene}</span>
                 <button
                   onClick={() => toggleSelectedGene(gene)}
@@ -1391,17 +1439,12 @@ function TranscriptSpeciesSection() {
           <div style={{ maxHeight: 180, overflowY: "auto" }}>
             {pickerGenes.map((gene) => {
               const checked = selectedGenes === null || selectedGenes.has(gene);
-              const [r, g, b] = resolveColor(gene);
               return (
                 // Row split into swatch-label + checkbox-label so clicking the
                 // swatch doesn't also toggle the checkbox (nested-label issue).
                 <div key={gene} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 3 }}>
-                  <label title="Click to change color" style={{ cursor: "pointer", flexShrink: 0, display: "flex" }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 2, background: `rgb(${r},${g},${b})`, outline: "1px solid rgba(255,255,255,0.15)" }} />
-                    <input type="color" value={rgbaToHex([r, g, b])}
-                      onChange={(e) => setTranscriptColorOverride(gene, hexToRgba(e.target.value))}
-                      style={{ position: "absolute", opacity: 0, width: 0, height: 0, pointerEvents: "none" }} tabIndex={-1} />
-                  </label>
+                  <ColorSwatch rgb={resolveColor(gene)}
+                    onChange={(rgba) => setTranscriptColorOverride(gene, rgba)} />
                   <label style={{ ...LABEL_STYLE, flex: 1, marginBottom: 0 }}>
                     <input
                       type="checkbox"
@@ -1456,6 +1499,58 @@ const CHIP_STYLE = {
   fontSize: 10,
   cursor: "pointer",
 };
+
+// ── Name-list import (genes, LRMs) ────────────────────────────────────────────
+/**
+ * Wires a hidden file input to `apply(text)`. The format, and every refusal,
+ * lives in utils/listImport.js; `apply` throws ListImportError to refuse, and
+ * the selection is left untouched. There is deliberately no match report on
+ * success — the section's own "N / M" counter already says what was applied.
+ *
+ * `.xlsx` is in `accept` on purpose: hiding workbooks from the picker would
+ * leave a user with one wondering where their file went, where letting them
+ * pick it gets the "Save As → CSV UTF-8" instruction.
+ */
+function useListImport(apply, resetKey) {
+  const ref = useRef(null);
+  const [error, setError] = useState(null);
+  // A refusal describes one file against one vocabulary; once the dataset or
+  // edge source changes it no longer describes anything on screen.
+  useEffect(() => setError(null), [resetKey]);
+  async function onChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";          // same file again must still fire onChange
+    if (!file) return;
+    try {
+      apply(await readFileText(file));
+      setError(null);
+    } catch (err) {
+      setError(`${file.name}: ${err instanceof ListImportError ? err.message : `could not be read (${err.message})`}`);
+    }
+  }
+  const input = (
+    <input ref={ref} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls"
+      onChange={onChange} style={{ display: "none" }} />
+  );
+  return { open: () => ref.current?.click(), input, error, clearError: () => setError(null) };
+}
+
+function ListImportErrorLine({ error, onDismiss }) {
+  if (!error) return null;
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "flex-start", fontSize: 10,
+                  fontFamily: "monospace", color: "#e66", margin: "2px 0 4px" }}>
+      <span style={{ flex: 1, wordBreak: "break-word" }}>{error}</span>
+      <button onClick={onDismiss} title="Dismiss"
+        style={{ background: "none", border: "none", color: "#a55", cursor: "pointer",
+                 fontSize: 10, padding: 0, lineHeight: 1 }}>✕</button>
+    </div>
+  );
+}
+
+function downloadCsv(text, filename) {
+  downloadBlob(new Blob([text], { type: "text/csv" }), filename);
+}
 
 // ── Density row (top-level — applies to tissue graph + edge data) ─────────────
 /**
@@ -1532,7 +1627,7 @@ function EdgeSection() {
     showArrowheads, setShowArrowheads,
     arrowStyle, setArrowStyle,
     arrowheadScale, setArrowheadScale,
-    hiddenLrms, toggleLrm, setAllLrmsVisible, hideAllLrms,
+    hiddenLrms, toggleLrm, setAllLrmsVisible, hideAllLrms, applyLrmList,
     edgeColorClamp, setEdgeColorClamp,
     categoricalOverrides, setCategoricalOverride,
   } = usePanelSettings();
@@ -1561,6 +1656,10 @@ function EdgeSection() {
     }
     return out;
   }, [active]);
+
+  // Matched against the union above — the checklist the user is looking at.
+  const lrmImport = useListImport((text) =>
+    applyLrmList(readLrmList(text, lrmCatalogue), lrmCatalogue.map(lrmId)), srcKey);
 
   // Edge metadata columns, unioned across panels.
   const [edgeColumns, setEdgeColumns] = useState([]);
@@ -1852,7 +1951,21 @@ function EdgeSection() {
                 </span>
                 <button onClick={setAllLrmsVisible} style={CHIP_STYLE}>all</button>
                 <button onClick={hideAllLrms} style={CHIP_STYLE}>none</button>
+                <button onClick={lrmImport.open} style={CHIP_STYLE}
+                  title={'Show only the mechanisms in a CSV file. The first row must contain an "lrm" column ("ligand|receptor"), or "ligand" and "receptor" columns; names must match exactly.'}>
+                  import
+                </button>
+                <button
+                  onClick={() => downloadCsv(
+                    lrmListCsv(lrmCatalogue.filter((e) => !hiddenLrms.has(lrmId(e)))),
+                    `${sources[0]?.dataset ?? "tissueplex"}_lrms.csv`)}
+                  style={CHIP_STYLE}
+                  title="Save the active mechanisms as a CSV that can be imported again">
+                  export
+                </button>
+                {lrmImport.input}
               </div>
+              <ListImportErrorLine error={lrmImport.error} onDismiss={lrmImport.clearError} />
               <input
                 type="text"
                 value={lrmSearch}

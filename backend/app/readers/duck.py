@@ -240,18 +240,39 @@ def register_ids(conn, ids, name: str = "tp_filter", col: str = "cell_id") -> st
 # the layer visibly flickers.
 SAMPLE_SEED = 42
 
+_HASH_SPACE = 2 ** 64          # DuckDB's hash() returns UBIGINT
 
-def reservoir_sample(n: int) -> str:
-    """``USING SAMPLE`` clause drawing exactly n rows, or '' to keep all rows.
 
-    Reservoir sampling gives an exact row count (unlike bernoulli, which gives an
-    expected count), matching the pre-DuckDB ``df.sample(n=...)`` behaviour.
-    Always attach this to a subquery wrapping the filtered SELECT — applied
-    directly alongside a WHERE clause, DuckDB may sample before filtering.
+def hash_sample_predicate(key_cols: list[str], n: int, total: int) -> str:
+    """WHERE predicate keeping each row with probability ``n / total``, or ''.
+
+    A row is kept when the hash of its identity (``key_cols``, plus the seed)
+    falls below a cut-off, so the verdict is a property of the row alone:
+    spatially uniform, identical on every re-fetch, and unaffected by the bbox,
+    so a dot does not vanish or reappear as the user pans. The edge-density
+    predicate in edge_reader.py works the same way.
+
+    This replaced ``USING SAMPLE reservoir(n ROWS)``, which is **not uniform**
+    in DuckDB 1.2.2 — on a 132M-row Xenium run it drew ~85× too many dots from
+    the sparse slide margin (1,641 against 19 expected in the left 500 µm, tiles
+    ranging 0.68–59× their fair share), and on one thread as on four. A
+    near-empty edge of the slide rendered as a dense stripe with straight sides.
+    Do not swap a ``USING SAMPLE`` clause back in without measuring per-tile
+    uniformity on a real dataset.
+
+    The kept count is ``n`` in expectation rather than exactly — within a
+    fraction of a percent at transcript scale. ``total`` should be the
+    pre-sample count the caller already has. ``key_cols`` should identify a row:
+    a unique id column where the format has one, otherwise coordinates plus
+    gene. Rows sharing a key share a verdict, which is harmless at that grain.
+    It is an ordinary predicate, so unlike ``USING SAMPLE`` it composes with the
+    other conditions by AND and needs no subquery wrapping.
     """
-    if n <= 0:
+    if total <= 0 or n >= total:
         return ""
-    return f"USING SAMPLE reservoir({int(n)} ROWS) REPEATABLE ({SAMPLE_SEED})"
+    cut = int(_HASH_SPACE * max(0, n) / total)
+    key = ", ".join(f'"{c}"' for c in key_cols)
+    return f"hash({key}, {SAMPLE_SEED}) < {cut}::UBIGINT"
 
 
 def to_records(df) -> list[dict]:
