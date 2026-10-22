@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { loggedFetch } from "../utils/clientLog";
 
 /**
  * Fetches cell boundary vertices and groups them into polygon objects.
@@ -102,7 +103,7 @@ export function useCellBoundaries(
           url += `?${fracParam}`;
         }
         url += filterQS;
-        const res = await fetch(url, { signal: ctrl.signal });
+        const res = await loggedFetch("cell-boundaries", { dataset }, url, { signal: ctrl.signal });
         if (!res.ok) { setCells([]); setTotal(0); return; }
         const data = await res.json();
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
+import { loggedFetch } from "../utils/clientLog";
 
 /**
  * Computes per-directed-edge color values.
@@ -58,7 +59,9 @@ export function useEdgeColors(
     if (!enabled || edgeColorBy?.mode !== "lrm_set" || !edges || edges.length === 0) {
       return null;
     }
-    const entries = edges.map((e) => [e.edge, e.visible_score_sum ?? 0]);
+    // visible_score_sum is present only while an LRM filter is active; with no
+    // filter the rows are the raw structural rows and score_sum is the total.
+    const entries = edges.map((e) => [e.edge, e.visible_score_sum ?? e.score_sum ?? 0]);
     const scores = entries.map(([, v]) => v);
     let min = Infinity, max = -Infinity;
     for (const v of scores) { if (v < min) min = v; if (v > max) max = v; }
@@ -102,7 +105,8 @@ export function useEdgeColors(
 
       setLoading(true);
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/edge-color-values${efParam}`, {
+        const res = await loggedFetch("edges/edge-color-values", { dataset, edgeFile, field },
+          `${apiBase}/edges/${dataset}/edge-color-values${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "metadata", field, categorical }),

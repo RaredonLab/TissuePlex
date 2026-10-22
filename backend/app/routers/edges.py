@@ -13,12 +13,14 @@ Required columns in edges.parquet (or any registered edge file):
 
 All other columns are optional metadata that the frontend can filter/color by.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import ORJSONResponse
 from pathlib import Path
 from pydantic import BaseModel
 import os
 from typing import Optional, List
 
+from app.concurrency import run_cancellable
 from app.readers.edge_reader import EdgeReader
 from app.readers.metadata_filter import MetadataFilter
 
@@ -222,9 +224,24 @@ class EdgeStructureRequest(BaseModel):
     # see EdgeReader.query_structure.
 
 
+# The three viewport queries below are the hot path: one of each fires on every
+# pan, zoom and filter change, for every panel. Three things they share:
+#
+# * They are `async` and go through `run_cancellable`, so a query the browser
+#   has already abandoned is interrupted instead of running to completion.
+# * They return an `ORJSONResponse` directly. Returning a plain list lets
+#   FastAPI run `jsonable_encoder` over it first — measured at 0.8 s for 200K
+#   records, longer than the DuckDB query — and then the stdlib JSON encoder.
+# * The reader is resolved *before* the thread hop so a 404 is still a 404.
+
+
+def _json(payload) -> ORJSONResponse:
+    return ORJSONResponse(payload)
+
+
 @router.post("/{dataset}/query-structure")
-def query_edge_structure(dataset: str, body: EdgeStructureRequest,
-                         edge_file: str = Query("edges.parquet")):
+async def query_edge_structure(request: Request, dataset: str, body: EdgeStructureRequest,
+                               edge_file: str = Query("edges.parquet")):
     """Every edge in the viewport, unfiltered — the tissue-graph layer.
 
     Separate from /query-grouped so that filtering the edge *data* can never
@@ -232,13 +249,14 @@ def query_edge_structure(dataset: str, body: EdgeStructureRequest,
     """
     bbox = (body.xmin, body.ymin, body.xmax, body.ymax) \
         if body.xmin is not None else None
-    return _reader(dataset, edge_file).query_structure(
-        bbox=bbox, density=max(0.001, min(1.0, body.density)))
+    reader = _reader(dataset, edge_file)
+    return await run_cancellable(request, lambda: _json(reader.query_structure(
+        bbox=bbox, density=max(0.001, min(1.0, body.density)))))
 
 
 @router.post("/{dataset}/query-grouped")
-def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
-                        edge_file: str = Query("edges.parquet")):
+async def query_edges_grouped(request: Request, dataset: str, body: EdgeGroupedQueryRequest,
+                              edge_file: str = Query("edges.parquet")):
     """
     Return one row per directed edge (pre-aggregated by edge).
     ~500x fewer rows than /query for LRM-rich parquet files.
@@ -248,7 +266,9 @@ def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
     bbox = (body.xmin, body.ymin, body.xmax, body.ymax) \
         if body.xmin is not None else None
     density = max(0.001, min(1.0, body.density))
-    try:
+    reader = _reader(dataset, edge_file)
+
+    def work():
         # Legacy cell_filter means "both endpoints", i.e. the same set on each.
         legacy = _cell_ids_for(dataset, body.cell_filter)
         sending = _cell_ids_for(dataset, body.sending_filter)
@@ -261,13 +281,16 @@ def query_edges_grouped(dataset: str, body: EdgeGroupedQueryRequest,
         if body.edge_filter is not None:
             filters.append(body.edge_filter.build())
 
-        return _reader(dataset, edge_file).query_grouped(
+        return _json(reader.query_grouped(
             bbox=bbox,
             density=density,
             sending_ids=sending,
             receiving_ids=receiving,
             edge_filters=[f for f in filters if f is not None],
-        )
+        ))
+
+    try:
+        return await run_cancellable(request, work)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -283,11 +306,15 @@ class EdgeScoreQueryRequest(BaseModel):
     #   excluded_lrms — when the excluded set is small (CASE WHEN path)
     included_lrms: Optional[List[Optional[str]]] = None
     excluded_lrms: Optional[List[Optional[str]]] = None
+    # The same density the structural query used, so scores are computed and
+    # shipped only for the edges actually drawn. 1.0 (every edge) when omitted,
+    # which is what older clients get.
+    density: float = 1.0
 
 
 @router.post("/{dataset}/query-scores")
-def query_edge_scores(dataset: str, body: EdgeScoreQueryRequest,
-                      edge_file: str = Query("edges.parquet")):
+async def query_edge_scores(request: Request, dataset: str, body: EdgeScoreQueryRequest,
+                            edge_file: str = Query("edges.parquet")):
     """
     Return per-edge LRM visibility scores: {edge, visible_lrm_count, visible_score_sum}.
     Lightweight complement to /query-grouped — only two aggregate columns, no coordinates.
@@ -300,11 +327,13 @@ def query_edge_scores(dataset: str, body: EdgeScoreQueryRequest,
         if body.included_lrms is not None else None
     excluded = [x for x in (body.excluded_lrms or []) if x is not None] \
         if body.excluded_lrms is not None else None
-    return _reader(dataset, edge_file).query_scores(
+    reader = _reader(dataset, edge_file)
+    return await run_cancellable(request, lambda: _json(reader.query_scores(
         bbox=bbox,
         included_lrms=included,
         excluded_lrms=excluded,
-    )
+        density=max(0.001, min(1.0, body.density)),
+    )))
 
 
 class EdgeColorRequest(BaseModel):
@@ -316,17 +345,17 @@ class EdgeColorRequest(BaseModel):
 
 
 @router.post("/{dataset}/edge-color-values")
-def edge_color_values(dataset: str, body: EdgeColorRequest,
-                      edge_file: str = Query("edges.parquet")):
+async def edge_color_values(request: Request, dataset: str, body: EdgeColorRequest,
+                            edge_file: str = Query("edges.parquet")):
     """
     Return per-directed-edge color values.
     lrm_set: sum score for the supplied LRM list, one value per edge.
     metadata: return first value of `field` per edge (auto-detects cat/continuous
     unless `categorical` overrides it).
     """
-    return _reader(dataset, edge_file).edge_color_values(
-        body.mode, body.lrms, body.field, body.categorical
-    )
+    reader = _reader(dataset, edge_file)
+    return await run_cancellable(request, lambda: _json(reader.edge_color_values(
+        body.mode, body.lrms, body.field, body.categorical)))
 
 
 @router.get("/{dataset}/neighborhood/{cell_id:path}")

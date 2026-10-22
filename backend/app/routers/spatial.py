@@ -5,14 +5,15 @@ Replaces the Xenium-specific xenium.py router.  All dataset access goes through
 ReaderFactory, which auto-detects the platform and returns the appropriate reader.
 Supported platforms: Xenium, MERSCOPE, CosMx (see readers/reader_factory.py).
 """
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import ORJSONResponse, StreamingResponse
 from pydantic import BaseModel
 from pathlib import Path
 from typing import List, Optional
 import io
 import os
 
+from app.concurrency import run_cancellable
 from app.readers.metadata_filter import MetadataFilter
 from app.readers.reader_factory import ReaderFactory
 
@@ -23,6 +24,18 @@ DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data"))
 # Module-level cache: dataset name → reader instance.
 # Keeps instance-level caches (_cells_full_cache, etc.) alive across requests.
 _reader_cache: dict[str, object] = {}
+
+# dataset → gene list. `gene_list()` is not cached by every reader — CosMx reads
+# its whole transcript CSV to compute it — and it is called on every transcript
+# request that arrives as `exclude_genes`, i.e. on every pan once the user has
+# deselected a few genes. Memoised here so each reader computes it once.
+_gene_list_cache: dict[str, list] = {}
+
+
+def _genes(dataset: str) -> list:
+    if dataset not in _gene_list_cache:
+        _gene_list_cache[dataset] = list(_reader(dataset).gene_list() or [])
+    return _gene_list_cache[dataset]
 
 
 def _reader(dataset: str):
@@ -138,11 +151,12 @@ def list_images(dataset: str):
 @router.get("/{dataset}/genes")
 def gene_list(dataset: str):
     """All assayed gene names (excluding controls/blanks)."""
-    return _reader(dataset).gene_list()
+    return _genes(dataset)
 
 
 @router.get("/{dataset}/transcripts")
-def transcripts(
+async def transcripts(
+    request: Request,
     dataset: str,
     xmin: float = Query(None),
     ymin: float = Query(None),
@@ -172,7 +186,7 @@ def transcripts(
     reader = _reader(dataset)
     if exclude_genes:
         excluded = set(exclude_genes)
-        remaining = [g for g in reader.gene_list() if g not in excluded]
+        remaining = [g for g in _genes(dataset) if g not in excluded]
         # An empty allowlist and "no filter" are different things, and `genes=None`
         # means the latter. Excluding every gene must therefore yield no rows, not
         # all of them, so fall back to a sentinel that matches nothing.
@@ -183,12 +197,14 @@ def transcripts(
     extra = {}
     if min_qv is not None and reader.capabilities().get("has_transcript_qv"):
         extra["min_qv"] = min_qv
-    return reader.transcripts(
+    # Cancellable and orjson-serialised for the same reasons as the edge
+    # queries: this fires on every pan and can return 200K rows.
+    return await run_cancellable(request, lambda: ORJSONResponse(reader.transcripts(
         bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
         genes=genes,
         fraction=fraction,
         **extra,
-    )
+    )))
 
 
 @router.get("/{dataset}/cells")
@@ -227,7 +243,8 @@ def cell_expression(dataset: str, cell_id: str):
 
 
 @router.get("/{dataset}/cell-boundaries")
-def cell_boundaries(
+async def cell_boundaries(
+    request: Request,
     dataset: str,
     xmin: float = Query(None),
     ymin: float = Query(None),
@@ -249,17 +266,21 @@ def cell_boundaries(
     full density instead of thinning it to almost nothing.
     """
     reader = _reader(dataset)
-    try:
-        cell_ids = reader.filter_cell_ids(MetadataFilter.build(
-            filter_field, filter_values, filter_min, filter_max, filter_missing,
+    spec = MetadataFilter.build(
+        filter_field, filter_values, filter_min, filter_max, filter_missing)
+
+    def work():
+        cell_ids = reader.filter_cell_ids(spec)
+        return ORJSONResponse(reader.cell_boundaries(
+            bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
+            fraction=max(0.0001, min(1.0, fraction)),
+            cell_ids=cell_ids,
         ))
+
+    try:
+        return await run_cancellable(request, work)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    return reader.cell_boundaries(
-        bbox=(xmin, ymin, xmax, ymax) if xmin is not None else None,
-        fraction=max(0.0001, min(1.0, fraction)),
-        cell_ids=cell_ids,
-    )
 
 
 @router.post("/{dataset}/cells/export")
@@ -292,8 +313,10 @@ class ColorValuesRequest(BaseModel):
 
 
 @router.post("/{dataset}/color-values")
-def color_values_post(dataset: str, body: ColorValuesRequest):
+async def color_values_post(request: Request, dataset: str, body: ColorValuesRequest):
     """Per-cell color values for gene_set or metadata coloring."""
-    return _reader(dataset).color_values(
-        body.mode, body.field, body.genes, body.categorical
-    )
+    reader = _reader(dataset)
+    # One value per cell in the *whole* dataset, so on a large run this is the
+    # biggest single response the app sends; orjson matters here.
+    return await run_cancellable(request, lambda: ORJSONResponse(reader.color_values(
+        body.mode, body.field, body.genes, body.categorical)))

@@ -40,6 +40,19 @@ services:
       # Unset → sized from available memory. See docker-compose.yml for why a
       # fixed default is unsafe. Override in .env.prod if you need a tighter cap.
       DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-}
+      # DuckDB worker threads (default: the CPUs the container can see, max 8)
+      # and how many viewport queries may run at once (default: about half
+      # that, min 2). One shared DuckDB instance serves every request, so these
+      # are process-wide caps — the old per-request pools could oversubscribe
+      # a two-core VM several times over.
+      DUCKDB_THREADS: ${DUCKDB_THREADS:-}
+      QUERY_CONCURRENCY: ${QUERY_CONCURRENCY:-}
+      # Requests slower than this are written to the log file (ms).
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-2000}
+      # Logs go to $CACHE_DIR/logs/tissueplex.log (rotating, 5 x 5 MB), on the
+      # dzi_cache volume, so they survive a container restart or OOM kill.
+      # Read them with:  docker compose exec backend tail -n 200 /cache/logs/tissueplex.log
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     restart: unless-stopped
     stop_grace_period: 5m
     deploy:

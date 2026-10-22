@@ -1551,6 +1551,20 @@ Notch1,Dll4</code></pre>
       (Settings → Resources).</td>
     </tr>
     <tr>
+      <td>A red <span class="ui">⚠ … failed</span> badge appears at the bottom
+      of the canvas, or the viewer just stops updating</td>
+      <td>A data request to the backend failed; the layer it was for is left
+      empty rather than crashing the viewer. The badge disappears after a few
+      seconds. Every such failure, every slow request and every backend crash is
+      written to a log file that survives restarts:<br>
+      <code>docker compose exec backend tail -n 300 /cache/logs/tissueplex.log</code><br>
+      If the badge keeps reappearing, restart with <code>docker compose
+      restart backend</code> and send the log to whoever maintains your
+      deployment. Opening a very large edge file for the first time is slow for
+      a minute or two while an index is built in the background; that is
+      normal and happens once.</td>
+    </tr>
+    <tr>
       <td>Error: port 3000 is already in use</td>
       <td>Another application is using that port. Stop the other application, or
       edit <code>docker-compose.yml</code> and change the host port (e.g.

@@ -10,9 +10,11 @@ The alternative — ``pq.read_table(path).to_pandas()`` followed by a pandas mas
 reads and materializes every row on every request, which is what made transcript
 and boundary panning slow on full-size datasets.
 """
+import contextvars
 import math
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -71,7 +73,23 @@ def _default_memory_limit() -> str:
 # through to the computed default. A whitespace value is truthy, so without it
 # DuckDB receives `SET memory_limit='   '` and raises a ParserException.
 _MEMORY_LIMIT = (os.getenv("DUCKDB_MEMORY_LIMIT") or "").strip() or _default_memory_limit()
-_THREADS = os.getenv("DUCKDB_THREADS", "4")
+
+
+def _default_threads() -> int:
+    """DuckDB worker threads: the cores actually available, capped.
+
+    This used to be a flat 4, which on a two-core Docker Desktop VM meant every
+    concurrent query oversubscribed the machine twice over — and before the
+    database became shared (below) *each* request had its own pool of 4.
+    """
+    try:
+        n = len(os.sched_getaffinity(0))        # honours the container's cpuset
+    except (AttributeError, OSError):
+        n = os.cpu_count() or 2
+    return max(1, min(8, n))
+
+
+_THREADS = int((os.getenv("DUCKDB_THREADS") or "").strip() or _default_threads())
 
 
 def _temp_dir() -> Optional[str]:
@@ -98,19 +116,184 @@ def _temp_dir() -> Optional[str]:
 _TEMP_DIR = _temp_dir()
 
 
-def connect() -> duckdb.DuckDBPyConnection:
-    """Return a fresh, isolated DuckDB connection.
+# ── One database, many cursors ────────────────────────────────────────────────
+#
+# Every query used to open its own `duckdb.connect()`. That *looks* like a cheap
+# connection but is a whole new in-memory database instance: its own buffer
+# pool, its own thread pool, and — the part that matters on a small laptop — its
+# own copy of `memory_limit`. Five requests in flight (two panels, several
+# layers each, plus the ones the browser already abandoned) were five databases
+# each entitled to 60% of RAM. That is how a backend that "respects" its memory
+# cap still gets killed by the VM's OOM killer.
+#
+# One shared database fixes the accounting: `memory_limit` and `threads` apply
+# to the process as a whole. Per-request isolation comes from `cursor()`, which
+# DuckDB documents as the way to use one database from several threads — each
+# cursor is its own connection, with its own registered Python objects (verified:
+# a frame `register`ed on one cursor is not visible from another), so the
+# `register_ids` semi-join trick is unaffected.
+#
+# Concurrency is bounded on top of that. FastAPI runs sync endpoints on a
+# 40-thread pool, so without a limit a user panning quickly on a slow machine
+# stacks up dozens of full-file scans that all compete for the same cores and
+# the same buffer pool, and the one they are actually waiting for finishes last.
+# `QUERY_CONCURRENCY` queries run at a time; the rest wait their turn in order.
 
-    A new connection per call is deliberate: DuckDB's default global connection
-    is not thread-safe, and sharing it under FastAPI's threadpool produces empty
-    or corrupt result sets rather than an error.
+_db: Optional[duckdb.DuckDBPyConnection] = None
+_db_lock = threading.Lock()
+
+
+def _default_concurrency() -> int:
+    return max(2, min(8, (_THREADS + 1) // 2 + 1))
+
+
+QUERY_CONCURRENCY = int((os.getenv("QUERY_CONCURRENCY") or "").strip()
+                        or _default_concurrency())
+_query_slots = threading.BoundedSemaphore(QUERY_CONCURRENCY)
+
+
+def _database() -> duckdb.DuckDBPyConnection:
+    global _db
+    if _db is None:
+        with _db_lock:
+            if _db is None:
+                db = duckdb.connect()
+                db.execute(f"SET memory_limit='{_MEMORY_LIMIT}'")
+                db.execute(f"SET threads={_THREADS}")
+                if _TEMP_DIR:
+                    db.execute(f"SET temp_directory='{_TEMP_DIR}'")
+                # Keep parquet footers / metadata cached across queries: every
+                # viewport change re-opens the same handful of files.
+                try:
+                    db.execute("SET enable_object_cache=true")
+                except duckdb.Error:
+                    pass
+                _db = db
+    return _db
+
+
+def settings() -> dict:
+    """What this process is actually running with, for the log and /health."""
+    return {"memory_limit": _MEMORY_LIMIT, "threads": _THREADS,
+            "query_concurrency": QUERY_CONCURRENCY, "temp_directory": _TEMP_DIR}
+
+
+# ── Cancellation ──────────────────────────────────────────────────────────────
+#
+# The browser aborts a fetch the moment a newer viewport supersedes it, but the
+# abort never used to reach the server: the query ran to completion for a
+# viewport nobody would see, holding a concurrency slot and a share of the
+# buffer pool. A `QueryScope` is opened by the router around one request (see
+# `app.concurrency.run_cancellable`); every cursor opened under it is recorded,
+# and `interrupt()` stops them all. The scope travels in a contextvar so it
+# follows the request onto the worker thread without any plumbing through the
+# readers — they just call `connect()` as before.
+
+class QueryScope:
+    __slots__ = ("_cursors", "cancelled", "_lock")
+
+    def __init__(self):
+        self._cursors: list = []
+        self.cancelled = False
+        self._lock = threading.Lock()
+
+    def _attach(self, cur) -> None:
+        with self._lock:
+            self._cursors.append(cur)
+
+    def _detach(self, cur) -> None:
+        with self._lock:
+            try:
+                self._cursors.remove(cur)
+            except ValueError:
+                pass
+
+    def interrupt(self) -> None:
+        """Stop every query running under this scope; safe from any thread."""
+        self.cancelled = True
+        with self._lock:
+            cursors = list(self._cursors)
+        for cur in cursors:
+            try:
+                cur.interrupt()
+            except Exception:
+                pass
+
+
+_current_scope: contextvars.ContextVar = contextvars.ContextVar("tp_query_scope", default=None)
+
+
+class QueryCancelled(Exception):
+    """Raised inside a query whose request has already been abandoned."""
+
+
+class _Conn:
+    """A cursor on the shared database plus the bookkeeping around it.
+
+    Behaves like a `DuckDBPyConnection` for everything the readers do with one
+    (`execute`, `register`, `with … as conn:`), while holding a concurrency slot
+    for exactly as long as it is open. Readers never see this class by name.
     """
-    conn = duckdb.connect()
-    conn.execute(f"SET memory_limit='{_MEMORY_LIMIT}'")
-    conn.execute(f"SET threads={_THREADS}")
-    if _TEMP_DIR:
-        conn.execute(f"SET temp_directory='{_TEMP_DIR}'")
-    return conn
+    __slots__ = ("_cur", "_scope", "_slot")
+
+    def __init__(self):
+        scope = _current_scope.get()
+        if scope is not None and scope.cancelled:
+            raise QueryCancelled()
+        _query_slots.acquire()
+        self._slot = True
+        # The wait for a slot may have been long; the client may be gone by now.
+        if scope is not None and scope.cancelled:
+            self._release()
+            raise QueryCancelled()
+        try:
+            self._cur = _database().cursor()
+        except Exception:
+            self._release()
+            raise
+        self._scope = scope
+        if scope is not None:
+            scope._attach(self._cur)
+
+    def _release(self) -> None:
+        if self._slot:
+            self._slot = False
+            _query_slots.release()
+
+    def close(self) -> None:
+        if self._scope is not None:
+            self._scope._detach(self._cur)
+            self._scope = None
+        try:
+            self._cur.close()
+        except Exception:
+            pass
+        self._release()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
+def connect() -> "_Conn":
+    """Return an isolated connection (cursor) on the shared database.
+
+    Use as a context manager. Isolation per request is still real — each cursor
+    has its own transaction state and its own `register`ed frames — but memory
+    and threads are now shared and capped process-wide. See the note above.
+    """
+    return _Conn()
+
+
+def is_cancelled_error(exc: BaseException) -> bool:
+    """True when `exc` is the server's own abort of an abandoned query."""
+    return isinstance(exc, (QueryCancelled, duckdb.InterruptException))
 
 
 def scan(path: Path) -> str:

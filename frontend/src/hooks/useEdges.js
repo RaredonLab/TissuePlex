@@ -24,6 +24,7 @@
  * Returns { edges, loading }.
  */
 import { useState, useEffect, useRef, useMemo } from "react";
+import { loggedFetch } from "../utils/clientLog";
 
 const DEBOUNCE_MS = 400;
 
@@ -116,7 +117,8 @@ export function useEdges(
       if (edgeFilterBodies.length) body.edge_filters = edgeFilterBodies;
 
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-grouped${efParam}`, {
+        const res = await loggedFetch("edges/query-grouped", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-grouped${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -149,7 +151,8 @@ export function useEdges(
       graphAbortRef.current = ctrl;
       const { xmin, ymin, xmax, ymax } = viewport;
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-structure${efParam}`, {
+        const res = await loggedFetch("edges/query-structure", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-structure${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ xmin, ymin, xmax, ymax,
@@ -204,7 +207,11 @@ export function useEdges(
 
       setLoadingScores(true);
       const { xmin, ymin, xmax, ymax } = viewport;
-      const body = { xmin, ymin, xmax, ymax };
+      // The same density as the structural fetch. The server applies the same
+      // deterministic per-edge predicate, so every drawn edge still finds its
+      // score — and at the default 0.1 the response is a tenth of the size it
+      // was when scores came back for every edge in the viewport.
+      const body = { xmin, ymin, xmax, ymax, density: Math.max(0.01, Math.min(1.0, density)) };
 
       // Choose the smaller set to minimise the IN-list and maximise DuckDB pruning.
       // included_lrms → WHERE lrm IN (...): reads only matching rows (~visibleCount/totalLrms fraction).
@@ -218,7 +225,8 @@ export function useEdges(
       }
 
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-scores${efParam}`, {
+        const res = await loggedFetch("edges/query-scores", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-scores${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -242,7 +250,7 @@ export function useEdges(
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(scoreTimerRef.current);
-  }, [apiBase, dataset, viewport, imageSize, enabled, hiddenLrms, lrmCatalogue, efParam]); // eslint-disable-line
+  }, [apiBase, dataset, viewport, imageSize, enabled, hiddenLrms, lrmCatalogue, efParam, density]); // eslint-disable-line
 
   // ── Merge: overlay scores onto structural edges ───────────────────────────
   // edgeScores === null → no filter; use score_sum from structural as visible_score_sum
@@ -250,12 +258,12 @@ export function useEdges(
   const edges = useMemo(() => {
     if (structuralEdges.length === 0) return [];
     if (edgeScores === null) {
-      // No LRM filter — visible_* fields equal the unfiltered totals
-      return structuralEdges.map(e => ({
-        ...e,
-        visible_lrm_count: e.lrm_count ?? 1,
-        visible_score_sum: e.score_sum  ?? null,
-      }));
+      // No LRM filter: the structural rows already carry the unfiltered totals
+      // as lrm_count / score_sum, and every consumer falls back to those when
+      // the visible_* fields are absent (Viewer's hasVisibleLrms, useEdgeColors).
+      // Returning the array as-is saves copying every edge object on each pan —
+      // at a few hundred thousand edges that copy was a visible GC pause.
+      return structuralEdges;
     }
     // LRM filter active — overlay scores; missing entries → 0 visible LRMs
     return structuralEdges.map(e => {

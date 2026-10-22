@@ -671,6 +671,13 @@ export const useStore = create((set, get) => ({
   // ── Rendering / loading state ─────────────────────────────────────────────
   // loadingKeys: Set of string keys currently in flight (one entry per panel).
   // The status badge is visible whenever loadingKeys.size > 0.
+  //
+  // backendError: the most recent failed data fetch, { message, context, at },
+  // written by utils/clientLog.js and shown briefly by RenderingStatus. The
+  // hooks degrade a failed request to an empty layer on purpose; this is what
+  // keeps that degradation from being silent.
+  backendError: null,
+  setBackendError: (e) => set({ backendError: e }),
   loadingKeys: new Set(),
   setLoadingKey: (key, loading) => set((s) => {
     const next = new Set(s.loadingKeys);

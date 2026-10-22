@@ -16,6 +16,7 @@ Cell centroids in the metadata file are also in global pixel space.
 pixel_size defaults to 0.18 µm/px (CosMx standard; may vary by run — check
 experiment metadata if available).
 """
+import logging
 import glob
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,8 @@ import pandas as pd
 
 from app.readers import duck
 from app.readers.base_reader import SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.cosmx")
 
 
 # Bruker documents a 120 nm pixel edge and states "multiply the pixel value by
@@ -89,21 +92,29 @@ class CosMxReader(SpatialDatasetReader):
     # ── Gene catalogue ────────────────────────────────────────────────────────
 
     def gene_list(self) -> list[str]:
-        tx_file = self._find_file("*_tx_file.csv")
+        tx_file = self._find_file("*_tx_file.csv") or self._find_file("tx_file.csv")
         if tx_file is None:
             return []
         try:
-            df = pd.read_csv(tx_file, usecols=["target"], nrows=0)
-            # Read just the unique targets from first chunk to avoid full load
-            chunks = pd.read_csv(tx_file, usecols=["target"], chunksize=100_000)
-            genes: set[str] = set()
-            for chunk in chunks:
-                genes.update(chunk["target"].dropna().unique())
+            # One DISTINCT over the target column, through DuckDB's CSV reader,
+            # rather than a chunked pandas pass over the whole file. Still a
+            # full read of the file (there is no index of genes), which is why
+            # the spatial router memoises the result per dataset.
+            with duck.connect() as conn:
+                rows = conn.execute(
+                    f'SELECT DISTINCT "target" FROM {duck.scan_csv(tx_file)} '
+                    f'WHERE "target" IS NOT NULL').fetchall()
+            genes = {str(r[0]) for r in rows}
             return sorted(g for g in genes if not g.startswith("Negative"))
-        except Exception:
+        except Exception as exc:
+            if duck.is_cancelled_error(exc):
+                raise
             return []
 
     # ── Transcripts ───────────────────────────────────────────────────────────
+
+    # Hard ceiling on transcripts per response, as in the other readers.
+    _MAX_TRANSCRIPTS = 200_000
 
     def transcripts(
         self,
@@ -111,39 +122,85 @@ class CosMxReader(SpatialDatasetReader):
         genes: Optional[list[str]] = None,
         fraction: float = 1.0,
     ) -> dict:
-        tx_file = self._find_file("*_tx_file.csv")
+        """Transcripts in the shifted pixel frame, bbox- and gene-filtered.
+
+        This used to `pd.read_csv` the *entire* transcript file on every call —
+        every pan, every zoom, every gene toggle. A real CosMx run ships that
+        file at several GB, so each viewport change re-parsed gigabytes of CSV
+        into pandas and then threw all but a viewport's worth away. That alone
+        explains minute-long pans and out-of-memory restarts for anyone viewing
+        CosMx on a laptop.
+
+        It now streams through DuckDB like MERSCOPE and seqFISH, and goes through
+        the spatial cache, which converts the CSV to a spatially-sorted parquet
+        once (in the background) so the bbox predicate can skip most of the file.
+        Sampling is the same seeded hash the other readers use, so the dots
+        drawn are stable across re-fetches and nested across zoom levels.
+        `total` remains the pre-sample count after the bbox and gene filters.
+        """
+        tx_file = self._find_file("*_tx_file.csv") or self._find_file("tx_file.csv")
         if tx_file is None:
             return {"transcripts": [], "total": 0}
         try:
-            df = pd.read_csv(
-                tx_file,
-                usecols=["x_global_px", "y_global_px", "target"],
-            )
-            df = df.rename(columns={
-                "x_global_px": "x_location",
-                "y_global_px": "y_location",
-                "target": "feature_name",
-            })
-            x0, y0 = self._origin()
-            df["x_location"] = df["x_location"] - x0
-            df["y_location"] = df["y_location"] - y0
-            if bbox:
-                # bbox arrives in the shifted frame, matching what cells report.
-                xmin, ymin, xmax, ymax = bbox
-                df = df[
-                    (df["x_location"] >= xmin) & (df["x_location"] <= xmax) &
-                    (df["y_location"] >= ymin) & (df["y_location"] <= ymax)
-                ]
-            if genes:
-                df = df[df["feature_name"].isin(genes)]
-            total = len(df)
-            fraction = max(0.0001, min(1.0, fraction))
-            sample_n = min(round(fraction * total), 200_000)
-            df = (df.sample(n=sample_n, random_state=42).copy()
-                  if sample_n < total else df.copy())
-            return {"transcripts": self._to_records(df), "total": total}
-        except Exception:
+            cols = set(duck.csv_columns(tx_file))
+        except OSError:
             return {"transcripts": [], "total": 0}
+        if not {"x_global_px", "y_global_px"} <= cols:
+            return {"transcripts": [], "total": 0}
+        gene_col = "target" if "target" in cols else None
+
+        from app.readers import spatial_cache
+        path = spatial_cache.sorted_path(
+            tx_file, self.path, "x_global_px", "y_global_px") or tx_file
+        src = duck.scan_any(path)
+
+        # The bbox arrives in the shifted frame cells() reports; the file holds
+        # raw slide-frame pixels, so shift it back. CosMx coordinates are already
+        # pixels — no pixel_size conversion here, unlike the micron platforms.
+        x0, y0 = self._origin()
+        native = None
+        if bbox and None not in bbox:
+            native = (bbox[0] + x0, bbox[1] + y0, bbox[2] + x0, bbox[3] + y0)
+
+        conditions, params = [], []
+        bbox_sql, bbox_params = duck.bbox_predicate("x_global_px", "y_global_px", native)
+        if bbox_sql:
+            conditions.append(bbox_sql)
+            params.extend(bbox_params)
+        if genes and gene_col:
+            sql, prm = duck.in_predicate(gene_col, genes)
+            conditions.append(sql)
+            params.extend(prm)
+        where = duck.where_clause(conditions)
+
+        select_cols = ["x_global_px", "y_global_px"] + ([gene_col] if gene_col else [])
+        select = ", ".join(f'"{c}"' for c in select_cols)
+
+        try:
+            with duck.connect() as conn:
+                total = int(conn.execute(
+                    f"SELECT COUNT(*) FROM {src} {where}", params).fetchone()[0] or 0)
+                if total == 0:
+                    return {"transcripts": [], "total": 0}
+                fraction = max(0.0001, min(1.0, fraction))
+                n = min(round(fraction * total), self._MAX_TRANSCRIPTS)
+                if n <= 0:
+                    return {"transcripts": [], "total": total}
+                sample = duck.hash_sample_predicate(select_cols, n, total)
+                df = conn.execute(
+                    f"SELECT {select} FROM {src} {duck.where_clause(conditions + [sample])}",
+                    params).df()
+        except Exception as exc:
+            if duck.is_cancelled_error(exc):
+                raise
+            log.warning(f"transcript query failed: {exc}")
+            return {"transcripts": [], "total": 0}
+
+        df = df.rename(columns={"x_global_px": "x_location", "y_global_px": "y_location",
+                                **({gene_col: "feature_name"} if gene_col else {})})
+        df["x_location"] = df["x_location"] - x0
+        df["y_location"] = df["y_location"] - y0
+        return {"transcripts": duck.to_records(df), "total": total}
 
     # ── Cells ─────────────────────────────────────────────────────────────────
 
@@ -166,7 +223,7 @@ class CosMxReader(SpatialDatasetReader):
         try:
             df = pd.read_csv(meta_file)
         except Exception as exc:
-            print(f"[cosmx] could not read {meta_file.name}: {exc}")
+            log.warning(f"could not read {meta_file.name}: {exc}")
             return None
 
         cols = {c.lower(): c for c in df.columns}
@@ -182,7 +239,7 @@ class CosMxReader(SpatialDatasetReader):
                 df["_gy"] = df[yl] + df[cols["fov"]].map(fovs["y"]).fillna(0)
                 xc, yc = "_gx", "_gy"
             else:
-                print("[cosmx] no CenterX/Y_global_px in metadata; cannot place cells")
+                log.warning("no CenterX/Y_global_px in metadata; cannot place cells")
                 return None
 
         x0, y0 = self._origin()
@@ -247,7 +304,7 @@ class CosMxReader(SpatialDatasetReader):
                         # against the canvas border.
                         self._origin_cache = (float(x0) - 50.0, float(y0) - 50.0)
             except Exception as exc:
-                print(f"[cosmx] could not determine coordinate origin: {exc}")
+                log.warning(f"could not determine coordinate origin: {exc}")
         return self._origin_cache
 
     def _fov_offsets(self):

@@ -43,6 +43,7 @@ because the reader has no way to know which image the viewer has open. Selecting
 ``tissue_lowres_image`` has the same problem. Both are recorded in the platform
 docs rather than guessed at here.
 """
+import logging
 import json
 from pathlib import Path
 from typing import Optional
@@ -51,6 +52,8 @@ import numpy as np
 import pandas as pd
 
 from app.readers.base_reader import _UNSET, SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.spaceranger")
 
 
 class SpaceRangerReader(SpatialDatasetReader):
@@ -109,7 +112,7 @@ class SpaceRangerReader(SpatialDatasetReader):
                 try:
                     self._scalefactors_cache = json.loads(f.read_text())
                 except Exception as exc:
-                    print(f"[{self._LOG}] could not read {f.name}: {exc}")
+                    log.warning(f"[{self._LOG}] could not read {f.name}: {exc}")
         return self._scalefactors_cache  # type: ignore[return-value]
 
     @property
@@ -160,7 +163,7 @@ class SpaceRangerReader(SpatialDatasetReader):
             if legacy.exists():
                 return pd.read_csv(legacy, header=None, names=cols)
         except Exception as exc:
-            print(f"[{self._LOG}] could not read tissue positions: {exc}")
+            log.warning(f"[{self._LOG}] could not read tissue positions: {exc}")
         return None
 
     def _positions(self) -> pd.DataFrame:
@@ -173,7 +176,7 @@ class SpaceRangerReader(SpatialDatasetReader):
         if df is None:
             return self._positions_cache  # type: ignore[return-value]
         if not {"pxl_col_in_fullres", "pxl_row_in_fullres"} <= set(df.columns):
-            print(f"[{self._LOG}] tissue positions lack pxl_col/row_in_fullres")
+            log.warning(f"[{self._LOG}] tissue positions lack pxl_col/row_in_fullres")
             return self._positions_cache  # type: ignore[return-value]
 
         # Most units fall outside the tissue; some carry negative pixel
@@ -327,7 +330,7 @@ class SpaceRangerReader(SpatialDatasetReader):
                 )
             self._matrix_cache = (barcodes, names, mat)
         except Exception as exc:
-            print(f"[{self._LOG}] could not read {h5.name}: {exc}")
+            log.warning(f"[{self._LOG}] could not read {h5.name}: {exc}")
         return self._matrix_cache
 
     def gene_list(self) -> list[str]:

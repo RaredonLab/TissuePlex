@@ -86,7 +86,9 @@ and boundary layers rather than returning empty arrays for them.
   not yet parsed)
 - CosMx: cells, transcripts, genes, metadata color-values implemented;
   gene-set color-values stub (requires transcript aggregation per cell);
-  `has_boundaries: False` (boundaries are per-FOV label TIFFs)
+  `has_boundaries: False` (boundaries are per-FOV label TIFFs). Transcripts
+  stream through DuckDB and the spatial cache like MERSCOPE and seqFISH — they
+  used to `pd.read_csv` the whole multi-GB transcript file on every pan.
 - seqFISH (Spatial Genomics GenePS): fully implemented for the current **v2** layout —
   cells, transcripts, boundaries, expression, and both color-value modes. Legacy **v1**
   reads cells and transcripts but declares `has_boundaries: False`, because v1 ships only
@@ -105,7 +107,12 @@ implementations return the dict form — the docstring is the thing that is wron
 ```
 backend/
   app/
-    main.py                  FastAPI entry point, CORS, router registration
+    main.py                  FastAPI entry point, CORS, router registration;
+                             ORJSONResponse is the default response class
+    logging_setup.py         Rotating log file under CACHE_DIR, request timing,
+                             memory watchdog, POST /client-log — see Observability
+    concurrency.py           run_cancellable(): runs a reader call on a worker
+                             thread and interrupts DuckDB if the client disconnects
     routers/
       tiles.py               DZI descriptor + tile serving; auto-builds pyramid on first request
       spatial.py             Platform-agnostic router: all /spatial/... endpoints
@@ -121,7 +128,9 @@ backend/
       xenium_reader.py       Xenium implementation (inherits SpatialDatasetReader)
       seqfish_reader.py      seqFISH / Spatial Genomics GenePS; v2 full, v1 partial.
                              Mixed µm/pixel coordinate handling — see its own section.
-      duck.py                Shared DuckDB query helpers used by the spatial readers
+      duck.py                Shared DuckDB helpers: ONE shared database, per-request
+                             cursors, the query semaphore and the cancellation scope —
+                             see Query Concurrency and Memory
       metadata_filter.py     Categorical-vs-continuous typing + the MetadataFilter
                              subsetting spec; shared by cells and edges (#35, #45)
       spatial_cache.py       Spatially-sorted parquet cache (build on first access)
@@ -687,6 +696,17 @@ cell segment outlines (structure) vs cell fill color (expression).
 - `lrm_count` — total LRM rows for this edge (used by tissue graph — show all structural pairs regardless of LRM filter)
 - `visible_lrm_count` — LRMs not in `hiddenLrms` (used by directed edges — hide edge when 0)
 - `visible_score_sum` — SUM(score) for non-excluded LRMs (used for client-side lrm_set color mapping)
+
+**The edge layers share one array and compute geometry in accessors.** `useEdges`
+returns the structural rows as-is when no LRM filter is active (consumers fall back
+`visible_lrm_count ?? lrm_count` and `visible_score_sum ?? score_sum`), and `Viewer`
+makes one pass splitting them into directed and autocrine rows. The perpendicular
+offset and the arrowhead triangle are computed inside the deck.gl accessors
+(`offsetEnds`, `arrowheadPolygon`) with `updateTriggers`, not materialised as arrays
+of new objects — that used to be four copies of every edge object per update.
+**Arrowheads are skipped when sub-pixel**: `arrowLen` is a world length, so below
+~1.5 screen px (`arrowheadsDrawable`) the layer gets no data; nothing visible
+changes and the most expensive layer leaves the frame at whole-tissue zoom.
 
 **Directional rendering**: A→B and B→A are offset perpendicular to the edge axis so they
 appear as two distinct parallel lines. Offset amount is tunable (`edgeOffset`, default 4px).
@@ -1579,6 +1599,136 @@ nothing to join on and would work on some datasets and not others.
 
 ---
 
+## Query Concurrency and Memory (readers/duck.py, concurrency.py)
+
+Three things decide whether the backend survives a laptop, and all three live
+in `duck.py`:
+
+**One DuckDB database, many cursors.** `duck.connect()` used to call
+`duckdb.connect()` — a *new in-memory database instance* per request, with its
+own buffer pool, its own thread pool, and its own copy of `memory_limit`. Five
+requests in flight (two panels, several layers each, plus the ones the browser
+had already abandoned) were five databases each entitled to 60% of RAM. That is
+how a backend that "respected" its memory cap was still killed by the VM's OOM
+killer. There is now one shared database (`_database()`), and `connect()`
+returns a cursor on it, which is DuckDB's documented way to use one database
+from several threads. Isolation per request is still real: each cursor has its
+own transaction and its own `register`ed frames (verified — a frame registered
+on one cursor is not visible from another), so `register_ids` is unaffected.
+`memory_limit` and `threads` are now process-wide caps, and `threads` defaults
+to the CPUs the container can actually see (capped at 8) instead of a flat 4.
+
+**A bounded query semaphore.** FastAPI runs sync endpoints on a 40-thread pool,
+so a user panning on a slow machine could stack dozens of full-file scans that
+all competed for the same cores. `QUERY_CONCURRENCY` (default about half the
+threads, min 2) queries run at once; the rest queue in order. `connect()`
+acquires a slot for exactly as long as the connection is open.
+
+**Cancellation.** The browser aborts a fetch the moment a newer viewport
+supersedes it, but that abort stopped at the socket: the query ran to
+completion for a view nobody would see. The hot endpoints (`query-grouped`,
+`query-structure`, `query-scores`, `edge-color-values`, `transcripts`,
+`cell-boundaries`, `color-values`) are now `async` and go through
+`concurrency.run_cancellable`, which runs the reader call on a worker thread
+inside a `duck.QueryScope` and polls `request.is_disconnected()` every 100 ms;
+on disconnect it calls `interrupt()` on every cursor the call opened and
+returns a 499. Measured: a query that would have taken 300–560 ms stopped
+~40 ms after the client left. The scope travels in a contextvar, so readers call
+`connect()` exactly as before and need no plumbing. **The timing middleware must
+stay a pure ASGI middleware** (`logging_setup._TimingMiddleware`): Starlette's
+`BaseHTTPMiddleware` re-wraps the receive channel and `is_disconnected()` never
+fires behind it — the first version of this used `@app.middleware("http")` and
+three aborted requests all ran to completion.
+
+The hot endpoints also return `ORJSONResponse` *explicitly*. Returning a plain
+list lets FastAPI run `jsonable_encoder` over it first, measured at 0.8 s for
+200K records — longer than the DuckDB query it wrapped — and then the stdlib
+JSON encoder (0.14 s); orjson does the whole thing in ~10 ms and writes NaN/Inf
+as null natively. `EdgeReader._records` likewise replaced the per-value Python
+`isfinite` loop (six million calls on a 500K-edge viewport) with a vectorised
+check per float column.
+
+## Edge Spatial Index and the Prunable BBox (readers/edge_reader.py)
+
+`EdgeReader` now goes through `spatial_cache` like the transcript and boundary
+readers: a one-time background rewrite of the edge file sorted by a coarse grid
+on `x1`/`y1`, cached under `CACHE_DIR` as `edges.sorted.parquet` (or
+`edges__<name>.sorted.parquet` for files in `edges/` — the `cache_name` override
+exists because two edge sources would otherwise collide on the stem "edge" and
+rebuild each other's cache on alternate requests). Files under 64 MB are left
+alone, which keeps the bundled datasets and the golden baseline untouched.
+
+**Sorting alone does nothing here, and that was measured.** The layer's
+predicate is `(x1,y1) in box OR (x2,y2) in box`, and DuckDB cannot prune
+parquet row groups through an OR over two different column pairs: on a 33M-row
+*sorted* file a 10% viewport still scanned every row group (231 ms vs 270 ms
+unsorted). `_bbox_sql` therefore prepends a prunable *envelope* — `x1,y1`
+within the box grown by the file's longest edge (`max_edge_length()`, one query
+per file, cached per instance). Any edge whose receiving end is in view has its
+sending end within that distance of the box, so the envelope is a superset and
+the exact OR test after it changes nothing; but it is a plain conjunction on one
+column pair, which is what zone maps can use. Bounds are inlined as literals,
+not bound as `?`, for the reason documented at `duck.bbox_predicate`.
+
+Measured on the 33M-row synthetic file (`scratchpad/make_big_edges.py` shape:
+22.5K cells, 200K edges, 500 LRMs), per query, this machine:
+
+| | before | after | |
+|---|---|---|---|
+| query_grouped, 10% viewport | 372 ms | 28 ms | 13× |
+| query_grouped, 2% viewport | 351 ms | 18 ms | 20× |
+| query_grouped, 10% + sending filter | 494 ms | 31 ms | 16× |
+| query_scores, 10% viewport | 316 ms | 27 ms | 12× |
+| query_grouped, whole tissue | 455 ms | 293 ms | 1.6× |
+
+Whole-tissue views still scan the file (there is nothing to prune), but gain
+from the literal bbox, the records fix and orjson. The index build took 8 s for
+33M rows; expect a minute or two for a 168M-row lab file, during which queries
+use the unsorted file (the log says so).
+
+`query_scores` also takes `density` now and applies the same deterministic
+`density_predicate` as `query_grouped`, *before* its GROUP BY. It used to
+aggregate and ship scores for every edge in the viewport while the layer drew a
+tenth of them; because the predicate hashes the edge id, the sampled structural
+edges always find their scores. The frontend sends it; the default is 1.0, so
+the golden probes and older clients are unchanged.
+
+## Observability (app/logging_setup.py)
+
+The backend wrote nothing but `print()`s to stdout, which inside Docker is
+`docker logs` and is gone the moment the container is recreated — and a backend
+that has just been OOM-killed and restarted is exactly the one whose output you
+wanted. When a trainee reported "it just stopped", there was nothing to read.
+
+Every log record now goes to a rotating file (`$CACHE_DIR/logs/tissueplex.log`,
+5 × 5 MB; the `dzi_cache` volume, so it survives restarts) as well as stdout.
+The readers' `print`s became `logging.getLogger("tissueplex.<platform>")` calls.
+On top of that:
+
+- `_TimingMiddleware` logs any request slower than `SLOW_REQUEST_MS` (default
+  2000) with its query string and the process RSS, every 4xx/5xx, and unhandled
+  exceptions with their traceback.
+- A watchdog thread logs when RSS passes 70% / 85% of the memory ceiling (the
+  min of the cgroup limit and physical RAM), so an OOM kill leaves a trail
+  leading up to it rather than a silent gap.
+- `POST /client-log` accepts reports from the browser (rate-limited, 60/min).
+  `frontend/src/utils/clientLog.js` wraps every data hook's `fetch`
+  (`loggedFetch`): a non-ok response or a network failure is reported with the
+  endpoint, dataset, status and duration — aborts are not — and
+  `installGlobalErrorReporting()` in `main.jsx` catches uncaught errors and
+  unhandled rejections. Reports are de-duplicated per message for 10 s and
+  capped at 30/min client-side.
+- The most recent failed fetch is also written to `store.backendError`, and
+  `RenderingStatus` shows it as a red badge for 12 s (panel 0 only). This is
+  the visible half of the fix: the hooks still degrade a failure to an empty
+  layer, which is right, but it is no longer silent.
+- `GET /health` reports `rss_mb`, `memory_ceiling_mb`, `uptime_s`, `log_file`
+  and the DuckDB settings in effect.
+
+Tuning knobs, all optional: `LOG_LEVEL`, `LOG_DIR`, `SLOW_REQUEST_MS`,
+`DUCKDB_THREADS`, `QUERY_CONCURRENCY`. All are passed through by both compose
+files.
+
 ## Tile Pyramid
 
 The backend uses pyvips when available (fast streaming, handles very large OME-TIFFs
@@ -1682,6 +1832,10 @@ cd backend && python3 tests/golden_snapshot.py --record # adopt intentional chan
 ```
 
 Datasets absent from a checkout are skipped, so it works with only the committed fixtures.
+The baseline was re-recorded with the laptop-performance pass: it had drifted by seven
+probes before that pass (the Q-Score capability flag and the hash sampler, both from
+v0.8.8, were never recorded), plus CosMx `tx_full`, whose sample moved when CosMx
+transcripts switched from `df.sample` to the shared hash sampler (`total` unchanged).
 Two determinism rules keep it honest: record-list digests are order-independent (because
 `query_grouped` uses `ORDER BY RANDOM()`), and sampling is seeded (`duck.SAMPLE_SEED`).
 If a probe changes and you cannot explain why, that is the point of the tool.
@@ -1789,17 +1943,36 @@ which it does not cover at all.
   deployment where the URL is reachable by someone untrusted.
 - `zarr==2.18.2` is still pinned in requirements.txt although the readers use parquet and
   HDF5, not zarr. Likely stale; verify before removing.
+- **`duck.connect()` returns a cursor on one shared database, and must stay that way.**
+  Calling `duckdb.connect()` directly anywhere reintroduces a per-request database with
+  its own memory limit and thread pool — the OOM path described under *Query Concurrency
+  and Memory*. Use it as a context manager; it holds a concurrency slot while open.
+- **The request-timing middleware is a pure ASGI class on purpose.** `@app.middleware("http")`
+  (Starlette's `BaseHTTPMiddleware`) breaks `request.is_disconnected()` downstream, which
+  silently disables query cancellation. Verified, not theoretical.
+- **The edge bbox must keep its envelope conjunct.** `_bbox_sql` = prunable envelope on
+  `x1,y1` AND the exact OR test. Dropping the envelope keeps the results and loses the
+  entire spatial index (DuckDB does not prune through the OR); dropping the OR changes
+  which edges are returned.
+- **`sample_data` must not contain anything over `SPATIAL_CACHE_MIN_BYTES`** (64 MB), or
+  the golden baseline starts depending on whether a cache has been built.
 
 ---
 
 ## What's Not Built Yet
 
-1. **Edge queries are not spatially indexed.** `transcripts()` and `cell_boundaries()`
-   now go through `spatial_cache` (see the Spatial Query Path section), but `EdgeReader`
-   does not. Two things would need to change: sort `edges.parquet` on `x1`/`y1`, and stop
-   binding its bbox as `?` parameters, which defeats row-group pruning. Less urgent than
-   it was for transcripts, because `query_grouped` already collapses the row count
-   server-side.
+1. **Whole-tissue edge queries still scan the whole file.** Zoomed-in queries are
+   now pruned (see *Edge Spatial Index*), but at whole-tissue zoom nothing can be
+   skipped, so an LRM toggle on a 168M-row file is still a full scan of three
+   columns. The natural next step is a tiered density cache — a parquet holding
+   only the edges the deterministic density predicate keeps at ≤ 10%, which is a
+   fixed subset — so every query at the default density reads a tenth of the
+   rows. Not built. Two related inefficiencies: `edge_color_values` (metadata and
+   lrm_set modes) and `color_values` for cells return a value for *every* unit in
+   the dataset rather than the viewport, which on a million-cell run is a
+   multi-MB response and a million-entry Map in the browser; and
+   `register_ids` rebuilds a str-id DataFrame per request when an endpoint filter
+   is active (~0.1–0.2 s at 500K ids) — cache the frame per filter spec.
 
 2. **Supplemental cell metadata is not shown in the cell info panel** — `CellInfoPanel.jsx`
    renders a hardcoded field list (`cell_id`, x, y, `transcript_counts`, `total_counts`,

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { loggedFetch } from "../utils/clientLog";
 
 /**
  * Xenium Explorer hides transcripts below this Q-Score by default, and so do we.
@@ -104,7 +105,7 @@ export function useTranscripts(apiBase, dataset, viewport, imageSize, enabled = 
           url += `&xmin=${xmin}&ymin=${ymin}&xmax=${xmax}&ymax=${ymax}`;
         }
 
-        const res = await fetch(url, { signal: ctrl.signal });
+        const res = await loggedFetch("transcripts", { dataset }, url, { signal: ctrl.signal });
         if (!res.ok) { setTranscripts([]); setTotal(0); return; }
         const data = await res.json();
         // Response is { transcripts: [...], total: N }

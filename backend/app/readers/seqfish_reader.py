@@ -50,6 +50,7 @@ the image width: a ratio near pixel_size means microns, a ratio near 1.0 means
 pixels. On the reference dataset those ratios are 0.106 / 0.107 / 0.999, which
 separates the cases by two orders of magnitude. The verdict is logged on load.
 """
+import logging
 import json
 import math
 import re
@@ -60,6 +61,8 @@ import pandas as pd
 
 from app.readers import duck, spatial_cache
 from app.readers.base_reader import _UNSET, SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.seqfish")
 
 # Fallback when the DAPI OME-XML carries no PhysicalSizeX. This is the documented
 # GenePS value and matches the reference dataset (0.107161).
@@ -112,7 +115,7 @@ class SeqfishReader(SpatialDatasetReader):
             return {}
 
         if len(matches) > 1:
-            print(f"[seqfish] {self.path.name}: {len(matches)} ROIs present "
+            log.info(f"{self.path.name}: {len(matches)} ROIs present "
                   f"({', '.join(m.name for m in matches)}); using {matches[0].name}. "
                   f"TissuePlex expects one ROI per folder — split them to see the rest.")
 
@@ -177,7 +180,7 @@ class SeqfishReader(SpatialDatasetReader):
                         if val > 0:
                             self._pixel_size_cache = val
             except Exception as exc:
-                print(f"[seqfish] could not read PhysicalSizeX from {img.name}: {exc}; "
+                log.warning(f"could not read PhysicalSizeX from {img.name}: {exc}; "
                       f"falling back to {_DEFAULT_PIXEL_SIZE} µm/px")
         return self._pixel_size_cache
 
@@ -195,7 +198,7 @@ class SeqfishReader(SpatialDatasetReader):
             h, w = shape[-2], shape[-1]
             self._image_size_cache = (int(w), int(h))
         except Exception as exc:
-            print(f"[seqfish] could not read image dimensions from {img.name}: {exc}")
+            log.warning(f"could not read image dimensions from {img.name}: {exc}")
             return None
         return self._image_size_cache
 
@@ -223,7 +226,7 @@ class SeqfishReader(SpatialDatasetReader):
         micron = d_um < d_px
         if label not in self._divisor_log:
             self._divisor_log.add(label)
-            print(f"[seqfish] {label}: extent ratio {ratio:.4f} vs pixel_size {ps:.6f} "
+            log.info(f"{label}: extent ratio {ratio:.4f} vs pixel_size {ps:.6f} "
                   f"→ treating as {'MICRONS (divide by pixel_size)' if micron else 'PIXELS (no conversion)'}")
         return ps if micron else 1.0
 
@@ -421,7 +424,7 @@ class SeqfishReader(SpatialDatasetReader):
             with open(path) as fh:
                 gj = json.load(fh)
         except Exception as exc:
-            print(f"[seqfish] could not read {path.name}: {exc}")
+            log.warning(f"could not read {path.name}: {exc}")
             return {"boundaries": [], "total": 0}
 
         features = gj.get("features") or []
@@ -505,7 +508,7 @@ class SeqfishReader(SpatialDatasetReader):
                 df.index.name = "cell_id"
                 self._cxg_cache = df
             except Exception as exc:
-                print(f"[seqfish] could not read {counts.name}: {exc}")
+                log.warning(f"could not read {counts.name}: {exc}")
         return self._cxg_cache  # type: ignore[return-value]
 
     def cell_expression(self, cell_id: str) -> dict:

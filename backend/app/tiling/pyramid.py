@@ -9,6 +9,7 @@ Two backends:
 DZI level numbering: level 0 = 1×1, level max = full resolution.
 OME level numbering: level 0 = full resolution, level n = most downsampled.
 """
+import logging
 import math
 import os
 import shutil
@@ -18,6 +19,8 @@ from typing import Optional
 
 import numpy as np
 from PIL import Image
+
+log = logging.getLogger("tissueplex.pyramid")
 
 TILE_SIZE = 256
 OVERLAP = 1
@@ -267,7 +270,7 @@ def _build_dzi(src: Path, out_dir: Path, image_name: str) -> None:
         # as JPEG2000-in-TIFF (compression tag 34712) that libvips cannot decode
         # via libtiff even when built with OpenJPEG — the tifffile+imagecodecs
         # fallback is what actually handles those files.
-        print(f"[pyramid] pyvips could not build {src.name} "
+        log.warning(f"pyvips could not build {src.name} "
               f"({'processing error' if pyvips_started else 'unavailable'}): "
               f"{type(exc).__name__}: {exc} — falling back to tifffile/Pillow")
         # Clean up any partial output before falling back.
@@ -445,7 +448,7 @@ def _build_dzi_tifffile(src: Path, out_dir: Path, image_name: str) -> None:
             deepest_built = dzi_level
 
     if deepest_built < max_dzi_level:
-        print(f"[pyramid] {src.name}: native {full_w}x{full_h}; DZI levels above "
+        log.info(f"{src.name}: native {full_w}x{full_h}; DZI levels above "
               f"{deepest_built} exceed MAX_TIFFFILE_DIM={MAX_TIFFFILE_DIM} and are "
               f"upscaled on demand. Raise MAX_TIFFFILE_DIM (more RAM) for sharper "
               f"top levels.")

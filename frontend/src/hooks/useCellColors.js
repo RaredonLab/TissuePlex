@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
 import { geneColor } from "../utils/geneColor";
+import { loggedFetch } from "../utils/clientLog";
 
 /**
  * Fetches per-cell color values and maps them to RGBA.
@@ -93,7 +94,8 @@ export function useCellColors(apiBase, dataset, colorBy, allGenes, selectedGenes
           ? { mode: "gene_set", genes: genesToSend }
           : { mode: "metadata", field, categorical };
 
-        const res = await fetch(`${apiBase}/spatial/${dataset}/color-values`, {
+        const res = await loggedFetch("color-values", { dataset, mode, field },
+          `${apiBase}/spatial/${dataset}/color-values`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),

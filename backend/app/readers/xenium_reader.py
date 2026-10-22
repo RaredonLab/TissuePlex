@@ -2,6 +2,7 @@
 Reads standard Xenium output folders (v2/v3/v4).
 All heavy I/O is deferred to per-method calls — no data is loaded at init.
 """
+import logging
 import json
 from pathlib import Path
 from typing import Optional
@@ -12,6 +13,8 @@ import pyarrow.parquet as pq
 
 from app.readers import duck, spatial_cache
 from app.readers.base_reader import _UNSET, SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.xenium")
 
 # Hard ceiling on transcripts returned in one response, independent of `fraction`.
 # Guards against a request for fraction=1.0 over a whole-tissue viewport trying to
@@ -208,7 +211,7 @@ class XeniumReader(SpatialDatasetReader):
         try:
             df = self._cells_full()
         except Exception as exc:
-            print(f"[xenium_reader] cells_schema fallback: {exc}")
+            log.warning(f"cells_schema fallback: {exc}")
             df = self._read_parquet("cells.parquet")
         if df is None:
             return {"columns": {}}

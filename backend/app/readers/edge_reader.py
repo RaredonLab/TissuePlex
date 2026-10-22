@@ -10,21 +10,57 @@ BBox query parameters are also expected in image pixel space.
 Uses DuckDB for all parquet queries so large files (1+ GB) are processed in
 streaming chunks without loading the full dataset into RAM.
 """
+import logging
 import math
 import os
 from pathlib import Path
 from typing import Optional
 import duckdb
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from app.readers import duck, metadata_filter, supplemental
+from app.readers import duck, metadata_filter, spatial_cache, supplemental
 from app.readers.metadata_filter import MetadataFilter
+
+log = logging.getLogger("tissueplex.edges")
 
 
 
 _UNSET = object()
+
+
+def _records(df: pd.DataFrame) -> list[dict]:
+    """DataFrame → JSON-safe records, without a Python loop over every value.
+
+    The old form, `{c: (None if not isfinite(v) else v) for c, v in row.items()}`
+    over `df.to_dict("records")`, visited every cell of the result in Python —
+    for a 500K-edge viewport that is six million isfinite calls per pan, more
+    time than the DuckDB query itself. Here the non-finite check is vectorised
+    per float column and the per-row fix-up runs only on columns that actually
+    contain a NaN or Inf (usually none). Building rows from column lists is also
+    ~2.5x faster than pandas' own to_dict.
+
+    Same output as before, including None in place of NaN/Inf, so the golden
+    snapshot digests do not move.
+    """
+    if df.empty:
+        return []
+    names = list(df.columns)
+    cols = []
+    for c in names:
+        col = df[c]
+        if col.dtype.kind == "f":
+            arr = col.to_numpy()
+            if not np.isfinite(arr).all():
+                col = col.astype(object).where(np.isfinite(arr), None)
+        elif col.dtype == object and col.isna().any():
+            # A NaN float inside an object column (a null string in pandas'
+            # hands) must become None too, as it did before.
+            col = col.where(col.notna(), None)
+        cols.append(col.tolist())
+    return [dict(zip(names, row)) for row in zip(*cols)]
 
 
 # The pipeline, in one place:
@@ -83,6 +119,9 @@ class EdgeReader:
         self._lrm_catalogue_cache = None
         self._pixel_size = pixel_size
         self._supp_cache = _UNSET
+        # Longest edge in the file, native units; see _bbox_sql. _UNSET until
+        # first needed, None when it cannot be measured.
+        self._max_edge_len = _UNSET
 
     # ── Supplemental edge metadata ────────────────────────────────────────────
     #
@@ -129,7 +168,87 @@ class EdgeReader:
         return self._schema_cache
 
     def _from(self) -> str:
-        return f"read_parquet('{self._sql_path}')"
+        """FROM fragment for the edge file — the spatially-sorted copy when there is one.
+
+        Same mechanism the transcript and boundary readers use (`spatial_cache`):
+        a one-time background rewrite of the file sorted by a coarse grid on the
+        sending centroid, with small row groups, so the bbox predicate can skip
+        most of the file. Until the build lands, or for files under the size
+        threshold, this is the original file and the query is simply slower.
+        Results are identical either way — every query here aggregates or
+        filters by edge id, and nothing depends on row order.
+        """
+        src = spatial_cache.sorted_path(
+            self.path, self._dataset_dir, "x1", "y1", cache_name=self._cache_name())
+        if src is None:
+            return f"read_parquet('{self._sql_path}')"
+        return duck.scan(src)
+
+    def _cache_name(self) -> str:
+        # "edges" for the top-level file, "edges__edge.raw.minimum" for one in
+        # edges/, so two edge sources in one dataset never share a cache file.
+        rel = self.path.relative_to(self._dataset_dir) if self.path.is_relative_to(
+            self._dataset_dir) else Path(self.path.name)
+        stem = str(rel.with_suffix("")).replace(os.sep, "__")
+        return stem
+
+    def max_edge_length(self) -> Optional[float]:
+        """Length of the longest edge in native units, measured once per file."""
+        if self._max_edge_len is _UNSET:
+            self._max_edge_len = None
+            if {"x1", "y1", "x2", "y2"} <= set(self._parquet_schema().names):
+                try:
+                    with self._conn() as conn:
+                        v = conn.execute(
+                            f"SELECT MAX(sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))) "
+                            f"FROM read_parquet('{self._sql_path}')").fetchone()[0]
+                    if v is not None and math.isfinite(float(v)):
+                        self._max_edge_len = float(v)
+                except Exception as exc:
+                    log.warning("%s: could not measure max edge length: %s", self.path.name, exc)
+        return self._max_edge_len
+
+    def _bbox_sql(self, bbox: Optional[tuple]) -> str:
+        """WHERE fragment keeping edges with either endpoint in `bbox` (pixel space).
+
+        Two parts, and both are needed:
+
+        * The *exact* test, `(x1,y1) in box OR (x2,y2) in box`. This is what the
+          layer means, but DuckDB cannot prune parquet row groups through an OR
+          over two different column pairs — measured on a 33M-row sorted file, it
+          scanned every row group whatever the viewport.
+        * A *prunable* envelope on the sending centroid alone: `x1,y1` within the
+          box grown by the longest edge in the file. Any edge whose receiving end
+          is in view has its sending end within that distance of the box, so the
+          envelope keeps a superset of the exact set and changes nothing — but it
+          is a plain conjunction on one column pair, which is exactly what zone
+          maps can use. On the same file this took a 10% viewport from 231 ms to
+          28 ms and a 2% viewport from 213 ms to 16 ms.
+
+        Bounds are inlined as literals rather than bound as `?`, because DuckDB
+        prunes at plan time and bound values are not known then (see
+        `duck.bbox_predicate`, where this was measured). Every value goes through
+        `float()` first, so only finite numeric literals can reach the SQL.
+        """
+        if not bbox or None in bbox:
+            return ""
+        ps = self.pixel_size
+        try:
+            vals = [float(v) * ps for v in bbox]
+        except (TypeError, ValueError):
+            return ""
+        if not all(math.isfinite(v) for v in vals):
+            return ""
+        xmin, ymin, xmax, ymax = (repr(v) for v in vals)
+        exact = (f"((x1 >= {xmin} AND x1 <= {xmax} AND y1 >= {ymin} AND y1 <= {ymax}) OR "
+                 f"(x2 >= {xmin} AND x2 <= {xmax} AND y2 >= {ymin} AND y2 <= {ymax}))")
+        reach = self.max_edge_length()
+        if reach is None:
+            return exact
+        ex0, ey0, ex1, ey1 = (repr(v) for v in (
+            vals[0] - reach, vals[1] - reach, vals[2] + reach, vals[3] + reach))
+        envelope = f"(x1 >= {ex0} AND x1 <= {ex1} AND y1 >= {ey0} AND y1 <= {ey1})"
+        return f"{envelope} AND {exact}"
 
     def _conn(self):
         # Shared with the spatial readers via duck.connect(), which also gives a
@@ -543,12 +662,8 @@ class EdgeReader:
             return []
         ps = self.pixel_size
 
-        where, params = "", []
-        if bbox and None not in bbox:
-            xmin, ymin, xmax, ymax = (v * ps for v in bbox)
-            where = ("WHERE ((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                     "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))")
-            params = [xmin, xmax, ymin, ymax, xmin, xmax, ymin, ymax]
+        bbox_sql = self._bbox_sql(bbox)
+        where, params = (f"WHERE {bbox_sql}" if bbox_sql else ""), []
 
         has_edge = "edge" in cols
         key = "edge" if has_edge else "x1, y1, x2, y2"
@@ -571,7 +686,7 @@ class EdgeReader:
 
         for c in ("x1", "y1", "x2", "y2"):
             df[c] = df[c] / ps
-        return df.to_dict("records")
+        return _records(df)
 
     def query_grouped(
         self,
@@ -615,17 +730,9 @@ class EdgeReader:
         where_conditions: list[str] = []
         where_params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                where_conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                      xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            where_conditions.append(bbox_sql)
 
         # Build SELECT columns
         agg_cols = ["edge"]
@@ -691,11 +798,7 @@ class EdgeReader:
         if "is_autocrine" in df.columns:
             df["is_autocrine"] = df["is_autocrine"].astype(bool)
 
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+        return _records(df)
 
     def query_scores(
         self,
@@ -703,6 +806,7 @@ class EdgeReader:
         included_lrms: Optional[list] = None,
         excluded_lrms: Optional[list] = None,
         max_limit: int = 500_000,
+        density: float = 1.0,
     ) -> list[dict]:
         """
         Return per-edge LRM visibility scores: visible_lrm_count + visible_score_sum.
@@ -720,8 +824,15 @@ class EdgeReader:
             All bbox edges appear in the result.
 
         The frontend picks whichever produces the smaller IN-list.
-        No density sampling — returns scores for all bbox edges so the
-        density-sampled structural edges always find their matching scores.
+
+        `density` applies the *same* deterministic predicate as `query_grouped`
+        (hash of the edge id), so the sampled structural edges always find their
+        scores — the two selections are identical by construction, not by luck.
+        It used to be absent here, which meant every LRM toggle aggregated and
+        shipped scores for every edge in the viewport while the layer drew a
+        tenth of them: at default density, ten times the rows for no benefit.
+        The predicate is applied before the GROUP BY, so the aggregation itself
+        shrinks with it. Defaults to 1.0 (unchanged behaviour).
         """
         ps = self.pixel_size
         schema_names = set(self._parquet_schema().names)
@@ -734,17 +845,12 @@ class EdgeReader:
         where_conditions: list[str] = []
         where_params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                where_conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                      xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            where_conditions.append(bbox_sql)
+        dens = density_predicate(density)
+        if dens:
+            where_conditions.append(dens)
 
         where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
@@ -803,12 +909,7 @@ class EdgeReader:
 
         if df.empty:
             return []
-
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+        return _records(df)
 
     def query(
         self,
@@ -823,17 +924,9 @@ class EdgeReader:
         conditions: list[str] = []
         params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            conditions.append(bbox_sql)
 
         if filters:
             for col, val in filters.items():
@@ -893,8 +986,4 @@ class EdgeReader:
             if col in df.columns:
                 df[col] = df[col] / ps
 
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+        return _records(df)
