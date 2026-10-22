@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
+import { valueToColor, QUAL_PALETTE, fadeAlpha } from "../utils/colormap";
 import { loggedFetch } from "../utils/clientLog";
 
 const EMPTY = {
@@ -38,7 +38,8 @@ export function useEdgeColors(
   palette, enabled, clamp,
   edges,  // array from useEdges — carries visible_score_sum / color_value per row
   edgeFile = "edges.parquet",
-  categorical = null  // issue #35 override: null = auto-detect, true/false = forced
+  categorical = null,  // issue #35 override: null = auto-detect, true/false = forced
+  fadeFrac = null      // opacityMin / opacity for lrm_set, or null for no fade
 ) {
   const efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
   const mode = edgeColorBy?.mode;
@@ -72,9 +73,18 @@ export function useEdgeColors(
     const lo = clamp?.low  ?? min;
     const hi = clamp?.high ?? max;  // use max (not p95) so reset matches the legend
     const colorMap = new Map();
-    for (let i = 0; i < n; i++) colorMap.set(edges[i].edge, valueToColor(scores[i], lo, hi, palette));
+    // The alpha channel carries the fade: 255 everywhere without a minimum,
+    // otherwise fadeAlpha over the same window the colour uses, so the palette
+    // and the translucency describe the same thing. Viewer scales its per-layer
+    // base alpha by it.
+    const span = hi - lo;
+    for (let i = 0; i < n; i++) {
+      const c = valueToColor(scores[i], lo, hi, palette);
+      const a = fadeFrac == null ? 255 : fadeAlpha(span > 0 ? (scores[i] - lo) / span : 1, fadeFrac);
+      colorMap.set(edges[i].edge, [c[0], c[1], c[2], a]);
+    }
     return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() };
-  }, [enabled, mode, edges, palette, clamp?.low, clamp?.high]);
+  }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac]);
 
   // ── metadata: one summary per column, then colours from the rows ─────────
   const [summary, setSummary] = useState(null);   // { key, type, categories, min, max, p95 }

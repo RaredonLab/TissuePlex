@@ -482,7 +482,10 @@ All shared state lives in a single Zustand store. Key sections:
   parquet that panel renders. Per-panel since v0.8.4. `setPanelEdgeFile` /
   `setPanelDataset` reset the edge-file-scoped state. See "Multiple Edge Files" above.
 - **Layer visibility**: `layers` object — each layer has `visible` + `opacity`;
-  `cellSegments` also has `outlineOpacity` (independent from fill opacity)
+  `cellSegments` also has `outlineOpacity` (independent from fill opacity).
+  `cellSegments` and `edges` also carry `opacityMin` (null = no fade): the
+  opacity the *lowest* colour value draws at under gene-set / LRM-set colouring,
+  with `opacity` as the ceiling. See *Fade by value* under Color System.
 - **Cell color**: `cellColorEnabled`, `colorBy` (`mode`: off/gene_set/metadata, `field`),
   `cellColorPalette`, `cellColorClamp` (squish/oob cutoffs). `cellColorType` /
   `cellColorCategories` hold the type the backend actually returned, written by
@@ -513,7 +516,10 @@ makes that consumer silently stale, which is far worse than a redundant render.
   dataset change. See Gene Filter section below.
 - **Edge density**: `edgeDensity` — fraction of available viewport edges to render
   (0.01–1.0, default **0.1**). Applies to both the tissue graph layer and the directed
-  edges layer. Slider is top-level in LayerPanel, between the two sections.
+  edges layer. In the sidebar it is the **sample** slider at the top of the Edge
+  Data section (named like the cell segments' sample slider), followed by the
+  Tissue Graph row and then the Edges row; the separate Tissue Graph section is
+  gone (v0.9.1). The store key keeps its name.
 - **Edge style**: `edgeWidth`, `showArrowheads`, `arrowStyle` (full/half-harpoon),
   `arrowheadScale`, `edgeDirectional`, `edgeOffset` (perpendicular separation), `showAutocrine`
 - **Edge color**: `edgeColorBy` (`mode`: default/lrm_set/metadata), `edgeColorPalette`,
@@ -1585,6 +1591,19 @@ dataset**, so legends and the linked colour scale keep their meaning. One
 corner-case change: an integer column that is null on some edges used to be
 typed from the per-edge `FIRST()` series (float64 with NaN → continuous); the
 summary types it from its DISTINCT non-null values (int → categorical when ≤ 30).
+
+**Fade by value (v0.9.1).** Under gene-set cell colouring and LRM-set edge
+colouring the layer's opacity has a draggable minimum (`opacityMin`, the
+**fade to** row under the palette). `Viewer` turns it into `fadeFrac =
+opacityMin / opacity` (null when the minimum sits at the maximum) and the colour
+hooks write `colormap.fadeAlpha(t, fadeFrac)` into the alpha channel of each
+colour, over the *same* clamp window the palette uses. The accessors in
+`Viewer` scale their fixed base alphas (180 cell fill, 200 edges, 220 autocrine
+and arrowheads) by that channel; the deck.gl layer `opacity` prop still
+multiplies everything, which is what makes the existing slider the ceiling.
+With no minimum the channel is 255 everywhere and nothing changes — that
+invariant is pinned in `src/fadeAlpha.test.js`. Metadata-continuous modes do
+not fade; extending them is one condition in each hook.
 
 **Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server

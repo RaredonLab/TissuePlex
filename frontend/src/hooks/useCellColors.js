@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { valueToColor, QUAL_PALETTE } from "../utils/colormap";
+import { valueToColor, QUAL_PALETTE, fadeAlpha } from "../utils/colormap";
 import { geneColor } from "../utils/geneColor";
 
 const EMPTY = {
@@ -35,7 +35,7 @@ const EMPTY = {
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading       always false — the boundaries fetch carries the loading state
  */
-export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryColorOverrides) {
+export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryColorOverrides, fadeFrac = null) {
   const [result, setResult] = useState(EMPTY);
 
   useEffect(() => {
@@ -62,11 +62,19 @@ export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryCol
     const min = raw.min ?? 0, max = raw.max ?? 0;
     const lo = clamp?.low  ?? min;
     const hi = clamp?.high ?? max;
+    // Fade applies to gene-set colouring only (see colormap.fadeAlpha); the
+    // alpha channel carries it and Viewer scales its base fill alpha by it.
+    const span = hi - lo;
+    const fade = fadeFrac != null && colorBy.mode === "gene_set";
     const colorMap = new Map(
-      Object.entries(raw.values).map(([id, v]) => [id, valueToColor(v, lo, hi, palette)])
+      Object.entries(raw.values).map(([id, v]) => {
+        const c = valueToColor(v, lo, hi, palette);
+        const a = fade ? fadeAlpha(span > 0 ? (v - lo) / span : 1, fadeFrac) : 255;
+        return [id, [c[0], c[1], c[2], a]];
+      })
     );
     setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() });
-  }, [raw, enabled, colorBy?.mode, colorBy?.field, clamp?.low, clamp?.high, palette, categoryColorOverrides]); // eslint-disable-line
+  }, [raw, enabled, colorBy?.mode, colorBy?.field, clamp?.low, clamp?.high, palette, categoryColorOverrides, fadeFrac]); // eslint-disable-line
 
   return { ...result, loading: false };
 }

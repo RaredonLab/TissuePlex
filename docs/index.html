@@ -223,7 +223,7 @@
     <a href="#cell-segments">Cell Segments</a>
     <a href="#filtering">Filtering by metadata</a>
     <a href="#transcripts">Transcripts</a>
-    <a href="#tissue-graph">Tissue Graph</a>
+    <a href="#tissue-graph">Edge Data: sample and Tissue Graph</a>
     <a href="#directed-edges">Directed Edges</a>
     <a href="#clicking">Clicking to explore</a>
     <a href="#split-screen">Split-screen mode</a>
@@ -844,6 +844,10 @@ write.csv(
     sliders to restrict the color range to a specific window, useful when
     outliers at the high end compress the variation across the rest of the
     dataset.</li>
+    <li>The <span class="ui">fade to</span> slider sets the fill opacity of the
+    <em>lowest</em>-expressing cells; the <span class="ui">fill</span> slider
+    stays the maximum. At the maximum nothing fades. Drag it down to let
+    low-expressing cells recede so the high expressers stand out.</li>
   </ul>
 
   <h4>Cell Metadata</h4>
@@ -965,7 +969,7 @@ write.csv(
   </ol>
   <p>Because the edge data is filtered <em>from</em> the tissue graph, it can never
   appear where there is no graph edge beneath it. Both layers respond to the one
-  density slider and stay aligned as you move it.</p>
+  sample slider and stay aligned as you move it.</p>
 </section>
 
 
@@ -1067,13 +1071,16 @@ Muc2,goblet</code></pre>
   Step 8). They visualize cell-cell communication as a spatial graph overlaid
   on the tissue.</p>
 
-  <h3>Edge Density</h3>
-  <p>The <span class="ui">density</span> slider controls what fraction of
-  available edges are rendered. The default is <strong>10%</strong>.</p>
+  <h3>Sample</h3>
+  <p>The <span class="ui">sample</span> slider, at the top of the
+  <span class="ui">Edge Data</span> section, controls what fraction of the
+  available edges are drawn — for the Tissue Graph and the Directed Edges alike,
+  so the two always line up. It works exactly like the <span class="ui">sample</span>
+  slider under Cell Segments. The default is <strong>10%</strong>.</p>
   <ul>
-    <li>At <strong>low density</strong> (1–10%): a sparse graph useful for
+    <li>At a <strong>low sample</strong> (1–10%): a sparse graph useful for
     viewing overall connectivity patterns.</li>
-    <li>At <strong>high density</strong> (50–100%): many more edges, revealing
+    <li>At a <strong>high sample</strong> (50–100%): many more edges, revealing
     densely connected hubs. Rendering may slow for large datasets.</li>
   </ul>
 
@@ -1083,19 +1090,20 @@ Muc2,goblet</code></pre>
   </div>
 
   <h3>Tissue Graph</h3>
-  <p>The <span class="ui">Tissue Graph</span> is a structural background layer
-  showing which cells are spatial neighbors, independent of any LRM information.
-  Each line indicates spatial adjacency between two cells. Use the checkbox to
-  toggle it and the opacity slider to adjust its visual weight.</p>
+  <p>The <span class="ui">Tissue Graph</span> row, just below the sample slider,
+  is a structural background layer showing which cells are spatial neighbors,
+  independent of any LRM information. Each line indicates spatial adjacency
+  between two cells. Use the checkbox to toggle it and the opacity slider to
+  adjust its visual weight.</p>
 
   <div class="note">
     <p>The tissue graph is <strong>ground truth</strong>: the total set of edges in
     view. No filter narrows it — it is shown or hidden, nothing else. Only the
-    density slider changes how many of its lines are drawn, and that applies
-    equally to the Edge Data layer on top, so the two always align.</p>
-    <p>Use <strong>opacity</strong>, not density, to make it recede behind the edge
-    data. Lowering density removes lines from a layer whose whole purpose is to
-    show the complete structure.</p>
+    sample slider changes how many of its lines are drawn, and that applies
+    equally to the Directed Edges on top, so the two always align.</p>
+    <p>Use <strong>opacity</strong>, not the sample, to make it recede behind the
+    edge data. Lowering the sample removes lines from a layer whose whole purpose
+    is to show the complete structure.</p>
   </div>
 </section>
 
@@ -1144,7 +1152,7 @@ Muc2,goblet</code></pre>
     <li>They <strong>obey the LRM Mechanisms checklist</strong>. Narrow to one
     mechanism and only the cells with autocrine signal through that mechanism keep
     their ring.</li>
-    <li>They obey the cell and edge metadata filters, and the density slider.</li>
+    <li>They obey the cell and edge metadata filters, and the sample slider.</li>
     <li>Clicking a ring opens the same edge detail panel, listing the mechanisms
     scored for that self-edge.</li>
   </ul>
@@ -1158,7 +1166,7 @@ Muc2,goblet</code></pre>
     <strong class="label">Seeing nothing?</strong> The
     <span class="ui">Edges</span> layer must be on for rings to appear —
     <span class="ui">Autocrine</span> lives inside it. Also check the
-    <span class="ui">density</span> slider: at the default 10% only a tenth of
+    <span class="ui">sample</span> slider: at the default 10% only a tenth of
     edges, rings included, are drawn.
   </div>
 
@@ -1180,7 +1188,11 @@ Muc2,goblet</code></pre>
     <li><strong>Default (uniform):</strong> all edges in a single neutral color.</li>
     <li><strong>LRM Set (selected mechanisms):</strong> edges colored by total
     communication score across active LRMs. The color scale adapts to the
-    current viewport. A palette picker and clamp controls appear below.</li>
+    current viewport. A palette picker, a <span class="ui">fade to</span>
+    slider and clamp controls appear below. <em>Fade to</em> is the opacity of
+    the weakest edge: leave it at the maximum and every edge draws at the
+    Edges opacity; drag it down and weak edges become translucent while the
+    strongest keep the full opacity.</li>
     <li><strong>Metadata column:</strong> color edges by a metadata field such
     as sending or receiving cell type. Continuous fields use a gradient palette;
     categorical fields use distinct colors with a legend.</li>
@@ -1277,7 +1289,7 @@ Notch1,Dll4</code></pre>
 
   <div class="note">
     <p>The summary is computed on the full data, so it is unaffected by the
-    density slider, by the sending and receiving filters, or by how far you are
+    sample slider, by the sending and receiving filters, or by how far you are
     zoomed in. It describes the tissue, not the current view. Clicking another
     cell replaces it; <span class="ui">hide highlight</span> removes it.</p>
   </div>
@@ -1481,9 +1493,9 @@ Notch1,Dll4</code></pre>
   <h4>Points to watch</h4>
   <ul>
     <li><strong>Sampling is not changed for you.</strong> The figure shows
-    exactly what the panel shows, including the edge density and transcript
+    exactly what the panel shows, including the edge sample and transcript
     sampling in effect. If you want the full edge set in a figure, raise the
-    density slider before exporting — and record the value you used in the
+    sample slider before exporting — and record the value you used in the
     legend.</li>
     <li><strong>Keep the rectangle on screen.</strong> Data is loaded for the
     current view, so if you pan away from your rectangle the export would be
@@ -1548,7 +1560,7 @@ Notch1,Dll4</code></pre>
     </tr>
     <tr>
       <td>TissuePlex is running slowly or edges lag</td>
-      <td>Reduce the <span class="ui">density</span> slider to 5% or lower.
+      <td>Reduce the <span class="ui">sample</span> slider to 5% or lower.
       Also check that Docker Desktop has at least 8 GB of memory allocated
       (Settings → Resources).</td>
     </tr>
