@@ -168,11 +168,6 @@ export default function LayerPanel() {
         </>
       )}
 
-      <div style={SECTION_HEADER}>Tissue Graph</div>
-      <TissueGraphSection />
-
-      <EdgeDensityRow />
-
       <div style={SECTION_HEADER}>Edge Data</div>
       <EdgeSection />
 
@@ -229,6 +224,7 @@ function ColorBySection({ unitLabel = "cell" }) {
     cellColorEnabled, setCellColorEnabled,
     colorBy, setColorBy,
     cellColorPalette, setCellColorPalette,
+    layers, setLayerProp,
     selectedGenes,
     cellColorClamp, setCellColorClamp,
     categoricalOverrides, setCategoricalOverride,
@@ -366,6 +362,12 @@ function ColorBySection({ unitLabel = "cell" }) {
             >
               {PALETTE_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
+          )}
+          {mode === "gene_set" && (
+            <FadeRow color="#6cf" max={layers.cellSegments?.opacity ?? 1}
+              value={layers.cellSegments?.opacityMin}
+              onChange={(v) => setLayerProp("cellSegments", "opacityMin",
+                v >= (layers.cellSegments?.opacity ?? 1) ? null : v)} />
           )}
 
           {/* Legend */}
@@ -1569,29 +1571,63 @@ function downloadCsv(text, filename) {
  * never changes *which* edges qualify — only how many of them are drawn.
  */
 function DensityRow({ label, value, onChange, note }) {
+  // Same shape as the cell segments' sample row: label, slider, percentage.
   return (
     <div style={{ marginBottom: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#555", marginBottom: 2 }}>
-        <span>{label}: {Math.round(value * 100)}%{value >= 1.0 ? " (all)" : ""}</span>
-        <span style={{ color: "#3a3a3a" }}>{note}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>{label}</span>
+        <input
+          type="range" min={0.01} max={1} step={0.01}
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value))}
+          style={{ flex: 1, accentColor: "#888", cursor: "pointer" }}
+        />
+        <span style={{ color: value >= 1.0 ? "#6c6" : "#555", width: 28, textAlign: "right", flexShrink: 0 }}>
+          {Math.round(value * 100)}%
+        </span>
       </div>
-      <input
-        type="range" min={0.01} max={1} step={0.01}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={{ width: "100%", accentColor: "#888", cursor: "pointer" }}
-      />
+      {note && (
+        <div style={{ fontSize: 9, color: "#3a3a3a", paddingLeft: 48, marginTop: 1 }}>{note}</div>
+      )}
     </div>
   );
 }
 
+// The one sampling control for both connectivity layers. It was a top-level
+// "density" slider between its own Tissue Graph section and the Edge Data
+// section; it now sits at the top of Edge Data, named like the cell segments'
+// own sample slider, since that is what it is.
 function EdgeDensityRow() {
   const { edgeDensity, setEdgeDensity } = usePanelSettings();
-  return <DensityRow label="density" value={edgeDensity} onChange={setEdgeDensity}
-                     note="tissue graph + edges" />;
+  return <DensityRow label="sample" value={edgeDensity} onChange={setEdgeDensity}
+                     note="applies to the tissue graph and the edges alike" />;
 }
 
-// ── Tissue graph section ──────────────────────────────────────────────────────
+/**
+ * The draggable opacity minimum for a value-coloured layer (gene set for cells,
+ * LRM set for edges). At the maximum — the default — nothing fades and the
+ * layer looks as it always has; drag it down and the lowest values become
+ * translucent, down to this opacity, with the layer's own opacity slider as
+ * the ceiling. See colormap.fadeAlpha.
+ */
+function FadeRow({ color, max, value, onChange }) {
+  const v = Math.min(value ?? max, max);
+  const off = v >= max - 1e-9;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}
+         title="Opacity of the lowest colour value. At the maximum, nothing fades.">
+      <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>fade to</span>
+      <input type="range" min={0} max={max} step={0.01} value={v}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ flex: 1, accentColor: color, cursor: "pointer" }} />
+      <span style={{ color: off ? "#444" : "#555", width: 28, textAlign: "right", flexShrink: 0 }}>
+        {off ? "off" : `${Math.round(v * 100)}%`}
+      </span>
+    </div>
+  );
+}
+
+// ── Tissue graph row — lives inside the Edge Data section ────────────────────
 function TissueGraphSection() {
   const { layers, setLayerProp } = usePanelSettings();
   const state = layers.tissueGraph ?? { visible: true, opacity: 0.25 };
@@ -1726,6 +1762,8 @@ function EdgeSection() {
 
   return (
     <div style={{ marginBottom: 8 }}>
+      <EdgeDensityRow />
+      <TissueGraphSection />
       <LayerRowBase
         label="Edges"
         color="#f90"
@@ -1919,6 +1957,10 @@ function EdgeSection() {
             >
               {PALETTE_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
+          )}
+          {mode === "lrm_set" && (
+            <FadeRow color="#f90" max={state.opacity} value={state.opacityMin}
+              onChange={(v) => setLayerProp("edges", "opacityMin", v >= state.opacity ? null : v)} />
           )}
 
           {/* Legend */}

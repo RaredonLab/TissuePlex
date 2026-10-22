@@ -21,9 +21,13 @@ export function makeSettings() {
     layers: {
       morphology:   { visible: false, opacity: 1.0 },
       transcripts:  { visible: false, opacity: 0.8 },
-      cellSegments: { visible: true,  opacity: 1.0, outlineOpacity: 0.0 },
+      // opacityMin: the opacity the *lowest* colour value draws at when the
+      // layer is coloured by a continuous value (gene set for cells, LRM set
+      // for edges). null = same as `opacity`, i.e. no fade — the default and
+      // the historical behaviour. See colormap.fadeAlpha.
+      cellSegments: { visible: true,  opacity: 1.0, outlineOpacity: 0.0, opacityMin: null },
       tissueGraph:  { visible: true,  opacity: 0.05 },
-      edges:        { visible: false, opacity: 0.25 },
+      edges:        { visible: false, opacity: 0.25, opacityMin: null },
     },
 
     // null = auto (the hook targets ~5k cells and adapts to viewport density);

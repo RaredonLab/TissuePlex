@@ -1,6 +1,6 @@
 # TissuePlex
 
-**v0.9.0**
+**v0.9.1**
 
 An interactive spatial transcriptomics viewer for exploring cell-cell communication from [NICHESv2](https://github.com/RaredonLab/NICHESv2) directly on the tissue image.
 
@@ -9,6 +9,11 @@ An interactive spatial transcriptomics viewer for exploring cell-cell communicat
 📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** — step-by-step setup and a reference for every control in the interface. No programming experience assumed.
 
 ---
+
+## What's new in v0.9.1
+
+- **Fade low values.** When cells are coloured by gene set or edges by LRM set, the layer's opacity slider gains a draggable minimum (<span class="ui">fade to</span>): the lowest values draw at that opacity and the highest at the slider's maximum. Left at the maximum, nothing changes.
+- **Edge Data holds everything connectivity.** The Tissue Graph row and the sampling slider now live under Edge Data, and the slider is called <em>sample</em>, matching the cell segments' own.
 
 ## What's new in v0.9.0
 

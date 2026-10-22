@@ -724,6 +724,16 @@ function ViewerPanel({ panelIndex }) {
   const cellOutlineOpacity = layerState.cellSegments?.outlineOpacity ?? 0.8;
   const edgesVisible = layerState.edges?.visible ?? true;
   const edgesOpacity = layerState.edges?.opacity ?? 0.9;
+  // Fade-by-value: the ratio of the layer's draggable opacity minimum to its
+  // opacity, or null when the minimum sits at the maximum (no fade). Only the
+  // value-coloured modes use it — LRM set for edges, gene set for cells.
+  const fadeFracOf = (layer) => {
+    const max = layer?.opacity ?? 1, min = layer?.opacityMin;
+    if (min == null || !(max > 0) || min >= max) return null;
+    return Math.max(0, min) / max;
+  };
+  const edgeFadeFrac = edgeColorBy?.mode === "lrm_set" ? fadeFracOf(layerState.edges) : null;
+  const cellFadeFrac = colorBy?.mode === "gene_set" ? fadeFracOf(layerState.cellSegments) : null;
   const tissueGraphVisible = layerState.tissueGraph?.visible ?? true;
   const tissueGraphOpacity = layerState.tissueGraph?.opacity ?? 0.25;
 
@@ -820,7 +830,7 @@ function ViewerPanel({ panelIndex }) {
     type: cellType, categories: cellCategories, loading: cellColorsLoading,
   } = useCellColors(
     cellColorsRaw, colorBy, cellColorPalette, cellColorEnabled,
-    effectiveCellClamp, categoryColorOverrides
+    effectiveCellClamp, categoryColorOverrides, cellFadeFrac
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
@@ -837,7 +847,7 @@ function ViewerPanel({ panelIndex }) {
   const edgeColorEnabled = edgeColorBy.mode !== "default";
   const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95, loading: edgeColorsLoading } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette,
-    edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical
+    edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac
   );
   useEffect(() => {
     patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax } });
@@ -883,7 +893,8 @@ function ViewerPanel({ panelIndex }) {
     if (rc) return [...rc, 120];
     if (colorValues) {
       const c = colorValues.get(d.cell_id);
-      if (c) return [c[0], c[1], c[2], 180];
+      // c[3] carries the fade (255 = none); the base alpha is scaled by it.
+      if (c) return [c[0], c[1], c[2], Math.round(180 * (c[3] ?? 255) / 255)];
       return [20, 11, 53, 120];
     }
     return [100, 200, 255, 25];
@@ -978,7 +989,7 @@ function ViewerPanel({ panelIndex }) {
   const getDirectedEdgeColor = useCallback((d) => {
     if (edgeColorValues) {
       const c = edgeColorValues.get(d.edge);
-      if (c) return [c[0], c[1], c[2], 200];
+      if (c) return [c[0], c[1], c[2], Math.round(200 * (c[3] ?? 255) / 255)];
     }
     return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_EDGE_COLOR;
   }, [edgeColorValues, selectedEdge]);
@@ -986,7 +997,7 @@ function ViewerPanel({ panelIndex }) {
   const getAutocrineCellColor = useCallback((d) => {
     if (edgeColorValues) {
       const c = edgeColorValues.get(d.edge);
-      if (c) return [c[0], c[1], c[2], 220];
+      if (c) return [c[0], c[1], c[2], Math.round(220 * (c[3] ?? 255) / 255)];
     }
     return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_AUTOCRINE_COLOR;
   }, [edgeColorValues, selectedEdge]);
@@ -1067,7 +1078,7 @@ function ViewerPanel({ panelIndex }) {
     getFillColor: (d) => {
       if (edgeColorValues) {
         const c = edgeColorValues.get(d.edge);
-        if (c) return [c[0], c[1], c[2], 220];
+        if (c) return [c[0], c[1], c[2], Math.round(220 * (c[3] ?? 255) / 255)];
       }
       return d.edge === selectedEdge ? [255, 255, 100, 255] : DEFAULT_EDGE_COLOR;
     },
