@@ -255,7 +255,11 @@ docs/
   index.html                 The user manual, published to GitHub Pages at
                              https://raredonlab.github.io/TissuePlex/ — hand-written
                              HTML, no build step. Update it when a UI control changes.
-  demo.gif                   README demo animation
+  demo.gif                   README demo animation (800 px, kept small for GitHub)
+  demo_1080p.gif / .mp4      The same cut at 1920×1080 for slides; the MP4 plays
+                             far better in PowerPoint than the 40 MB GIF
+  make_demo_gif.sh           Regenerates both from recording.mov (gitignored, repo
+                             root). The original demo.gif has no recorded script.
 OBS/                         Archived, superseded planning docs. Provenance only —
                              NOT a specification. See OBS/README.md.
 NICHESv2_package_design.md   Design doc for the separate NICHESv2 R package (not this repo)
