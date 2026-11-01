@@ -199,21 +199,11 @@ with, how far they reach, and which mechanisms dominate across those edges.</p>
   <img src="img/vignettes/ex2_neighbourhood.jpg" alt="Close view of one selected cell in white, ten connected neighbours in amber inside an amber circle, and the surrounding edges drawn as paired offset lines with harpoon arrowheads">
   <figcaption><strong>2b · One cell's local neighbourhood.</strong> The selected cell in white; its ten connected neighbours in amber; the enclosing radius, 19.5 µm, as a circle. Every edge is drawn twice, once per direction, offset to its own left with a harpoon head, so A→B and B→A read like a chemistry equilibrium arrow and can carry different colours. The amber points are the honest answer: connectivity is not isotropic, and the circle contains cells this one is not connected to.</figcaption>
 </figure>
-<div class="callout note"><strong class="label">What the Cell Info block said for this cell</strong>
-<pre style="background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:6px;font-size:.82rem;line-height:1.5;margin:8px 0 0">cell_id        21_213
-x, y           30818.7, 9803.3
-NEIGHBOURHOOD
-neighbours     10
-local edges    21
-radius         19.5 µm
-autocrine      yes
-MECHANISMS (BY SCORE)
-Ptprs|Ntrk3    1431      Ntrk3|Ptprs    1431
-Prnp|Ncam1      730      Ncam1|Ncam1     575
-App|Aplp2       536      Bdnf|Ntrk2      261
-Nfasc|Nrcam     226      Nrcam|Nfasc     226
-Ncam1|Cntn1     225      Cntn1|Ncam1     225</pre>
-<p style="margin-top:8px">Receptor tyrosine phosphatase–Trk, cell-adhesion (Ncam1, Nfasc/Nrcam, Cntn1) and neurotrophin (Bdnf→Ntrk2) mechanisms dominate, which is what one would expect of a pyramidal neuron and its immediate neighbours. The mechanism list is computed over the 21 incident edges only.</p></div>
+<figure class="pair">
+  <img src="img/vignettes/ex2_cellinfo.jpg" alt="The Cell Info block: cell id 21_213, neighbourhood of 10 neighbours, 21 local edges, radius 19.5 µm, autocrine yes, and mechanisms ranked by score led by Ptprs|Ntrk3 at 1431">
+  <img src="img/vignettes/ex2_focus.jpg" alt="The same neighbourhood with only four mechanisms ticked: most edges are gone, and the few that remain show where Bdnf-Ntrk2 and three neuropeptide pairs act">
+  <figcaption><strong>2c · The neighbourhood summary, and the same view with four mechanisms.</strong> Left: the <strong>Cell Info</strong> block for this cell. The neighbourhood is 10 cells and 21 directed edges within 19.5 µm; the mechanism list is ranked over those 21 edges only, and receptor tyrosine phosphatase–Trk (Ptprs–Ntrk3), cell adhesion (Ncam1, Nfasc/Nrcam, Cntn1) and neurotrophin (Bdnf→Ntrk2) pairs lead, as one would expect of a pyramidal neuron and its neighbours. Right: the same view after clicking <span class="ui">none</span> in <strong>LRM Mechanisms</strong> and ticking only Bdnf→Ntrk2, Npy→Npy1r, Sst→Sstr2 and Pdyn→Oprk1. Edges that carry none of the four vanish; the colour scale re-ranges to the four that remain.</figcaption>
+</figure>
 <div class="callout note"><strong class="label">Why the numbers do not change when you pan</strong>
 <p>The neighbourhood is computed from the whole edge file on the server, not from the lines currently drawn. So the count is complete even when the edge sample slider is below 100%, and it is the same wherever you have scrolled to. Colour cells by a metadata column first and the block also reports the neighbourhood's composition by that column.</p></div>
 
