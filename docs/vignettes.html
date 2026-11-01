@@ -189,14 +189,15 @@ with, how far they reach, and which mechanisms dominate across those edges.</p>
   <li>With the settings from example 1, zoom into the hippocampus with the mouse wheel until single cells are clear.</li>
   <li>Click a cell in the pyramidal layer (a plain click, no <kbd>Shift</kbd>). The <strong>Cell Info</strong> block at the foot of the sidebar fills with its id, position and metadata.</li>
   <li>Click <span class="ui">show local neighbourhood</span> at the bottom of that block.</li>
+  <li>Zoom in once more, until the cell and its neighbours fill the view. Untick <span class="ui">Tissue Graph</span>, raise <span class="ui">offset</span> to 3 and choose <span class="ui">Harpoon</span>, so each pair of cells shows its two directions as separate half-arrows.</li>
 </ol>
 <figure>
   <img src="img/vignettes/ex2_hippocampus.jpg" alt="Zoomed view of the mouse hippocampus: the dentate gyrus and CA pyramidal layer drawn as dense bands of scored edges, with sparse edges elsewhere">
   <figcaption><strong>2a · The hippocampus at cell resolution.</strong> Same settings as figure 1b. The two bands are the dentate gyrus granule layer (upper) and the CA pyramidal layer (lower); the midline structure at left is the third ventricle region. At this zoom the summed-score colouring separates the cell layers from the neuropil around them.</figcaption>
 </figure>
 <figure>
-  <img src="img/vignettes/ex2_neighbourhood.jpg" alt="Close view of one selected cell drawn in white with ten connected neighbours marked in amber and an amber circle enclosing them, within the pyramidal layer">
-  <figcaption><strong>2b · One cell's local neighbourhood.</strong> The selected cell in white; its ten connected neighbours in amber; the enclosing radius, 19.5 µm, as a circle. The amber points are the honest answer: connectivity is not isotropic, and the circle contains cells this one is not connected to.</figcaption>
+  <img src="img/vignettes/ex2_neighbourhood.jpg" alt="Close view of one selected cell in white, ten connected neighbours in amber inside an amber circle, and the surrounding edges drawn as paired offset lines with harpoon arrowheads">
+  <figcaption><strong>2b · One cell's local neighbourhood.</strong> The selected cell in white; its ten connected neighbours in amber; the enclosing radius, 19.5 µm, as a circle. Every edge is drawn twice, once per direction, offset to its own left with a harpoon head, so A→B and B→A read like a chemistry equilibrium arrow and can carry different colours. The amber points are the honest answer: connectivity is not isotropic, and the circle contains cells this one is not connected to.</figcaption>
 </figure>
 <div class="callout note"><strong class="label">What the Cell Info block said for this cell</strong>
 <pre style="background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:6px;font-size:.82rem;line-height:1.5;margin:8px 0 0">cell_id        21_213
