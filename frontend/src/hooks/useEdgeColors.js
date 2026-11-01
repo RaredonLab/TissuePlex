@@ -3,7 +3,7 @@ import { valueToColor, QUAL_PALETTE, fadeAlpha } from "../utils/colormap";
 import { loggedFetch } from "../utils/clientLog";
 
 const EMPTY = {
-  colorValues: null, type: "continuous", vmin: 0, vmax: 0, p95: null,
+  colorValues: null, type: "continuous", vmin: 0, vmax: 0,
   categories: [], categoryColors: new Map(),
 };
 
@@ -19,16 +19,21 @@ const EMPTY = {
  *   query to carry the chosen column (`color_field`), so the value arrives with
  *   the edge instead of as a separate whole-file GROUP BY that returned a value
  *   for every edge in the dataset. What *is* fetched, once per column, is a
- *   summary — type, categories, min / max / p95 over the whole dataset — so the
- *   legend and the linked colour scale describe the dataset, not the viewport.
+ *   summary — the column's type and its categories.
+ *
+ * The colour range is the rule a reader expects of a legend: with no clamp,
+ * `lo`/`hi` are the minimum and maximum of the values actually drawn, so the
+ * legend's endpoints are the colours' endpoints, and the range follows every
+ * pan and every mechanism toggle. A clamp is only ever set by the user and
+ * persists until they reset it. (There used to be a hidden 95th-percentile
+ * cap: the palette saturated at a value the legend did not show.)
  *
  * Clamp and palette changes update the canvas immediately in both modes.
  *
  * Returns:
  *   colorValues   Map<edge_id, [r,g,b,a]> or null when mode is "default"
  *   type          "continuous" | "categorical"
- *   vmin, vmax    for continuous legend
- *   p95           95th-percentile value (used for auto-calibration)
+ *   vmin, vmax    min / max of the drawn values, for the continuous legend
  *   categories    string[] for categorical legend
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading
@@ -68,10 +73,8 @@ export function useEdgeColors(
     }
     if (!isFinite(min)) min = 0;
     if (!isFinite(max)) max = 0;
-    const sorted = Float64Array.from(scores).sort();
-    const p95 = sorted[Math.floor(n * 0.95)] ?? max;
     const lo = clamp?.low  ?? min;
-    const hi = clamp?.high ?? max;  // use max (not p95) so reset matches the legend
+    const hi = clamp?.high ?? max;
     const colorMap = new Map();
     // The alpha channel carries the fade: 255 everywhere without a minimum,
     // otherwise fadeAlpha over the same window the colour uses, so the palette
@@ -83,11 +86,11 @@ export function useEdgeColors(
       const a = fadeFrac == null ? 255 : fadeAlpha(span > 0 ? (scores[i] - lo) / span : 1, fadeFrac);
       colorMap.set(edges[i].edge, [c[0], c[1], c[2], a]);
     }
-    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() };
+    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() };
   }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac]);
 
   // ── metadata: one summary per column, then colours from the rows ─────────
-  const [summary, setSummary] = useState(null);   // { key, type, categories, min, max, p95 }
+  const [summary, setSummary] = useState(null);   // { key, type, categories, empty }
   const [loading, setLoading] = useState(false);
   const abortRef = useRef(null);
   const summaryKey = `${dataset}|${efParam}|${field}|${categorical}`;
@@ -115,11 +118,10 @@ export function useEdgeColors(
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setSummary({ key: summaryKey, type: data.type, categories: data.categories ?? [],
-                     min: data.min ?? 0, max: data.max ?? 0, p95: data.p95 ?? null,
                      empty: !!data.empty });
       } catch (e) {
         if (e.name === "AbortError") return;
-        setSummary({ key: summaryKey, type: "continuous", categories: [], min: 0, max: 0, p95: null, empty: true });
+        setSummary({ key: summaryKey, type: "continuous", categories: [], empty: true });
       } finally {
         if (abortRef.current === ctrl) setLoading(false);
       }
@@ -140,18 +142,26 @@ export function useEdgeColors(
         const label = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
         edgeColors.set(e.edge, colorMap.get(label) ?? [128, 128, 128, 255]);
       }
-      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, p95: null, categories, categoryColors: colorMap };
+      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap };
     }
-    const { min, max, p95 } = summary;
+    // Continuous: range over the values in view, exactly as lrm_set does.
+    let min = Infinity, max = -Infinity;
+    for (const e of edges ?? []) {
+      const v = e.color_value;
+      if (typeof v !== "number" || !isFinite(v)) continue;
+      if (v < min) min = v; if (v > max) max = v;
+    }
+    if (!isFinite(min)) min = 0;
+    if (!isFinite(max)) max = 0;
     const lo = clamp?.low  ?? min;
-    const hi = clamp?.high ?? (p95 ?? max);
+    const hi = clamp?.high ?? max;
     const edgeColors = new Map();
     for (const e of edges ?? []) {
       const v = e.color_value;
       if (typeof v !== "number" || !isFinite(v)) continue;
       edgeColors.set(e.edge, valueToColor(v, lo, hi, palette));
     }
-    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, p95, categories: [], categoryColors: new Map() };
+    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() };
   }, [enabled, mode, field, summary, summaryKey, edges, clamp?.low, clamp?.high, palette]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);

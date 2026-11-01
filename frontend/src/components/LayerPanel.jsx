@@ -404,7 +404,9 @@ function ClampableLegend({ label, palette, vmin, vmax, clamp, setClamp, accentCo
       <div style={{ height: 8, borderRadius: 2, background: legendGradient(palette), marginBottom: 2 }} />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#555", marginBottom: hasData ? 4 : 0 }}>
         <span>{hasData ? fmt(low) : "low"}</span>
-        <span style={{ color: "#666", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 100 }}>{label}</span>
+        <span style={{ color: "#666", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>
+          {label}{hasData && <span style={{ color: clamped ? "#c80" : "#3a7", marginLeft: 4 }}>{clamped ? "· clamped" : "· auto"}</span>}
+        </span>
         <span>{hasData ? fmt(high) : "high"}</span>
       </div>
       {hasData && (

@@ -845,7 +845,7 @@ function ViewerPanel({ panelIndex }) {
   }, [cellType, cellCategories]); // eslint-disable-line
 
   const edgeColorEnabled = edgeColorBy.mode !== "default";
-  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95, loading: edgeColorsLoading } = useEdgeColors(
+  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, loading: edgeColorsLoading } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette,
     edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac
   );
@@ -853,11 +853,13 @@ function ViewerPanel({ panelIndex }) {
     patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax } });
   }, [edgeVmin, edgeVmax]); // eslint-disable-line
 
-  useEffect(() => {
-    if (panelIndex === 0 && edgeColorBy?.mode === "lrm_set" && edgeP95 != null) {
-      setEdgeColorClamp(edgeColorClamp?.low ?? null, edgeP95);
-    }
-  }, [edgeP95]); // eslint-disable-line
+  // No automatic clamp. The colour range is the min and max of what is drawn
+  // (useEdgeColors), recomputed on every pan and every mechanism toggle, and a
+  // clamp exists only when the user sets one. This used to write
+  // `high = p95 of the viewport` into the store on every viewport change: the
+  // legend then printed the true max while the palette saturated at a number
+  // the user never saw, "reset range" was undone by the next pan, and so was
+  // any clamp the user had set by hand.
 
   useEffect(() => { setSelectedEdge(null, panelIndex); }, [dataset]); // eslint-disable-line
 

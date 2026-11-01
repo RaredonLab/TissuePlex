@@ -1654,9 +1654,9 @@ not fade; extending them is one condition in each hook.
 
 **Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server
-call is made for `lrm_set` mode. The p95 of `visible_score_sum` across the current
-viewport is auto-set as `edgeColorClamp.high` so the color range adapts to the data
-rather than being dominated by outlier edges.
+call is made for `lrm_set` mode. With no clamp the range is the min and max of
+`visible_score_sum` over the rows in view, recomputed on every pan and toggle, so the
+legend endpoints are the colour endpoints; only the user sets a clamp (v1.0.1).
 
 **Autocrine edges are colored on the same scale as directed edges.** They were once
 excluded from the `lrm_set` computation, which left the rings stuck on their default
@@ -2182,11 +2182,12 @@ which it does not cover at all.
   opened — an image or the data frame — and the hooks key on the viewport. Gating a
   fetch or a layer on `activeImage`, the DZI, or `has_morphology` reintroduces the
   "no DAPI, no cells" bug. `no_image_check.py` is the test to run.
-- **Edge color clamp has two different defaults, by design.** `Viewer.jsx` auto-sets
-  `edgeColorClamp.high` from the p95 of `visible_score_sum` so the initial view isn't
-  washed out by outliers. But `useEdgeColors` computes its own fallback `hi` as `max`, not
-  p95, so that "reset range" lands on a value matching the legend endpoints. They disagree
-  intentionally — don't "fix" one in isolation.
+- **The colour range is auto (min/max of what is drawn) unless the user clamps it, and
+  nothing else may write `edgeColorClamp`.** `Viewer.jsx` used to write `high = p95 of
+  the viewport` into the clamp on every viewport change: the palette then saturated at
+  a value the legend never showed, `reset range` was undone by the next pan, and a
+  hand-set clamp was overwritten too. Removed in v1.0.1. `useEdgeColors` ranges over
+  the rows in view in both modes and the legend shows `· auto` / `· clamped`.
 - **`edges.py` validates path traversal; the other routers don't.** `edges.py::_reader`
   resolves `edge_file` and rejects anything escaping the dataset directory.
   `spatial.py::_reader`, `tiles.py`, and `layers.py` do a bare `DATA_ROOT / dataset` with

@@ -949,11 +949,14 @@ write.csv(
     <li>Choose a <strong>color palette</strong>: viridis (yellow&rarr;purple),
     plasma (yellow&rarr;magenta), magma (yellow&rarr;black), or inferno.
     <em>Viridis</em> is recommended for colorblind accessibility.</li>
-    <li>A color legend shows the data range. Use the <span class="ui">lo</span>
-    and <span class="ui">hi</span> sliders to restrict the color range to a
-    specific window, useful when outliers at the high end compress the variation
-    across the rest of the dataset; <span class="ui">reset range</span> puts
-    the full range back.</li>
+    <li>A color legend shows the range in use. By default it is
+    <strong>auto</strong>: the lowest and highest value currently drawn, so the
+    legend's endpoints are exactly the colors' endpoints, and it follows you as
+    you pan or change the selection. Drag the <span class="ui">lo</span> or
+    <span class="ui">hi</span> slider to fix a window instead, useful when a few
+    outliers compress the variation across everything else; the legend then says
+    <em>clamped</em>, the window stays put until you click
+    <span class="ui">reset range</span>, and a figure legend should quote it.</li>
     <li>The <span class="ui">fade to</span> slider sets the fill opacity of the
     <em>lowest</em>-expressing cells; the <span class="ui">fill</span> slider
     stays the maximum. At the maximum nothing fades. Drag it down to let

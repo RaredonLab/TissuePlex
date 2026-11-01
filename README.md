@@ -1,102 +1,18 @@
 # TissuePlex
 
-**v1.0.0**
+**v1.0.1** · [GNU AGPL v3](LICENSE), commercial licence available
 
-An interactive spatial transcriptomics viewer for exploring cell-cell communication from [NICHESv2](https://github.com/RaredonLab/NICHESv2) directly on the tissue image.
+An interactive viewer for spatial transcriptomics that puts cell–cell communication on the tissue image. It reads the output of [NICHESv2](https://github.com/RaredonLab/NICHESv2) alongside Xenium, Visium, Visium HD, MERSCOPE, CosMx and seqFISH data, and lets you ask, in a browser: which cells are signalling, to whom, through which ligand–receptor mechanisms, and where.
 
 ![TissuePlex demo](docs/demo.gif)
 
-Free and open source under the [GNU AGPL v3](LICENSE) for research and any use that keeps the source open; a commercial licence is available for use in closed products or services — see [Licence](#licence).
-
-📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** — step-by-step setup and a reference for every control in the interface. No programming experience assumed.
-
-🔬 **[Worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html)** — seven short, screenshot-led tours on the demo datasets: where the signalling is, one cell's neighbourhood, your own annotations, spots and bins, platforms without an image, side-by-side comparison, and figures for a paper.
-
----
-
-## What's new in v1.0.0
-
-The release reviewed alongside the manuscript. Functionally the v0.9.x viewer, with the public-facing material brought up to date:
-
-- **Worked examples.** A new [screenshot-led tour](https://raredonlab.github.io/TissuePlex/vignettes.html) of seven workflows on the demo datasets, and a manual re-checked control by control against the software.
-- **Real demo data in one command.** `python3 sample_data/fetch_samples.py` adds the 10x Xenium breast, 10x Visium mouse kidney and Bruker CosMx mouse brain datasets, each with NICHESv2 edges and a provenance note, from the release's attached files.
-- **Two sidebar fixes.** The edge-table filter dropdown threw when a column was chosen; the inert *min strength* slider is gone.
-- **Licence.** TissuePlex is distributed under the GNU AGPL v3, with a commercial licence available from the lab.
-
-## What's new in v0.9.1
-
-- **Fade low values.** When cells are coloured by gene set or edges by LRM set, the layer's opacity slider gains a draggable minimum (<span class="ui">fade to</span>): the lowest values draw at that opacity and the highest at the slider's maximum. Left at the maximum, nothing changes.
-- **Edge Data holds everything connectivity.** The Tissue Graph row and the sampling slider now live under Edge Data, and the slider is called <em>sample</em>, matching the cell segments' own.
-
-## What's new in v0.9.0
-
-A performance and robustness release aimed at lab laptops and Docker deployments.
-
-- **Gene and mechanism toggles are instant.** Unchecking a transcript species filters in the browser with no request; toggling an LRM is answered from a cached per-viewport score matrix in milliseconds. Only a moving viewport is debounced.
-- **Nothing is processed beyond the field of view.** Edge queries are spatially indexed (a 10% viewport on a 33M-row edge file: 372 → 28 ms), whole-tissue views read a 10% density tier, and colour values arrive only for the cells and edges on screen instead of one value per unit in the dataset.
-- **Datasets without an image render.** A missing DAPI or morphology, or a TIFF the tiler cannot open, no longer blanks the cell segments and edges: every layer draws on a frame sized from the data, and an unreadable image is reported rather than silently fatal. seqFISH coordinate detection no longer needs the DAPI.
-- **The backend survives a laptop.** One shared DuckDB instance with process-wide memory and thread caps, a bounded query queue, and cancellation of queries the browser has abandoned. CosMx transcripts stream through DuckDB instead of re-reading the whole CSV per pan.
-- **Failures are logged to disk.** A rotating log on the cache volume records slow requests, errors with tracebacks, memory pressure before an out-of-memory kill, and any fetch the browser saw fail; a red badge in the viewer shows the most recent one. `docker compose exec backend tail -n 300 /cache/logs/tissueplex.log`.
-
----
-
-## What it does
-
-Spatial transcriptomics platforms (Xenium, seqFISH, Visium, Visium HD, MERSCOPE, CosMx) produce high-resolution images with hundreds of genes measured per cell. NICHESv2 infers which cells are communicating and through which ligand-receptor mechanisms (LRMs). TissuePlex bridges those two outputs: it overlays the NICHESv2 communication graph on the tissue image and lets you explore it interactively.
-
-**Key capabilities:**
-
-- **Toggle individual LRMs in real time** — select any subset of 100s of ligand-receptor mechanisms and instantly see which cell pairs are communicating through them
-- **Color edges by communication score or metadata** — visualize LRM set strength, cell type, or any custom column from your analysis as a continuous or categorical color scale
-- **Click any edge for full detail** — inspect every active LRM for a given cell pair with their individual scores
-- **Directed edges with arrowheads** — A→B and B→A are visually distinct; autocrine communication renders as a ring per cell, on the same color scale and mechanism filter as the edges
-- **Multiple edge sets per dataset** — drop several `.parquet` files into an `edges/` folder and flip between scoring approaches on the same tissue without duplicating the image or cell data
-- **Pan and zoom on high-resolution morphology images** — OME-TIFF tile pyramid with smooth zoom from whole-tissue to single-cell scale
-- **Multi-channel morphology** — Xenium `morphology_focus/` channels are selectable alongside the top-level morphology image
-- **Cross-platform metadata** — the `cell-metadata/` convention works the same way on every platform that supports it, so annotation workflows transfer between Xenium and seqFISH unchanged
-- **Split-screen comparison** — two independently navigable panels sharing one set of layer controls, with a match-zoom button
-- **Per-panel rotation** — rotate either panel to any angle to align tissue orientation
-- **Transcript dot overlay** — per-gene colored dots with hover tooltips, filterable by gene species; on Xenium, low-quality transcripts (Q-score < 20) are hidden by default, as in Xenium Explorer
-- **Gene and mechanism lists** — import a CSV of genes or ligand-receptor pairs to set the transcript filter or the active mechanisms in one step (Xenium Explorer's gene-group format works unchanged), and export the current selection
-- **Cell/spot segmentation** — polygon boundaries with color-by-gene-set or color-by-metadata, and editable per-category colors
-- **Autocrine signalling** — self-signalling drawn as a ring per cell, colored by the same scale as the directed edges and obeying the same mechanism filter
-- **Metadata filtering** — restrict the view to a subset of cells or edges (a sample, a few cell types, a value range). Applied server-side before sampling, so a rare cluster renders at full density instead of being sampled away
-- **Treat-as-categorical toggle** — integer-coded cluster IDs get a discrete editable palette rather than a viridis gradient, with the numeric order preserved in the legend
-- **Local neighbourhood summary** — click a cell to see every cell it is connected to, the enclosing radius, the composition by any metadata column, and the top mechanisms over its edges
-- **Region drawing and measurement tools** — annotate areas, measure distances in microns, export the cells inside a region as CSV
-- **Publication figures** — frame a region and export it at any pixel size with a DPI tag and scale bar, or save a quick PNG of the panel
-- **Supplemental metadata** — drop any CSV or parquet into a `cell-metadata/` folder to add custom color-by columns (clusters, pseudotime, etc.) without touching the original data
-- **Multi-dataset support** — switch between datasets without restarting; each is auto-detected by platform
-- **Works without an image** — a dataset with no morphology or DAPI draws its cells, transcripts and edges on a frame sized from the data; the image is one optional layer among the others
-
----
-
-## Supported platforms
-
-| Platform | Vendor | Morphology | Transcripts | Cell segments | Edges |
-|---|---|:---:|:---:|:---:|:---:|
-| **Xenium** | 10x Genomics | ✓ | ✓ | ✓ | ✓ |
-| **seqFISH** | Spatial Genomics | ✓ | ✓ | ✓ | ✓ |
-| **Visium HD** | 10x Genomics | ✓ | — | ✓ (bins) | ✓ |
-| **Visium** | 10x Genomics | ✓ | — | ✓ (spots) | ✓ |
-| **MERSCOPE** | Vizgen | ✓ | ✓ | ✓ | ✓ |
-| **CosMx** | Bruker / NanoString | — (drawn on a data-sized frame) | ✓ | ✓ | ✓ |
-
-Every demo dataset (see *Demo datasets* below) ships `edges.parquet` and an `edge-metadata/` folder, so the connectivity layer and the annotation workflow have something to show on every platform. One caveat worth knowing: targeted panels are chosen for cell typing rather than signalling, so a small panel may carry few or no complete ligand-receptor pairs — `check_lr_coverage()` reports this before NICHESv2 runs. The `edge-metadata/` folders are generated demo annotations, not analysis output; each carries a README saying which columns are derived and which is invented.
-
-seqFISH means the commercial **Spatial Genomics GenePS** output, not the academic seqFISH/seqFISH+ method, which has no standard file layout; the current v2 layout is fully supported, and legacy v1 reads cells and transcripts but not boundaries.
-
-The two array-based platforms have no per-molecule transcript coordinates — only spot- or bin-level UMI counts — so they synthesise a polygon per unit instead: a square for a Visium HD bin, a circle for a 55 µm Visium spot. Fill, colour-by, picking and region selection then all work through the same layers. CosMx datasets often ship no morphology image, in which case TissuePlex renders the data onto a blank canvas sized to the tissue. Each reader declares what it supports via a capability flag, and the UI hides layers the platform cannot serve — and relabels itself, so a Visium dataset says "spot" wherever a Xenium one says "cell".
-
-The edge connectivity layer (NICHESv2 output) works with any platform — it is platform-agnostic as long as cell barcodes match.
+📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** · 🔬 **[Worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html)** · 📝 **[Changelog](CHANGELOG.md)**
 
 ---
 
 ## Quick start
 
-**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows) or Docker Engine + Compose v2 (Linux). Nothing else needed on the host.
-
-### Demo with sample data
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac or Windows) or Docker Engine with Compose v2 (Linux). Nothing else is installed on your machine.
 
 ```bash
 git clone https://github.com/RaredonLab/TissuePlex.git
@@ -104,242 +20,102 @@ cd TissuePlex
 docker compose up --build
 ```
 
-Open **http://localhost:3000**. The sidebar's dataset menu lists the four demo datasets that come with the clone; the viewer opens on `mouse_ileum_tiny`.
-
-### Demo datasets
-
-Four small datasets are committed to the repository and work straight after `git clone`:
-
-| Folder | Platform | What it is | Size |
-|---|---|---|---|
-| `mouse_ileum_tiny` | Xenium | 10x's "Xenium Prime Mouse Ileum tiny" crop (36 cells) with worked `cell-metadata/`, `edge-metadata/` and multi-edge-set examples | 1.6 MB |
-| `visium_hd_tiny` | Visium HD | A subset of 10x's "Visium HD Tiny Mouse Brain" (real Space Ranger 4.0.1 output, 8 and 16 µm bins), CC BY 4.0 | 26 MB |
-| `visium_tiny` | Visium | Synthetic classic Visium slide from `make_visium.py` (252 spots), built to catch coordinate-scaling bugs | 0.9 MB |
-| `seqfish_synthetic` | seqFISH | Synthetic Spatial Genomics GenePS v2 ROI from `make_seqfish.py` (36 cells) | 0.8 MB |
-
-Three larger **real** datasets are too big for git and are published as release assets instead. One command fetches them into `sample_data/`, verifies their checksums, and unpacks them; restart `docker compose` afterwards and they appear in the dataset menu:
+Open **http://localhost:3000**. Four small demo datasets are included; three larger real ones are one command away:
 
 ```bash
-python3 sample_data/fetch_samples.py          # all three (~390 MB)
-python3 sample_data/fetch_samples.py --list   # or pick with --only <name>
+python3 sample_data/fetch_samples.py
 ```
 
-| Folder | Platform | What it is | Licence | Download |
-|---|---|---|---|---|
-| `xenium_human_breast_2fov` | Xenium | 10x's "Human Breast 2 FOV" example run (7,275 cells, full DAPI morphology, 32 scored mechanisms) | CC BY 4.0 | ~290 MB |
-| `visium_mouse_kidney` | Visium | 10x's "Mouse Kidney: Coronal Section" (1,438 spots in tissue; 2,479 mechanisms) | CC BY 4.0 | ~40 MB |
-| `cosmx-mousebrain` | CosMx | Bruker/NanoString 1000-plex mouse brain, via the OSTA project's OSF archive (38,996 cells, no image) | Bruker non-commercial data licence (included) | ~60 MB |
-
-Each unpacked folder carries a `PROVENANCE.md` naming its source, licence and exactly what was trimmed or added. No MERSCOPE dataset is distributed: the Vizgen example set the reader was developed against has no redistribution grant, so a MERSCOPE run has to be your own (`docs/public_datasets.md` lists sources). `sample_data/example_lists/` holds gene and mechanism CSVs for the sidebar's **import** buttons.
-
-### Your own data
+To view your own data, point `DATA_PATH` at a folder that contains one or more platform output directories. TissuePlex detects the platform from each directory's contents.
 
 ```bash
 DATA_PATH=/absolute/path/to/your/datasets docker compose up --build
 ```
 
-`DATA_PATH` should be a **parent folder** containing one or more platform output directories. TissuePlex auto-detects the platform from each subdirectory's contents:
-
-```
-/your/datasets/
-  xenium_run_A/
-    experiment.xenium       ← Xenium sentinel
-    morphology.ome.tif
-    morphology_focus/       ← optional; extra channels appear in the image picker
-    cells.parquet
-    transcripts.parquet
-    cell_boundaries.parquet
-    edges.parquet           ← NICHESv2 output (optional)
-    edges/                  ← optional; additional edge sets to flip between
-      raw_minimum.parquet
-      normalized_product.parquet
-
-  seqfish_run_B/            ← Spatial Genomics GenePS; one ROI per folder
-    Roi1_CellCoordinates.csv    ← seqFISH sentinel
-    Roi1_CellxGene.csv
-    Roi1_TranscriptList.csv
-    Roi1_Boundaries.geojson
-    Roi1_DAPI.tiff
-    edges.parquet
-
-  visium_hd_run_C/          ← Space Ranger outs/
-    binned_outputs/
-      square_008um/         ← Visium HD sentinel
-        filtered_feature_bc_matrix.h5
-        spatial/{tissue_positions.parquet, scalefactors_json.json, tissue_hires_image.png}
-    edges.parquet
-
-  visium_run_D/
-    filtered_feature_bc_matrix.h5
-    spatial/                ← Visium sentinel: scalefactors_json.json +
-      scalefactors_json.json     tissue_positions.csv
-      tissue_positions.csv
-      tissue_hires_image.png
-    edges.parquet
-
-  merscope_run_E/
-    cell_by_gene.csv        ← MERSCOPE sentinel
-    cell_metadata.csv
-    detected_transcripts.csv
-    edges.parquet
-
-  cosmx_run_F/
-    my_experiment_tx_file.csv   ← CosMx sentinel
-    edges.parquet
-```
-
-If `edges.parquet` is absent the edge layers are hidden — all other layers work normally. When a dataset has more than one edge source, a dropdown appears at the top of the Edge Data section (in split-screen mode, in each panel's header), and the two panels can show two different edge sources side by side.
-
-The first launch builds DZI tile pyramids from OME-TIFF morphology images. This takes ~30 seconds per dataset and is cached across restarts.
-
-### Deploying to a server
-
-[docs/cloud-deploy.md](docs/cloud-deploy.md) is a step-by-step DigitalOcean runbook (~$106–116/month) covering droplet setup, block storage for data, DNS, automatic TLS via Caddy, and data upload. Note that **access control is opt-in**: unless you enable Caddy's `basicauth`, anyone with the URL can view the data.
+The [manual](https://raredonlab.github.io/TissuePlex/) walks through installation step by step, including Windows specifics, and documents every control. The [worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html) show seven things to try in the first ten minutes.
 
 ---
 
-## NICHESv2 workflow
+## What you can do
 
-TissuePlex is designed as a downstream visualization step for [NICHESv2](https://github.com/RaredonLab/NICHESv2). After running NICHESv2 on your spatial dataset, export the connectivity object:
+- **See communication on the tissue.** NICHESv2 edges are drawn between the cells they connect, directed, with arrowheads, coloured by score or by any annotation. Autocrine signalling draws as a ring per cell.
+- **Interrogate mechanisms.** Tick and untick any of hundreds of ligand–receptor mechanisms and the map updates instantly. Click an edge to see every mechanism scored on that cell pair.
+- **Ask about one cell.** Click a cell for its expression and metadata, then show its local neighbourhood: every connected cell, the enclosing radius, the composition by cell type, and the dominant mechanisms.
+- **Filter by metadata.** Restrict cells, or the sending and receiving ends of edges, by cluster, sample, cell type or a numeric range. Filters are applied before sampling, so a rare population renders at full density.
+- **Bring your own annotations.** Drop a CSV beside the dataset (`cell-metadata/` for cells, `edge-metadata/` for cell pairs) and the columns appear as colour and filter options, with no re-export.
+- **Compare side by side.** Two panels, one set of controls, a shared colour scale and a match-zoom button, for two edge sets, two images or two datasets.
+- **Make figures.** Frame a region and export the data layers at any pixel size with a DPI tag and scale bar, or save a quick PNG. Draw regions to export the cells inside them as CSV; measure distances in microns.
+- **Handle real data sizes.** Viewport-bounded queries over a spatial index keep a multi-gigabyte transcript file or a 100-million-row edge file responsive on a laptop, and datasets without an image render on a data-sized frame.
 
-```r
-# In R, after running NICHESv2:
-export_to_TissuePlex(
-  niches_object,
-  output.path = "/your/datasets/xenium_run_A/edges.parquet",
-  celltype.col = "Type.6"
-)
-```
+## Supported platforms
 
-Working examples of the full pipeline — exporting Seurat metadata, running NICHESv2, and exporting the parquet — are in [`r/`](r/). Those scripts have hardcoded paths and are meant to be read and adapted, not run as-is.
+| Platform | Vendor | Morphology | Transcripts | Segments | Edges |
+|---|---|:---:|:---:|:---:|:---:|
+| **Xenium** | 10x Genomics | ✓ | ✓ | ✓ | ✓ |
+| **Visium HD** | 10x Genomics | ✓ | — | ✓ (bins) | ✓ |
+| **Visium** | 10x Genomics | ✓ | — | ✓ (spots) | ✓ |
+| **MERSCOPE** | Vizgen | ✓ | ✓ | ✓ | ✓ |
+| **CosMx** | Bruker / NanoString | optional | ✓ | ✓ | ✓ |
+| **seqFISH** (Spatial Genomics GenePS) | Spatial Genomics | ✓ | ✓ | ✓ | ✓ |
 
-Then launch TissuePlex — the edge layer will appear automatically.
-
-The `edges.parquet` format is one row per **(directed edge) × (LRM)**. A→B and B→A are separate rows. Any additional columns in the file (cell types, scores, custom metadata) are automatically available as color-by options in the UI. See [docs/data_format.md](docs/data_format.md) for the full column specification.
-
----
-
-## Supplemental cell metadata
-
-To add custom annotation columns (clusters, pseudotime, leiden labels, etc.) to the cell color-by menu without modifying the original platform output:
-
-```
-dataset_folder/
-  experiment.xenium
-  cells.parquet
-  cell-metadata/          ← create this directory
-    clusters.csv          ← barcodes in first column (or cell_id column)
-    pseudotime.parquet
-```
-
-Standard R export works out of the box:
-
-```r
-write.csv(my_metadata, file.path(dataset_dir, "cell-metadata", "metadata.csv"))
-```
-
-Columns appear automatically in the **Cell Color** and **Cell Filter** dropdowns. Continuous columns get a gradient; string and low-cardinality integer columns get discrete colors. Use **treat as categorical** to override that guess either way — a Seurat cluster column with more than 30 levels still gets discrete colors, and a coded column you want as a gradient can have one.
-
-## Supplemental edge metadata
-
-The same idea for cell *pairs* — annotate edges without regenerating `edges.parquet` from R:
-
-```
-dataset_folder/
-  edges.parquet
-  edge-metadata/          ← create this directory
-    annotations.csv       ← key column `edge` = "SendingCell|ReceivingCell"
-```
-
-```r
-write.csv(annotations_df, file.path(dataset_dir, "edge-metadata", "annotations.csv"))
-```
-
-Columns appear automatically in the **edge color** dropdown, and show as an *Annotations* block when you click an edge. The folder sits beside the dataset rather than beside the edge file, so one set of annotations applies across every edge source — annotations describe cell pairs, which belong to the tissue rather than to one scoring run.
-
-`sample_data/mouse_ileum_tiny` ships worked examples of both `cell-metadata/` and `edge-metadata/`.
+The array platforms carry no per-molecule coordinates, so a Visium spot and a Visium HD bin are drawn as polygons and behave like cells everywhere else. Each reader declares what it can serve, and the interface hides the rest. The edge layer is platform-agnostic: it joins to any dataset whose cell barcodes match.
 
 ---
 
-## Development setup
+## Bringing your own analysis
+
+**Communication edges** come from NICHESv2. After scoring a spatial object in R, export it beside the dataset and the layer appears on the next launch:
+
+```r
+export_to_TissuePlex(niches_object, output.path = "/your/datasets/xenium_run_A/edges.parquet")
+```
+
+One ready-made script per platform is in [`r/`](r/), handling each platform's coordinate units; [`docs/data_format.md`](docs/data_format.md) specifies the file so any pipeline can produce one. Several edge sets can sit in an `edges/` folder and be switched from a menu.
+
+**Cell and edge annotations** need no export at all. `write.csv(df, "cell-metadata/clusters.csv")` from R, keyed on the cell barcode, adds columns to the colour and filter menus; `edge-metadata/`, keyed on `"Sender|Receiver"`, does the same for cell pairs. See the manual's [Enriching your data](https://raredonlab.github.io/TissuePlex/#step6).
+
+## Demo datasets
+
+| Folder | Platform | Source | How it ships |
+|---|---|---|---|
+| `mouse_ileum_tiny` | Xenium | 10x tiny example (36 cells), with annotation and multi-edge-set examples | in the repository |
+| `visium_hd_tiny` | Visium HD | subset of 10x "Tiny Mouse Brain", CC BY 4.0 | in the repository |
+| `visium_tiny` | Visium | synthetic slide | in the repository |
+| `seqfish_synthetic` | seqFISH | synthetic region | in the repository |
+| `xenium_human_breast_2fov` | Xenium | 10x human breast, 2 FOV, CC BY 4.0 | `fetch_samples.py` (290 MB) |
+| `visium_mouse_kidney` | Visium | 10x mouse kidney, CC BY 4.0 | `fetch_samples.py` (40 MB) |
+| `cosmx-mousebrain` | CosMx | Bruker mouse brain via the OSTA project, non-commercial licence | `fetch_samples.py` (60 MB) |
+
+Every fetched folder includes a `PROVENANCE.md` stating its source, licence and what was changed. [`docs/public_datasets.md`](docs/public_datasets.md) has the full inventory and further public data.
+
+---
+
+## Deployment
+
+TissuePlex runs as two containers and serves one browser or a whole lab. [`docs/setup.md`](docs/setup.md) covers a shared lab server; [`docs/cloud-deploy.md`](docs/cloud-deploy.md) is a step-by-step cloud runbook with automatic TLS. Access control is opt-in: enable Caddy's `basicauth` before exposing data to the internet.
+
+## Development
 
 ```bash
-# Backend (FastAPI + DuckDB)
-cd backend
-pip install -r requirements.txt
-DATA_ROOT=../sample_data uvicorn app.main:app --reload
-
-# Frontend (React + Vite) — in a separate terminal
-cd frontend
-npm install
-npm run dev   # → http://localhost:5173, proxies /api → :8000
+cd backend && pip install -r requirements.txt && DATA_ROOT=../sample_data uvicorn app.main:app --reload
+cd frontend && npm install && npm run dev        # http://localhost:5173, proxies /api → :8000
 ```
 
-The dev server uses port 5173 so it does not collide with `docker compose`, which binds 3000 for the production frontend.
+Tests: `npm test` in `frontend/`, and in `backend/` the reader regression guard `tests/golden_snapshot.py`, `tests/edge_pipeline_check.py`, `tests/no_image_check.py` and `tests/duckdb_config_check.py`.
 
-Tests, run them after any change (there is still no CI or linter):
-
-```bash
-cd frontend && npm test                               # vitest: store settings and annotations, export, list import, viewport filters, fade alpha, client log
-cd backend && python3 tests/golden_snapshot.py        # reader regression guard against a recorded baseline
-cd backend && python3 tests/edge_pipeline_check.py    # edge filter/sampling invariants, score-matrix equivalence
-cd backend && python3 tests/no_image_check.py         # every layer renders in the same place without an image
-cd backend && python3 tests/duckdb_config_check.py    # DUCKDB_MEMORY_LIMIT forms
-```
-
----
-
-## Architecture
-
-```
-Browser
-  OpenSeadragon   — pan/zoom over the OME-TIFF tile pyramid, or over a blank
-                    frame sized from the data when there is no image
-  deck.gl (WebGL) — all data layers; coordinate-synced to OSD
-
-FastAPI backend
-  /tiles    — OME-TIFF → DZI tile pyramid (pyvips / tifffile fallback)
-  /spatial  — transcripts, cell boundaries, cell metadata, gene expression
-  /edges    — edge query, LRM catalogue, per-edge color values, edge detail
-  /layers   — generic parquet layer serving
-```
-
-All data is served directly from parquet files via one shared DuckDB instance — no database setup or import step. Tile pyramids and spatial indexes are built on first access and cached; queries the browser abandons are cancelled on the server; everything slow or failed is written to a log file on the cache volume.
-
-### Adding a new platform
-
-1. Create `backend/app/readers/my_platform_reader.py` extending `SpatialDatasetReader`
-2. Implement the abstract methods (`cells`, `transcripts`, `cell_boundaries`, etc.)
-3. Override `capabilities()` to declare which layers the platform supports
-4. Register a detector in `reader_factory.py`
-
-The frontend automatically adapts its layer controls to the capabilities your reader declares.
-
----
-
-## Roadmap
-
-Tracked in [GitHub issues](https://github.com/RaredonLab/TissuePlex/issues).
-
-[#45](https://github.com/RaredonLab/TissuePlex/issues/45) (select by metadata) and [#35](https://github.com/RaredonLab/TissuePlex/issues/35) (treat-as-categorical toggle) are both implemented. Natural follow-ups, neither yet built:
-
-- Combining more than one *cell* filter at a time — edge-side filters already stack, but the cell filter is one column, so "cluster 4 *and* sample B" needs two passes
-- Persisting the categorical choice and the palette across reloads
-- Filtering transcripts, which needs a transcript→cell assignment that several platforms do not ship
-
-Large datasets are handled by a spatial index built automatically on first access, alongside the tile pyramid: transcript, boundary and edge files over 64 MB are rewritten sorted by a spatial grid, which makes viewport queries roughly 27× faster on a 40M-row transcript file and 13× on a 33M-row edge file, and also converts seqFISH CSV to parquet along the way. Edge files additionally get a 10% density tier for whole-tissue views. Set `SPATIAL_CACHE=0` to disable it.
+The stack is a FastAPI backend querying parquet through DuckDB, with OpenSeadragon for the image pyramid and deck.gl for every data layer in the browser. [`CLAUDE.md`](CLAUDE.md) is the full technical brief: architecture, reader interface, data model, and the design decisions behind each subsystem.
 
 ---
 
 ## Licence
 
-TissuePlex is **dual-licensed**.
+TissuePlex is dual-licensed.
 
-- **Open source: [GNU Affero General Public License v3.0](LICENSE).** Use it, modify it and share it freely. If you distribute a modified version, or let others use a modified version over a network, the AGPL requires you to make your modified source available under the same terms. Academic and non-profit use is unaffected by this in practice.
-- **Commercial licence.** If you want to use TissuePlex, or code derived from it, in a product or service without the AGPL's source-sharing obligations, contact the Raredon Lab for a commercial licence.
+- **Open source** under the [GNU Affero General Public License v3.0](LICENSE). Use, modify and share it freely; if you distribute a modified version or offer it over a network, the AGPL requires that your modified source be made available under the same terms. Academic and non-profit use is unaffected in practice.
+- **Commercial licence** for use in products or services without the AGPL's source-sharing obligations: contact the Raredon Lab.
 
-The demo datasets are not covered by either licence: each carries its own terms in its `PROVENANCE.md` (10x data under CC BY 4.0; the CosMx set under Bruker's non-commercial data licence).
+The demo datasets carry their own terms, stated in each dataset's `PROVENANCE.md`.
 
 ## Citation
 
-If you use TissuePlex in published work, please cite: *(preprint / paper link — coming soon)*
+If you use TissuePlex in published work, please cite: *(preprint / paper link to follow)*
