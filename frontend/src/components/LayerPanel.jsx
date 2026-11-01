@@ -843,7 +843,10 @@ function EndpointFilterSection() {
 }
 
 function EdgeFilterSection() {
-  const { apiBase, edgeFilter, setEdgeFilter, categoricalOverrides } = usePanelSettings();
+  // The store keeps edge-table filters as a list (`edgeFilters`, and-ed); this
+  // section exposes the first slot. It used to read `edgeFilter` /
+  // `setEdgeFilter`, neither of which exists, so choosing a column threw.
+  const { apiBase, edgeFilters, setEdgeFilterAt, categoricalOverrides } = usePanelSettings();
   const active = useActivePanels();
   const [columns, setColumns] = useState([]);
   const sources = active.filter((p) => p.dataset)
@@ -876,7 +879,8 @@ function EdgeFilterSection() {
   if (!columns.length) return null;
   return (
     <MetadataFilterSection
-      scope="edge" columns={columns} filter={edgeFilter} setFilter={setEdgeFilter}
+      scope="edge" columns={columns} filter={edgeFilters?.[0] ?? null}
+      setFilter={(f) => setEdgeFilterAt(0, f)}
       fetchValues={fetchValues} unitLabel="edge"
     />
   );
@@ -1653,7 +1657,6 @@ function EdgeSection() {
   const {
     apiBase,
     layers, setLayerProp,
-    edgeMinStrength, setEdgeMinStrength,
     edgeColorBy, setEdgeColorBy,
     edgeColorPalette, setEdgeColorPalette,
     edgeDirectional, setEdgeDirectional,
@@ -1671,8 +1674,6 @@ function EdgeSection() {
   } = usePanelSettings();
   const active = useActivePanels();
   const state = layers.edges ?? { visible: true, opacity: 0.9 };
-  const [localStrength, setLocalStrength] = useState(edgeMinStrength ?? 0);
-  const commitTimer = useRef(null);
   const [lrmSearch, setLrmSearch] = useState("");
 
   // The edge-file picker lives in each panel's header now, beside its dataset —
@@ -1721,13 +1722,6 @@ function EdgeSection() {
 
   // Legend range from panel 0; the colour scale is shared across panels.
   const edgeColorRange = useStore((s) => s.panels[0].edgeColorRange);
-
-  const handleStrength = (e) => {
-    const v = parseFloat(e.target.value);
-    setLocalStrength(v);
-    clearTimeout(commitTimer.current);
-    commitTimer.current = setTimeout(() => setEdgeMinStrength(v), 300);
-  };
 
   const metaCols = edgeColumns;
 
@@ -1885,17 +1879,6 @@ function EdgeSection() {
               </div>
             </div>
           )}
-
-          {/* Strength filter */}
-          <div style={{ fontSize: 10, color: "#555", marginBottom: 2 }}>
-            min strength: {localStrength.toFixed(2)}
-          </div>
-          <input
-            type="range" min={0} max={4} step={0.05}
-            value={localStrength}
-            onChange={handleStrength}
-            style={{ width: "100%", accentColor: "#f90", cursor: "pointer", marginBottom: 8 }}
-          />
 
           {/* ── Edge Color ──────────────────────────────────────────────── */}
           <div style={{ fontSize: 10, color: "#555", marginBottom: 3 }}>edge color</div>

@@ -8,6 +8,8 @@ An interactive spatial transcriptomics viewer for exploring cell-cell communicat
 
 📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** — step-by-step setup and a reference for every control in the interface. No programming experience assumed.
 
+🔬 **[Worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html)** — seven short, screenshot-led tours on the demo datasets: where the signalling is, one cell's neighbourhood, your own annotations, spots and bins, platforms without an image, side-by-side comparison, and figures for a paper.
+
 ---
 
 ## What's new in v0.9.1
@@ -43,12 +45,15 @@ Spatial transcriptomics platforms (Xenium, seqFISH, Visium, Visium HD, MERSCOPE,
 - **Cross-platform metadata** — the `cell-metadata/` convention works the same way on every platform that supports it, so annotation workflows transfer between Xenium and seqFISH unchanged
 - **Split-screen comparison** — two independently navigable panels sharing one set of layer controls, with a match-zoom button
 - **Per-panel rotation** — rotate either panel to any angle to align tissue orientation
-- **Transcript dot overlay** — per-gene colored dots, filterable by gene species, with hover tooltips
+- **Transcript dot overlay** — per-gene colored dots with hover tooltips, filterable by gene species; on Xenium, low-quality transcripts (Q-score < 20) are hidden by default, as in Xenium Explorer
+- **Gene and mechanism lists** — import a CSV of genes or ligand-receptor pairs to set the transcript filter or the active mechanisms in one step (Xenium Explorer's gene-group format works unchanged), and export the current selection
 - **Cell/spot segmentation** — polygon boundaries with color-by-gene-set or color-by-metadata, and editable per-category colors
 - **Autocrine signalling** — self-signalling drawn as a ring per cell, colored by the same scale as the directed edges and obeying the same mechanism filter
 - **Metadata filtering** — restrict the view to a subset of cells or edges (a sample, a few cell types, a value range). Applied server-side before sampling, so a rare cluster renders at full density instead of being sampled away
 - **Treat-as-categorical toggle** — integer-coded cluster IDs get a discrete editable palette rather than a viridis gradient, with the numeric order preserved in the legend
-- **Region drawing and measurement tools** — annotate areas, export cell selections, save PNG screenshots
+- **Local neighbourhood summary** — click a cell to see every cell it is connected to, the enclosing radius, the composition by any metadata column, and the top mechanisms over its edges
+- **Region drawing and measurement tools** — annotate areas, measure distances in microns, export the cells inside a region as CSV
+- **Publication figures** — frame a region and export it at any pixel size with a DPI tag and scale bar, or save a quick PNG of the panel
 - **Supplemental metadata** — drop any CSV or parquet into a `cell-metadata/` folder to add custom color-by columns (clusters, pseudotime, etc.) without touching the original data
 - **Multi-dataset support** — switch between datasets without restarting; each is auto-detected by platform
 - **Works without an image** — a dataset with no morphology or DAPI draws its cells, transcripts and edges on a frame sized from the data; the image is one optional layer among the others
@@ -64,9 +69,9 @@ Spatial transcriptomics platforms (Xenium, seqFISH, Visium, Visium HD, MERSCOPE,
 | **Visium HD** | 10x Genomics | ✓ | — | ✓ (bins) | ✓ |
 | **Visium** | 10x Genomics | ✓ | — | ✓ (spots) | ✓ |
 | **MERSCOPE** | Vizgen | ✓ | ✓ | ✓ | ✓ |
-| **CosMx** | Nanostring | placeholder | ✓ | ✓ | ✓ |
+| **CosMx** | Bruker / NanoString | — (drawn on a data-sized frame) | ✓ | ✓ | ✓ |
 
-All nine bundled demo datasets ship `edges.parquet` and an `edge-metadata/` folder, so the connectivity layer and the annotation workflow have something to show on every platform. Two caveats worth knowing: the MERSCOPE panel carries only **2** complete ligand-receptor pairs and the seqFISH reference panel **none**, because targeted panels are chosen for cell typing rather than signalling — `check_lr_coverage()` reports this before NICHESv2 runs, and `seqfish_instrument2` therefore uses synthetic edges from `make_edges.py`. The `edge-metadata/` folders are generated demo annotations, not analysis output; each carries a README saying which columns are derived and which is invented.
+Every demo dataset (see *Demo datasets* below) ships `edges.parquet` and an `edge-metadata/` folder, so the connectivity layer and the annotation workflow have something to show on every platform. One caveat worth knowing: targeted panels are chosen for cell typing rather than signalling, so a small panel may carry few or no complete ligand-receptor pairs — `check_lr_coverage()` reports this before NICHESv2 runs. The `edge-metadata/` folders are generated demo annotations, not analysis output; each carries a README saying which columns are derived and which is invented.
 
 seqFISH means the commercial **Spatial Genomics GenePS** output, not the academic seqFISH/seqFISH+ method, which has no standard file layout; the current v2 layout is fully supported, and legacy v1 reads cells and transcripts but not boundaries.
 
@@ -88,7 +93,33 @@ cd TissuePlex
 docker compose up --build
 ```
 
-Open **http://localhost:3000**.
+Open **http://localhost:3000**. The sidebar's dataset menu lists the four demo datasets that come with the clone; the viewer opens on `mouse_ileum_tiny`.
+
+### Demo datasets
+
+Four small datasets are committed to the repository and work straight after `git clone`:
+
+| Folder | Platform | What it is | Size |
+|---|---|---|---|
+| `mouse_ileum_tiny` | Xenium | 10x's "Xenium Prime Mouse Ileum tiny" crop (36 cells) with worked `cell-metadata/`, `edge-metadata/` and multi-edge-set examples | 1.6 MB |
+| `visium_hd_tiny` | Visium HD | A subset of 10x's "Visium HD Tiny Mouse Brain" (real Space Ranger 4.0.1 output, 8 and 16 µm bins), CC BY 4.0 | 26 MB |
+| `visium_tiny` | Visium | Synthetic classic Visium slide from `make_visium.py` (252 spots), built to catch coordinate-scaling bugs | 0.9 MB |
+| `seqfish_synthetic` | seqFISH | Synthetic Spatial Genomics GenePS v2 ROI from `make_seqfish.py` (36 cells) | 0.8 MB |
+
+Three larger **real** datasets are too big for git and are published as release assets instead. One command fetches them into `sample_data/`, verifies their checksums, and unpacks them; restart `docker compose` afterwards and they appear in the dataset menu:
+
+```bash
+python3 sample_data/fetch_samples.py          # all three (~390 MB)
+python3 sample_data/fetch_samples.py --list   # or pick with --only <name>
+```
+
+| Folder | Platform | What it is | Licence | Download |
+|---|---|---|---|---|
+| `xenium_human_breast_2fov` | Xenium | 10x's "Human Breast 2 FOV" example run (7,275 cells, full DAPI morphology, 32 scored mechanisms) | CC BY 4.0 | ~290 MB |
+| `visium_mouse_kidney` | Visium | 10x's "Mouse Kidney: Coronal Section" (1,438 spots in tissue; 2,479 mechanisms) | CC BY 4.0 | ~40 MB |
+| `cosmx-mousebrain` | CosMx | Bruker/NanoString 1000-plex mouse brain, via the OSTA project's OSF archive (38,996 cells, no image) | Bruker non-commercial data licence (included) | ~60 MB |
+
+Each unpacked folder carries a `PROVENANCE.md` naming its source, licence and exactly what was trimmed or added. No MERSCOPE dataset is distributed: the Vizgen example set the reader was developed against has no redistribution grant, so a MERSCOPE run has to be your own (`docs/public_datasets.md` lists sources). `sample_data/example_lists/` holds gene and mechanism CSVs for the sidebar's **import** buttons.
 
 ### Your own data
 
@@ -146,7 +177,7 @@ DATA_PATH=/absolute/path/to/your/datasets docker compose up --build
     edges.parquet
 ```
 
-If `edges.parquet` is absent the edge layers are hidden — all other layers work normally. When a dataset has more than one edge source, a dropdown appears at the top of the Edge Data section; the selection applies to every open panel.
+If `edges.parquet` is absent the edge layers are hidden — all other layers work normally. When a dataset has more than one edge source, a dropdown appears at the top of the Edge Data section (in split-screen mode, in each panel's header), and the two panels can show two different edge sources side by side.
 
 The first launch builds DZI tile pyramids from OME-TIFF morphology images. This takes ~30 seconds per dataset and is cached across restarts.
 
@@ -238,7 +269,7 @@ The dev server uses port 5173 so it does not collide with `docker compose`, whic
 Tests, run them after any change (there is still no CI or linter):
 
 ```bash
-cd frontend && npm test                               # vitest: store, export, list import, viewport filters
+cd frontend && npm test                               # vitest: store settings and annotations, export, list import, viewport filters, fade alpha, client log
 cd backend && python3 tests/golden_snapshot.py        # reader regression guard against a recorded baseline
 cd backend && python3 tests/edge_pipeline_check.py    # edge filter/sampling invariants, score-matrix equivalence
 cd backend && python3 tests/no_image_check.py         # every layer renders in the same place without an image
@@ -281,7 +312,7 @@ Tracked in [GitHub issues](https://github.com/RaredonLab/TissuePlex/issues).
 
 [#45](https://github.com/RaredonLab/TissuePlex/issues/45) (select by metadata) and [#35](https://github.com/RaredonLab/TissuePlex/issues/35) (treat-as-categorical toggle) are both implemented. Natural follow-ups, neither yet built:
 
-- Combining more than one filter at a time — today it is one column, so "cluster 4 *and* sample B" needs two passes
+- Combining more than one *cell* filter at a time — edge-side filters already stack, but the cell filter is one column, so "cluster 4 *and* sample B" needs two passes
 - Persisting the categorical choice and the palette across reloads
 - Filtering transcripts, which needs a transcript→cell assignment that several platforms do not ship
 

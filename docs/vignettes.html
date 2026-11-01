@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TissuePlex Worked Examples</title>
+  <meta name="description" content="Seven short, screenshot-led walkthroughs of TissuePlex on the demo datasets that ship with the repository: cell–cell signalling on Xenium, custom annotations, Visium spots and Visium HD bins, platforms without an image, side-by-side comparison, and publication figures.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy: #1e2d47; --navy-dark: #131f33; --blue: #2563eb; --blue-light: #dbeafe;
+      --teal: #0d9488; --teal-light: #ccfbf1; --amber: #92400e; --amber-bg: #fef3c7;
+      --note-blue: #1e40af; --note-bg: #eff6ff; --sidebar-w: 270px; --content-max: 900px; --radius: 8px;
+      --ink: #1e293b; --muted: #64748b; --bg: #f8fafc; --panel: #ffffff; --line: #e2e8f0;
+    }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+           line-height: 1.7; color: var(--ink); background: var(--bg); }
+    #sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar-w); background: var(--navy);
+               color: #cbd5e1; padding: 28px 0 40px; overflow-y: auto; }
+    #sidebar .brand { padding: 0 22px 18px; color: #fff; font-weight: 700; font-size: 1.15rem; }
+    #sidebar .brand small { display: block; color: #94a3b8; font-weight: 400; font-size: .8rem; margin-top: 2px; }
+    #sidebar .toc-label { padding: 14px 22px 6px; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; }
+    #sidebar a { display: block; padding: 7px 22px; color: #cbd5e1; text-decoration: none; font-size: .9rem; border-left: 3px solid transparent; }
+    #sidebar a:hover { background: var(--navy-dark); color: #fff; }
+    #sidebar a.ext { color: #93c5fd; }
+    #content { margin-left: var(--sidebar-w); padding: 40px 48px 80px; }
+    .content-inner { max-width: var(--content-max); }
+    .hero { background: linear-gradient(135deg, var(--navy) 0%, #24406a 100%); color: #fff; border-radius: 12px; padding: 36px 40px; margin-bottom: 36px; }
+    .hero h1 { font-size: 2rem; margin-bottom: 6px; }
+    .hero .sub { color: #bfdbfe; font-size: 1rem; margin-bottom: 14px; }
+    .hero p { color: #e2e8f0; max-width: 60ch; }
+    .hero a { color: #93c5fd; }
+    h2 { font-size: 1.55rem; margin: 48px 0 6px; color: var(--navy); scroll-margin-top: 24px; }
+    h2 .num { display: inline-block; background: var(--teal); color: #fff; border-radius: 6px; font-size: .85rem; padding: 1px 9px; margin-right: 10px; vertical-align: middle; }
+    .meta { color: var(--muted); font-size: .9rem; margin-bottom: 16px; }
+    .meta code { background: #e2e8f0; padding: 1px 6px; border-radius: 4px; font-size: .85rem; }
+    h3 { font-size: 1.05rem; margin: 22px 0 8px; color: var(--navy); }
+    p, li { max-width: 72ch; }
+    p { margin-bottom: 12px; }
+    ol, ul { margin: 0 0 14px 24px; }
+    li { margin-bottom: 6px; }
+    .ui { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; background: var(--blue-light); color: #1e3a8a; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; background: #e2e8f0; padding: 1px 5px; border-radius: 4px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: var(--radius); overflow-x: auto; margin: 10px 0 16px; font-size: .85rem; }
+    pre code { background: none; color: inherit; padding: 0; }
+    figure { margin: 18px 0 22px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; }
+    figure img { display: block; width: 100%; height: auto; border-radius: 4px; background: #111; }
+    figure.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    figure.pair figcaption { grid-column: 1 / -1; }
+    figcaption { font-size: .85rem; color: var(--muted); padding: 8px 4px 2px; }
+    .callout { border-radius: var(--radius); padding: 14px 18px; margin: 16px 0; }
+    .note { background: var(--note-bg); border-left: 4px solid var(--note-blue); }
+    .tip  { background: var(--teal-light); border-left: 4px solid var(--teal); }
+    .warn { background: var(--amber-bg); border-left: 4px solid var(--amber); }
+    .callout strong.label { display: block; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 18px 0 8px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+    .card h4 { font-size: .95rem; color: var(--navy); margin-bottom: 4px; }
+    .card p { font-size: .88rem; color: var(--muted); margin: 0; }
+    .card a { color: var(--blue); text-decoration: none; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: .9rem; }
+    th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+    footer { margin-top: 60px; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 16px; }
+    a { color: var(--blue); }
+    #menu-btn { display: none; }
+    @media (max-width: 900px) {
+      #sidebar { display: none; }
+      #content { margin-left: 0; padding: 20px 16px 60px; }
+      .hero { padding: 24px 20px; }
+      figure.pair { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="brand">TissuePlex<small>Worked examples</small></div>
+  <div class="toc-label">Start here</div>
+  <a href="#about">About these examples</a>
+  <a href="#datasets">The demo datasets</a>
+  <div class="toc-label">Examples</div>
+  <a href="#ex1">1 · Where is the signalling?</a>
+  <a href="#ex2">2 · One cell's neighbourhood</a>
+  <a href="#ex3">3 · Your own annotations</a>
+  <a href="#ex4">4 · Spots and bins (Visium)</a>
+  <a href="#ex5">5 · With and without an image</a>
+  <a href="#ex6">6 · Side by side</a>
+  <a href="#ex7">7 · A figure for the paper</a>
+  <div class="toc-label">Elsewhere</div>
+  <a class="ext" href="index.html">User manual</a>
+  <a class="ext" href="https://github.com/RaredonLab/TissuePlex">GitHub repository</a>
+</nav>
+
+<main id="content">
+<div class="content-inner">
+
+<div class="hero" id="about">
+  <h1>Worked examples</h1>
+  <div class="sub">Seven short tours of TissuePlex on the data that ships with it</div>
+  <p>Each example takes a few minutes, uses one of the demo datasets, and names every
+  control exactly as it appears in the sidebar. They are written so that someone who
+  has never used a spatial transcriptomics viewer can follow them and see what the
+  tool is for. The <a href="index.html">user manual</a> explains each control in
+  full; this page shows why you would reach for it.</p>
+</div>
+
+<p>Every screenshot on this page was taken from the viewer itself, on the dataset the
+example names, with the settings the example gives. Nothing was drawn afterwards.</p>
+
+<h2 id="datasets">The demo datasets</h2>
+<p>Four small datasets come with the repository and appear in the
+<span class="ui">Dataset</span> menu as soon as the viewer opens. Three larger, real
+datasets are published as release assets; one command fetches them:</p>
+<pre><code>python3 sample_data/fetch_samples.py</code></pre>
+<table>
+  <tr><th>Menu entry</th><th>Platform</th><th>What it is</th><th>Used in</th></tr>
+  <tr><td><code>mouse_ileum_tiny</code></td><td>Xenium</td><td>Three 640-px patches of mouse ileum (36 cells) from 10x's tiny example run, with example <code>cell-metadata/</code>, <code>edge-metadata/</code> and two extra edge sets. In the clone.</td><td>3</td></tr>
+  <tr><td><code>visium_hd_tiny</code></td><td>Visium HD</td><td>A corner of 10x's "Tiny Mouse Brain" Space Ranger output, 8 µm and 16 µm bins. In the clone.</td><td>4</td></tr>
+  <tr><td><code>visium_tiny</code></td><td>Visium</td><td>Synthetic classic Visium slide, 252 spots. In the clone.</td><td>—</td></tr>
+  <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells. In the clone.</td><td>5</td></tr>
+  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 2, 6, 7</td></tr>
+  <tr><td><code>visium_mouse_kidney</code></td><td>Visium</td><td>10x's mouse kidney coronal section, 1,438 spots on tissue, NICHESv2 spot–spot edges. Fetched.</td><td>4</td></tr>
+  <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>5</td></tr>
+</table>
+<div class="callout note"><strong class="label">Three layers start switched off</strong>
+<p>When the viewer opens, <span class="ui">Morphology</span>, <span class="ui">Transcripts</span>
+and <span class="ui">Edges</span> are unticked, so you see cell outlines on a dark
+canvas. Every example below starts by ticking what it needs.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex1"><span class="num">1</span>Where is the signalling?</h2>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 5 minutes · the core use case</p>
+<p>NICHESv2 scores every neighbouring pair of cells for every ligand–receptor
+mechanism it can see in the panel. TissuePlex draws those scores as lines between the
+cells, on the tissue image, so you can ask the simplest question first: where in this
+tissue is the strongest signalling, and between which cells?</p>
+<ol>
+  <li>Choose <span class="ui">xenium_human_breast_2fov</span> in the <span class="ui">Dataset</span> menu. The first open builds the image tiles; allow about 15 seconds.</li>
+  <li>Tick <span class="ui">Morphology</span> and drag its opacity down to about 45%, so the DAPI image sits behind the data rather than in front of it.</li>
+  <li>Under <strong>Edge Data</strong>, tick <span class="ui">Edges</span>. Raise its opacity to 90% and <span class="ui">width</span> to 3.</li>
+  <li>Leave <span class="ui">edge color</span> on <span class="ui">LRM Set (selected mechanisms)</span>: each line is coloured by the summed score of the mechanisms that are ticked in the <strong>LRM Mechanisms</strong> list below it, yellow for the strongest.</li>
+  <li>Zoom in with the mouse wheel until single cells are clear.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/xenium_edges_lrmset.jpg" alt="Xenium breast tissue with DAPI in grey and NICHESv2 edges drawn as viridis-coloured lines between neighbouring cells">
+  <figcaption>Breast tissue, two fields of view. Grey: DAPI. Lines: directed cell–cell edges, coloured by LRM-set score (purple low, yellow high). The faint grey mesh behind them is the <span class="ui">Tissue Graph</span>, every neighbouring pair whether or not it scored.</figcaption>
+</figure>
+<h3>What to notice</h3>
+<ul>
+  <li>Edges are <em>directed</em>. With <span class="ui">Directional</span> on and <span class="ui">offset</span> raised, A→B and B→A separate into two parallel lines with harpoon arrowheads, like a chemistry equilibrium arrow.</li>
+  <li>Untick a mechanism in <strong>LRM Mechanisms</strong> and the colours update at once; the lines that only carried that mechanism disappear. Tick <span class="ui">none</span>, then one mechanism, to see where a single ligand–receptor pair is active.</li>
+  <li>Hold <kbd>Shift</kbd> and click a line. A floating <strong>EDGE</strong> panel lists the sending and receiving cell, every mechanism scored on that pair with its share of the total, and any annotations from <code>edge-metadata/</code>.</li>
+</ul>
+<figure>
+  <img src="img/vignettes/xenium_edge_info_pane.jpg" alt="The viewer with an edge selected; a floating panel lists sending cell, receiving cell, annotations and the scored mechanisms with their percentages">
+  <figcaption>Shift-click on an edge. The panel reads sending cell (Endothelial) → receiving cell (Smooth_Muscle), the demo annotations, then Fgf2→Fgfr1, Efnb1→Ephb4 and Vegfa→Flt1 with their scores.</figcaption>
+</figure>
+<div class="callout tip"><strong class="label">Try next</strong>
+<p>Open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to a cell-type column. Only edges leaving that cell type remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex2"><span class="num">2</span>One cell's neighbourhood</h2>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 2 minutes · continues from example 1</p>
+<p>The edge layer answers "where"; the neighbourhood view answers "who". Click any cell
+and TissuePlex can show every cell it exchanges signal with, how far they reach, and
+which mechanisms dominate across those edges.</p>
+<ol>
+  <li>Click a cell (a plain click, no <kbd>Shift</kbd>). The <strong>Cell Info</strong> block at the foot of the sidebar fills with its id, position, counts, area and the expression of every gene in the panel.</li>
+  <li>Click <span class="ui">show local neighbourhood</span> at the bottom of that block.</li>
+</ol>
+<figure class="pair">
+  <img src="img/vignettes/xenium_neighbourhood.jpg" alt="Zoomed view with one cell drawn in white, its connected neighbours in amber and an amber circle enclosing them">
+  <img src="img/vignettes/xenium_neighbourhood_pane.jpg" alt="The sidebar's Cell Info block listing gene expression, neighbour count and local edges for the selected cell">
+  <figcaption>Left: the selected cell in white, its connected neighbours in amber, and the enclosing radius in microns. Right: the Cell Info block with expression and the neighbourhood summary. The amber points are the honest answer: a cell at a tissue edge has neighbours on one side only, and the circle contains cells it is not connected to.</figcaption>
+</figure>
+<div class="callout note"><strong class="label">Why the numbers do not change when you pan</strong>
+<p>The neighbourhood is computed from the whole edge file on the server, not from the lines currently drawn, which are a sample of the edges in view. So the count is complete, and it is the same wherever you have scrolled to.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex3"><span class="num">3</span>Your own annotations, without touching the data</h2>
+<p class="meta">Dataset <code>mouse_ileum_tiny</code> · 3 minutes · in the clone</p>
+<p>Most analysis happens in R or Python after the instrument has finished. TissuePlex
+reads that work from two plain folders dropped beside the dataset, so clusters,
+scores or review flags appear in the viewer without regenerating anything:</p>
+<ul>
+  <li><code>cell-metadata/</code>, one row per cell, keyed on the cell barcode. <code>write.csv(df, "cell-metadata/clusters.csv")</code> from R works as is.</li>
+  <li><code>edge-metadata/</code>, one row per cell pair, keyed on <code>"Sender|Receiver"</code>.</li>
+</ul>
+<p>The demo dataset ships both. Its <code>cell-metadata/example_clusters.csv</code> has a <code>seurat_clusters</code> column with twelve integer levels, chosen on purpose: integers are the common case for cluster ids and the awkward one for a viewer.</p>
+<ol>
+  <li>Choose <span class="ui">mouse_ileum_tiny</span>. Tick <span class="ui">Morphology</span>.</li>
+  <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose <span class="ui">Cell metadata</span>, then <span class="ui">seurat_clusters</span>.</li>
+  <li>The legend lists clusters 0 to 11 in numeric order with a swatch each; click a swatch to change its colour, or <span class="ui">import palette</span> to load a <code>category,#hex</code> file.</li>
+</ol>
+<figure class="pair">
+  <img src="img/vignettes/ileum_clusters.jpg" alt="A 640-pixel patch of mouse ileum with each cell polygon filled in the colour of its Seurat cluster">
+  <img src="img/vignettes/ileum_legend_pane.jpg" alt="The sidebar's Cell Color section showing Cell metadata, seurat_clusters, the treat as categorical checkbox and a twelve-entry colour legend">
+  <figcaption>Cells filled by <code>seurat_clusters</code> from a CSV in <code>cell-metadata/</code>. The viewer recognised twelve integer levels as categories rather than a 0–11 gradient; <span class="ui">treat as categorical</span> is there to override that call either way.</figcaption>
+</figure>
+<h3>What to notice</h3>
+<ul>
+  <li>Cluster 10 sorts after cluster 9, not between 1 and 2. Columns whose labels all parse as numbers are ordered numerically.</li>
+  <li>The same column is offered under <strong>Cell Filter</strong>. Choose it there and untick all but one cluster: the remaining cells are drawn at full density, because the filter is applied on the server before sampling.</li>
+  <li>Shift-click an edge: the <strong>Annotations</strong> block in the edge panel comes from <code>edge-metadata/example_annotations.csv</code>. Its README says which columns are derived from the edge file and which one is invented.</li>
+</ul>
+<div class="callout tip"><strong class="label">Try next</strong>
+<p>This dataset also has three edge sets. The <span class="ui">Edge source</span> menu at the top of the sidebar switches between <code>edges</code>, <code>edge.raw.minimum</code> and <code>edge.normalized.product</code>, each a different scoring of the same tissue.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex4"><span class="num">4</span>Spots and bins: the array platforms</h2>
+<p class="meta">Datasets <code>visium_mouse_kidney</code> (fetched) and <code>visium_hd_tiny</code> (in the clone) · 3 minutes</p>
+<p>Classic Visium measures 55 µm spots on a 100 µm lattice, each covering one to ten
+cells; Visium HD tiles the capture area with 2, 8 or 16 µm square bins. Neither has
+per-molecule coordinates. TissuePlex draws a polygon per unit, a 16-sided circle for a
+spot and a square for a bin, so colouring, clicking, filtering and NICHESv2 edges all
+work exactly as they do for cells. The sidebar relabels itself: <strong>Spot Segments</strong>
+and <strong>Spot Info</strong> on Visium, <strong>Bin Segments</strong> on HD.</p>
+<ol>
+  <li>Choose <span class="ui">visium_mouse_kidney</span>; tick <span class="ui">Morphology</span> and <span class="ui">Edges</span>.</li>
+  <li>Spots are drawn at their detected ~65 µm footprint, as Loupe and scanpy draw them. Use <span class="ui">⟷ Measure</span> between two spot centres: the label reads 100 µm, the lattice pitch, which is how the pixel size of this platform is derived.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/visium_kidney.jpg" alt="A coronal mouse kidney section with Visium spots drawn as circles over the H&E image and NICHESv2 spot-to-spot edges between neighbouring spots">
+  <figcaption>Mouse kidney, classic Visium. Each circle is a spot; the lines are spot–spot NICHESv2 edges. Top mechanisms in this dataset include Apoe→Lrp2 and Cst3→Lrp2, megalin-mediated uptake in the proximal tubule.</figcaption>
+</figure>
+<ol start="3">
+  <li>Choose <span class="ui">visium_hd_tiny</span>. The tissue sits in one corner of the frame, because 10x's "tiny" dataset is a corner crop; zoom into it.</li>
+  <li>The bins follow the edge file: this dataset was scored at 16 µm, so 16 µm bins are shown. (Barcodes are bin-size specific; showing 8 µm bins under 16 µm edges would leave nothing to click.)</li>
+</ol>
+<figure>
+  <img src="img/vignettes/visium_hd.jpg" alt="Visium HD bins drawn as a grid of small squares over the tissue image, with edges between neighbouring bins">
+  <figcaption>Visium HD, 16 µm bins over the hires image. Expression here is very shallow (32,000 UMIs over the whole corner), so gene-set colouring looks sparse; that is the data, not the viewer.</figcaption>
+</figure>
+<div class="callout warn"><strong class="label">A spot is a neighbourhood, not a cell</strong>
+<p>Edges on classic Visium connect spots, each a mix of one to ten cells. Say so in a figure legend. The HD bins are closer to single cells but still a grid, not a segmentation.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex5"><span class="num">5</span>With and without an image</h2>
+<p class="meta">Datasets <code>seqfish_synthetic</code> (in the clone) and <code>cosmx-mousebrain</code> (fetched) · 3 minutes</p>
+<p>The morphology image is one optional layer. Every data layer is drawn in a shared
+coordinate frame sized from the data itself, so a dataset with no DAPI, or whose TIFF
+cannot be opened, still shows its cells, transcripts and edges where they belong.</p>
+<ol>
+  <li>Choose <span class="ui">seqfish_synthetic</span>. Tick <span class="ui">Transcripts</span> and raise <span class="ui">Cell Segments → outline</span> to 100%. Hover a dot: the tooltip names the gene.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/seqfish_synthetic.jpg" alt="Cell outline polygons with coloured transcript dots inside them on a synthetic seqFISH region">
+  <figcaption>Spatial Genomics GenePS layout. Cell outlines come from the GeoJSON boundaries file (in pixels) and the transcript dots from the transcript list (in microns); the reader detects each table's units separately, which is why both land on the same cells.</figcaption>
+</figure>
+<ol start="2">
+  <li>Choose <span class="ui">cosmx-mousebrain</span>. There is no <span class="ui">Morphology</span> row, because the dataset has no image; the cells draw on a frame sized from their extent.</li>
+  <li>Tick <span class="ui">Edges</span>. The edge file here has 3.8 million rows; panning stays responsive because only the edges under the viewport are read, and the whole-tissue view reads a pre-sampled tier.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/cosmx_noimage.jpg" alt="A mouse brain section drawn as cell polygons and edges on a dark frame with no underlying image">
+  <figcaption>CosMx mouse brain, 38,996 cells, no image. The polygons come from the platform's <code>polygons.csv</code>; the edges from NICHESv2.</figcaption>
+</figure>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex6"><span class="num">6</span>Side by side</h2>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 3 minutes</p>
+<p>A comparison is only fair if both halves are drawn the same way. Split mode gives
+two panels driven by one sidebar: the same opacity, palette, colour range and
+mechanism selection on both sides, with the freedom to show two edge sets, two images,
+or two datasets.</p>
+<ol>
+  <li>Click <span class="ui">⊞ Split</span> in the toolbar of the left panel.</li>
+  <li>Each panel now has its own <span class="ui">Dataset</span>, <span class="ui">Image</span> and <span class="ui">Edge source</span> menus at its bottom-left. Set the right panel's edge source to <span class="ui">niches_rad30</span>, a run of the same tissue scored with a 30 µm neighbourhood radius, and leave the left on <span class="ui">edges</span>.</li>
+  <li>Click <span class="ui">⇔ Match</span> on one panel to give the other the same physical scale: the same number of microns across, which is what a scale bar would check.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/split_pane.jpg" alt="Two viewer panels side by side showing the same breast tissue with two different NICHESv2 edge sets">
+  <figcaption>Left: <code>edges</code>. Right: <code>niches_rad30</code>. One sidebar, one colour scale (<span class="ui">shared colour scale across panels</span> is on by default), so a yellow line means the same score in both.</figcaption>
+</figure>
+<div class="callout note"><strong class="label">Unlinking</strong>
+<p>Untick <span class="ui">settings linked — edits apply to both panels</span> to style one side independently, and use <span class="ui">copy panel 1 → panel 2</span> to push one side's settings to the other in one step.</p></div>
+
+<!-- ─────────────────────────────────────────────────────────────── -->
+<h2 id="ex7"><span class="num">7</span>A figure for the paper</h2>
+<p class="meta">Any dataset · 3 minutes</p>
+<p>A screenshot is limited to the pixels on your screen. <span class="ui">Export…</span>
+redraws the data layers at whatever size you ask for, because they are geometry rather
+than pixels, and writes the DPI you choose into the file so a journal's resolution check
+reads it.</p>
+<ol>
+  <li>Choose <span class="ui">▭ Rectangle</span> and drag over the region you want. The rectangle stays on the tissue while you pan.</li>
+  <li>Click <span class="ui">Export…</span>. Pick a preset, <span class="ui">3.5in @500</span> for a single column or <span class="ui">7in @500</span> for a double, or type a width in pixels. Choose a <span class="ui">background</span>, tick <span class="ui">scale bar</span>, and click <span class="ui">Export PNG</span>.</li>
+  <li>For a quick slide, <span class="ui">Save PNG</span> saves the panel as shown, image included, at screen resolution.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/export_dialog_pane.jpg" alt="The Export figure dialog with width, DPI, background and scale bar options over a framed region of tissue">
+  <figcaption>The <strong>Export figure</strong> dialog. The readout under the fields shows the output size in pixels and inches so the relationship between width and DPI stays visible.</figcaption>
+</figure>
+<div class="callout warn"><strong class="label">Two things to know before exporting a multi-panel figure</strong>
+<ul>
+  <li>Line weight is fixed in output pixels, so export every panel of one figure at the <em>same</em> pixel width or their lines will not match.</li>
+  <li>The morphology image is not included in <span class="ui">Export…</span>; it cannot be sharper than the source TIFF. Use <span class="ui">Save PNG</span> when you need the image, and the vector export for the data layers.</li>
+</ul></div>
+
+<h2 id="more">Where to go from here</h2>
+<div class="cards">
+  <div class="card"><h4><a href="index.html">User manual</a></h4><p>Every control, the install steps, and the R commands that produce <code>edges.parquet</code> with NICHESv2.</p></div>
+  <div class="card"><h4><a href="https://github.com/RaredonLab/TissuePlex/blob/dev/docs/data_format.md">Edge file format</a></h4><p>The column specification for <code>edges.parquet</code>, so any pipeline can produce one.</p></div>
+  <div class="card"><h4><a href="https://github.com/RaredonLab/TissuePlex/blob/dev/docs/public_datasets.md">Datasets and licences</a></h4><p>Where each demo dataset comes from, what was trimmed, and further public data to try.</p></div>
+</div>
+
+<footer>TissuePlex is developed in the Raredon Lab. Demo data: 10x Genomics example datasets (CC BY 4.0); Bruker Spatial Biology CosMx mouse brain via the OSTA project (non-commercial data licence); synthetic fixtures generated in this repository.</footer>
+</div>
+</main>
+</body>
+</html>

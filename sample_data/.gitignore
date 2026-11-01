@@ -1,5 +1,6 @@
 # ── Large datasets not committed to the repo ─────────────────────────────────
-# These must be downloaded separately (see fetch_samples.py or README.md).
+# Fetched into place by `python3 sample_data/fetch_samples.py` (GitHub release
+# assets; see the README's *Demo datasets* section and docs/public_datasets.md).
 xenium_human_breast_2fov/
 merscope-*/
 cosmx-*/

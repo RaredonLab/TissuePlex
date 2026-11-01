@@ -6,7 +6,7 @@ TissuePlex runs as a two-container Docker application (backend API + frontend we
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac or Windows) or Docker Engine + docker-compose (Linux)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac or Windows) or Docker Engine + Compose v2 (Linux)
 - Your spatial transcriptomics output folder(s) on disk
 
 No Python, Node.js, or other dependencies are required on the host machine.
@@ -17,7 +17,7 @@ No Python, Node.js, or other dependencies are required on the host machine.
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/RaredonLab/TissuePlex.git
 cd TissuePlex
 
 # Launch against your data
@@ -41,8 +41,13 @@ Then open **http://localhost:3000** in your browser.
     cell_metadata.csv
     ...
   visium_hd_experiment_C/
-    square_002um/
-      ...
+    binned_outputs/
+      square_008um/
+        ...
+  seqfish_roi_D/
+    Roi1_CellCoordinates.csv
+    Roi1_CellxGene.csv
+    ...
 ```
 
 TissuePlex auto-detects the platform for each subdirectory based on its contents.
@@ -54,9 +59,13 @@ TissuePlex auto-detects the platform for each subdirectory based on its contents
 | Platform | Sentinel file / directory |
 |---|---|
 | **Xenium** (10x Genomics) | `experiment.xenium` |
-| **Visium HD** (10x Genomics) | `square_???um/` subdirectory |
+| **Visium HD** (10x Genomics) | `binned_outputs/square_*um/` (Space Ranger `outs/` layout) |
+| **Visium** (10x Genomics, classic) | `spatial/scalefactors_json.json` plus a `tissue_positions*` file |
 | **MERSCOPE** (Vizgen) | `cell_by_gene.csv` or `cell_metadata.csv` |
 | **CosMx** (Nanostring) | `*_tx_file.csv` |
+| **seqFISH** (Spatial Genomics GenePS) | `*_CellCoordinates*.csv` |
+
+Point `DATA_PATH` at the parent of your dataset folders; for the 10x array platforms, the dataset folder is the *contents* of Space Ranger's `outs/`.
 
 Directories that don't match any sentinel are silently ignored.
 
@@ -70,13 +79,13 @@ The first time a dataset with a morphology image is opened, the viewer builds a 
 
 ## Using sample data
 
-The repo includes a small test dataset. To use it without setting `DATA_PATH`:
+The repo ships four small demo datasets in `sample_data/` (Xenium, seqFISH, Visium HD and classic Visium, each with a NICHESv2 edge layer). To use them without setting `DATA_PATH`:
 
 ```bash
 docker compose up --build
 ```
 
-This mounts `sample_data/` from the repo root.
+This mounts `sample_data/` from the repo root. Larger public datasets for the other platforms can be added with `python3 sample_data/fetch_samples.py` — see the README's *Demo datasets* section.
 
 ---
 

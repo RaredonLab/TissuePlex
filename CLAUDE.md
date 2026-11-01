@@ -90,11 +90,12 @@ and boundary layers rather than returning empty arrays for them.
   registration check: 98.1% of `in_tissue` spots land on stained tissue and 99.5% of
   out-of-tissue spots land on bare slide. See its own section.
 - MERSCOPE: cells, transcripts, genes, color-values (metadata + gene-set) implemented;
-  `cell_boundaries()` returns empty and `has_boundaries: False` (HDF5 polygon format
-  not yet parsed)
+  boundaries are read when a boundary file is present (`_boundary_file()`), and
+  `has_boundaries` reports whether one was found
 - CosMx: cells, transcripts, genes, metadata color-values implemented;
   gene-set color-values stub (requires transcript aggregation per cell);
-  `has_boundaries: False` (boundaries are per-FOV label TIFFs). Transcripts
+  boundaries come from the platform's `polygons.csv` when present
+  (`_polygon_file()`), and `has_morphology` requires a `CellComposite/` folder. Transcripts
   stream through DuckDB and the spatial cache like MERSCOPE and seqFISH — they
   used to `pd.read_csv` the whole multi-GB transcript file on every pan.
 - seqFISH (Spatial Genomics GenePS): fully implemented for the current **v2** layout —
@@ -215,8 +216,12 @@ Caddyfile                    Reverse proxy + TLS for the cloud deployment; optio
 deploy.sh                    One-shot droplet bootstrap (see docs/cloud-deploy.md)
 upload-data.sh               rsync datasets to a deployed server
 sample_data/                 Partially gitignored — default data mount for local dev/demo.
-                             mouse_ileum_tiny and seqfish_synthetic are tracked; larger
-                             and licence-restricted datasets are ignored.
+                             Four fixtures are tracked (mouse_ileum_tiny, seqfish_synthetic,
+                             visium_tiny, visium_hd_tiny); larger and licence-restricted
+                             datasets are ignored. See *Demo Data Distribution* below.
+  fetch_samples.py           Downloads the three redistributable real datasets from the
+                             `demo-data-v1` GitHub release (sha256-verified zips, each with
+                             a PROVENANCE.md). Stdlib only.
   make_edges.py              Synthetic edges.parquet generator
   make_seqfish.py            Synthetic seqFISH v2 ROI generator (committable fixture)
   make_visium.py             Synthetic classic Visium generator (committable fixture);
@@ -255,7 +260,17 @@ docs/
   index.html                 The user manual, published to GitHub Pages at
                              https://raredonlab.github.io/TissuePlex/ — hand-written
                              HTML, no build step. Update it when a UI control changes.
-  demo.gif                   README demo animation
+                             Pages serves the default branch (dev), so a push is a publish.
+  vignettes.html             Seven screenshot-led worked examples on the demo datasets,
+                             same hand-written style; linked from the manual sidebar and
+                             the README. Screenshots live in docs/img/vignettes/ (1600 px
+                             JPEGs made from 2560×2000 canvas captures — see
+                             *Demo Data Distribution* for how they were taken).
+  demo.gif                   README demo animation (800 px, kept small for GitHub)
+  demo_1080p.gif / .mp4      The same cut at 1920×1080 for slides; the MP4 plays
+                             far better in PowerPoint than the 40 MB GIF
+  make_demo_gif.sh           Regenerates both from recording.mov (gitignored, repo
+                             root). The original demo.gif has no recorded script.
 OBS/                         Archived, superseded planning docs. Provenance only —
                              NOT a specification. See OBS/README.md.
 NICHESv2_package_design.md   Design doc for the separate NICHESv2 R package (not this repo)
@@ -300,6 +315,33 @@ The `sample_data/make_edges.py` script generates synthetic demo data in this for
 Real data comes from `export_to_TissuePlex()` in the NICHESv2 R package.
 
 ---
+
+## Demo Data Distribution
+
+Nine datasets live in the author's `sample_data/`; only four are in git. The other five
+split by licence, recorded in `docs/public_datasets.md` (*What ships with TissuePlex*):
+
+| Dataset | How it ships | Why |
+|---|---|---|
+| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (`demo-data-v1`) | 10x example data, CC BY 4.0 |
+| `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Not MIT. |
+| `merscope-vpt-smallset` | not distributed | Vizgen's U2OS "small set" from the VPT vignette; no licence stated, terms of use reserve redistribution |
+| `seqfish_instrument2` | not distributed | Spatial Genomics test set used by scverse CI; gated download, no open licence |
+
+`sample_data/fetch_samples.py` downloads the release zips, verifies SHA-256 (the digests
+are in its `MANIFEST`), and unpacks each beside itself. The zips were built from the
+local copies trimmed to what the readers open, plus `edges.parquet`, `edges/`,
+`edge-metadata/` and a `PROVENANCE.md`; rebuild them by re-running that recipe if a
+dataset changes, and bump `RELEASE_TAG` + the digests together. The golden snapshot and
+`edge_pipeline_check` still cover all nine datasets locally and skip what is absent.
+
+**Taking screenshots for `docs/vignettes.html`.** The browser pane's own screenshots are
+small; the data layers are captured instead by compositing the OSD canvas
+(`.openseadragon-canvas canvas`) and the deck canvas (`#deckgl-overlay`) exactly as
+`Save PNG` does, then POSTing the blob to a throwaway local HTTP receiver. Sidebar and
+dialog images are ordinary pane screenshots. Zoom is capped by the source image's native
+resolution, so `mouse_ileum_tiny` and `visium_hd_tiny` cannot be zoomed past ~1:1 and
+their figures are crops.
 
 ## Supplemental Cell Metadata
 
@@ -525,6 +567,11 @@ makes that consumer silently stale, which is far worse than a redundant render.
 - **Edge color**: `edgeColorBy` (`mode`: default/lrm_set/metadata), `edgeColorPalette`,
   `edgeColorClamp`
 - **LRM filter**: `hiddenLrms` (Set of "ligand|receptor" strings), `lrmCatalogue`
+- **`edgeMinStrength`** is a dead key: the *min strength* slider was removed from
+  `EdgeSection` (it filtered a `strength` column no NICHESv2 export has, and `useEdges`
+  never sent the value). `EdgeFilterSection` writes `edgeFilters[0]` via
+  `setEdgeFilterAt(0, …)` — it used to read `edgeFilter` / `setEdgeFilter`, which do not
+  exist, so the edge-table filter dropdown threw on every use until v0.9.1+.
 - **Selection**: `selectedCell`, `selectedEdge`
 - **Annotations**: `regions`, `measurements`, `activeRegion`, `annotationMode`
   (`pan` / `region` / `measure` / `rectangle`)
