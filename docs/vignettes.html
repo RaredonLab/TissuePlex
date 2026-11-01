@@ -217,22 +217,31 @@ scores or review flags appear in the viewer without regenerating anything:</p>
   <li><code>cell-metadata/</code>, one row per cell, keyed on the cell barcode. <code>write.csv(df, "cell-metadata/clusters.csv")</code> from R works as is.</li>
   <li><code>edge-metadata/</code>, one row per cell pair, keyed on <code>"Sender|Receiver"</code>.</li>
 </ul>
-<p>The demo dataset ships both. Its <code>cell-metadata/example_clusters.csv</code> has a <code>seurat_clusters</code> column with twelve integer levels, chosen on purpose: integers are the common case for cluster ids and the awkward one for a viewer.</p>
+<p>The demo dataset ships both. Its <code>cell-metadata/example_clusters.csv</code> has a
+<code>seurat_clusters</code> column with twelve integer levels, chosen on purpose: integers
+are the common case for cluster ids and the awkward one for a viewer. It is a tiny
+fixture, three 640-pixel patches with 36 cells, so the figures here are small by nature;
+everything in it works the same on a full run.</p>
 <ol>
-  <li>Choose <span class="ui">mouse_ileum_tiny</span>. Tick <span class="ui">Morphology</span>.</li>
+  <li>Choose <span class="ui">mouse_ileum_tiny</span> and zoom into the middle patch. Raise <span class="ui">outline</span> to 50% under <strong>Cell Segments</strong>.</li>
   <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose <span class="ui">Cell metadata</span>, then <span class="ui">seurat_clusters</span>.</li>
   <li>The legend lists clusters 0 to 11 in numeric order with a swatch each; click a swatch to change its colour, or <span class="ui">import palette</span> to load a <code>category,#hex</code> file.</li>
+  <li>Hold <kbd>Shift</kbd> and click an edge: the <strong>EDGE</strong> panel opens with an <strong>Annotations</strong> block from <code>edge-metadata/example_annotations.csv</code>.</li>
 </ol>
+<figure>
+  <img src="img/vignettes/ex3_clusters.jpg" alt="Fourteen cell polygons filled in twelve distinct cluster colours with light outlines, joined by thin directed edges, on a dark background">
+  <figcaption><strong>3a · Cells filled by <code>seurat_clusters</code></strong> from a CSV in <code>cell-metadata/</code>, with the NICHESv2 edges between them. The viewer recognised twelve integer levels as categories rather than a 0–11 gradient; <span class="ui">treat as categorical</span> is there to override that call either way.</figcaption>
+</figure>
 <figure class="pair">
-  <img src="img/vignettes/ileum_clusters.jpg" alt="A 640-pixel patch of mouse ileum with each cell polygon filled in the colour of its Seurat cluster">
-  <img src="img/vignettes/ileum_legend_pane.jpg" alt="The sidebar's Cell Color section showing Cell metadata, seurat_clusters, the treat as categorical checkbox and a twelve-entry colour legend">
-  <figcaption>Cells filled by <code>seurat_clusters</code> from a CSV in <code>cell-metadata/</code>. The viewer recognised twelve integer levels as categories rather than a 0–11 gradient; <span class="ui">treat as categorical</span> is there to override that call either way.</figcaption>
+  <img src="img/vignettes/ex3_legend.jpg" alt="The Cell Color section: Color cells ticked, Cell metadata, seurat_clusters, treat as categorical ticked, twelve colour swatches labelled 0 to 11, and import and export palette buttons">
+  <img src="img/vignettes/ex3_edgepanel.jpg" alt="The EDGE panel for an Endothelial to Fibroblast pair: an Annotations block with interaction_class heterotypic, score_tier mid, score_percentile 52.44, demo_review_flag unreviewed, then three mechanisms with scores">
+  <figcaption><strong>3b · The two places annotations surface.</strong> Left: the <strong>Cell Color</strong> section with the categorical legend. Cluster 10 sorts after cluster 9, not between 1 and 2, because columns whose labels all parse as numbers are ordered numerically. Right: the <strong>EDGE</strong> panel for one Endothelial→Fibroblast pair; the <strong>Annotations</strong> block is the row for this pair in <code>edge-metadata/</code>, above the three mechanisms NICHESv2 scored on it. The folder's README says which of those columns are derived from the edge file and which one is invented.</figcaption>
 </figure>
 <h3>What to notice</h3>
 <ul>
-  <li>Cluster 10 sorts after cluster 9, not between 1 and 2. Columns whose labels all parse as numbers are ordered numerically.</li>
   <li>The same column is offered under <strong>Cell Filter</strong>. Choose it there and untick all but one cluster: the remaining cells are drawn at full density, because the filter is applied on the server before sampling.</li>
-  <li>Shift-click an edge: the <strong>Annotations</strong> block in the edge panel comes from <code>edge-metadata/example_annotations.csv</code>. Its README says which columns are derived from the edge file and which one is invented.</li>
+  <li>Annotation columns also appear in the <span class="ui">edge color</span> and <strong>Edge Filter</strong> menus, so a review flag or a confidence tier can colour or subset the edges directly.</li>
+  <li>The cell types in the EDGE panel header (Endothelial, Fibroblast) come from the edge file's own <code>sending_type</code> / <code>receiving_type</code> columns, which NICHESv2 writes only when asked; in this fixture they are simulated.</li>
 </ul>
 <div class="callout tip"><strong class="label">Try next</strong>
 <p>This dataset also has three edge sets. The <span class="ui">Edge source</span> menu at the top of the sidebar switches between <code>edges</code>, <code>edge.raw.minimum</code> and <code>edge.normalized.product</code>, each a different scoring of the same tissue.</p></div>
