@@ -1,5 +1,6 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
+orjson>=3.9  # fast JSON for the large viewport responses; NaN -> null natively
 python-multipart==0.0.9
 
 # Data I/O

@@ -212,13 +212,13 @@
       "total": 0
     },
     "tx_full": {
-      "digest": "b76ab16b6333ead5",
+      "digest": "b0507e6ef18c83c8",
       "keys": [
         "feature_name",
         "x_location",
         "y_location"
       ],
-      "n": 200000,
+      "n": 200029,
       "total": 399999
     },
     "tx_gene0": {
@@ -435,13 +435,13 @@
       "total": 17103
     },
     "tx_bbox_half": {
-      "digest": "f9ad6e07e3ff210d",
+      "digest": "ffbae81afa2c23c8",
       "keys": [
         "feature_name",
         "x_location",
         "y_location"
       ],
-      "n": 8552,
+      "n": 8540,
       "total": 17103
     },
     "tx_full": {
@@ -1126,13 +1126,13 @@
       "total": 1750
     },
     "tx_bbox_half": {
-      "digest": "4474c8ca16d0c621",
+      "digest": "132671004d4f1f39",
       "keys": [
         "feature_name",
         "x_location",
         "y_location"
       ],
-      "n": 875,
+      "n": 880,
       "total": 1750
     },
     "tx_full": {
@@ -1771,14 +1771,15 @@
       "total": 7275
     },
     "bounds_half": {
-      "digest": "ff23537fade12766",
-      "n": 90908,
-      "n_cells": 3638,
+      "digest": "897a62f0a10a58b9",
+      "n": 91031,
+      "n_cells": 3642,
       "total": 7275
     },
     "capabilities": {
       "has_boundaries": true,
       "has_morphology": true,
+      "has_transcript_qv": true,
       "has_transcripts": true,
       "unit_label": "cell"
     },
@@ -2078,29 +2079,29 @@
     "pixel_size": 0.2125,
     "platform": "xenium",
     "tx_bbox": {
-      "digest": "bd94661711d7cd2d",
+      "digest": "6bc329b689b752fc",
       "keys": [
         "feature_name",
         "qv",
         "x_location",
         "y_location"
       ],
-      "n": 200000,
+      "n": 200361,
       "total": 228952
     },
     "tx_bbox_half": {
-      "digest": "533e723da47274dc",
+      "digest": "35e0ec65d588db21",
       "keys": [
         "feature_name",
         "qv",
         "x_location",
         "y_location"
       ],
-      "n": 114476,
+      "n": 114678,
       "total": 228952
     },
     "tx_full": {
-      "digest": "4531f4ac79155e19",
+      "digest": "f4f42430496f5e48",
       "keys": [
         "feature_name",
         "qv",

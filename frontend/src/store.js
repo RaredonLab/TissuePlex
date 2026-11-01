@@ -21,9 +21,13 @@ export function makeSettings() {
     layers: {
       morphology:   { visible: false, opacity: 1.0 },
       transcripts:  { visible: false, opacity: 0.8 },
-      cellSegments: { visible: true,  opacity: 1.0, outlineOpacity: 0.0 },
+      // opacityMin: the opacity the *lowest* colour value draws at when the
+      // layer is coloured by a continuous value (gene set for cells, LRM set
+      // for edges). null = same as `opacity`, i.e. no fade — the default and
+      // the historical behaviour. See colormap.fadeAlpha.
+      cellSegments: { visible: true,  opacity: 1.0, outlineOpacity: 0.0, opacityMin: null },
       tissueGraph:  { visible: true,  opacity: 0.05 },
-      edges:        { visible: false, opacity: 0.25 },
+      edges:        { visible: false, opacity: 0.25, opacityMin: null },
     },
 
     // null = auto (the hook targets ~5k cells and adapts to viewport density);
@@ -174,8 +178,9 @@ export function sanitiseSettings(next, allowed, sameDataset) {
 export function makePanel() {
   return {
     dataset: null,
-    activeImage: null,
-    imageSize: { w: null, h: null },     // from the DZI descriptor, when OSD opens
+    activeImage: null,                   // image stem, or BLANK_IMAGE_NAME for "no image"
+    imageSize: { w: null, h: null },     // from OSD when it opens (image or data frame)
+    frame: null,                         // /info -> frame: {width, height} from the data extent
     platformCapabilities: null,          // /spatial/{ds}/info -> has_transcripts, unit_label, …
     pixelSize: 1.0,                      // µm per image pixel; drives measurement + zoom match
     edgeFile: "edges.parquet",
@@ -290,8 +295,10 @@ export const useStore = create((set, get) => ({
   setSelectedCell: (cell, panelIndex = 0) =>
     set({ selection: cell ? { panelIndex, kind: "cell", cell } : null,
           neighborhood: null }),
-  setSelectedEdge: (edge, panelIndex = 0) =>
-    set({ selection: edge ? { panelIndex, kind: "edge", edge } : null,
+  // `hint` is the edge's sending centroid in image px, when the click had it;
+  // EdgeInfoPanel passes it along so the detail lookup can prune by position.
+  setSelectedEdge: (edge, panelIndex = 0, hint = null) =>
+    set({ selection: edge ? { panelIndex, kind: "edge", edge, hint } : null,
           neighborhood: null }),
   clearSelection: () => set({ selection: null, neighborhood: null }),
 
@@ -671,6 +678,13 @@ export const useStore = create((set, get) => ({
   // ── Rendering / loading state ─────────────────────────────────────────────
   // loadingKeys: Set of string keys currently in flight (one entry per panel).
   // The status badge is visible whenever loadingKeys.size > 0.
+  //
+  // backendError: the most recent failed data fetch, { message, context, at },
+  // written by utils/clientLog.js and shown briefly by RenderingStatus. The
+  // hooks degrade a failed request to an empty layer on purpose; this is what
+  // keeps that degradation from being silent.
+  backendError: null,
+  setBackendError: (e) => set({ backendError: e }),
   loadingKeys: new Set(),
   setLoadingKey: (key, loading) => set((s) => {
     const next = new Set(s.loadingKeys);

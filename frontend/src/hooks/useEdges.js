@@ -24,7 +24,12 @@
  * Returns { edges, loading }.
  */
 import { useState, useEffect, useRef, useMemo } from "react";
+import { loggedFetch } from "../utils/clientLog";
+import { fetchDelay } from "../utils/viewportFilters";
 
+// For a *moving* viewport only. A fetch whose viewport is unchanged from the
+// last one — an LRM toggle, a filter edit, a colour column change — goes out at
+// once: the debounce exists to coalesce drag events, and a click is one event.
 const DEBOUNCE_MS = 400;
 
 /**
@@ -49,10 +54,15 @@ export function useEdges(
   minStrength, hiddenLrms, lrmCatalogue, density = 1.0,
   edgeFile = "edges.parquet",
   { sendingFilter = null, receivingFilter = null, edgeFilters = null,
-    graphEnabled = false, graphDensity = 1.0 } = {}
+    graphEnabled = false, graphDensity = 1.0, colorField = null } = {}
 ) {
   // Which edge-source parquet to query; appended to every /edges request.
   const efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
+  const viewKey = viewport && imageSize?.w
+    ? `${viewport.xmin},${viewport.ymin},${viewport.xmax},${viewport.ymax}` : "";
+  const structViewRef = useRef(null);
+  const graphViewRef = useRef(null);
+  const scoreViewRef = useRef(null);
 
   // Serialised so the effects can depend on filter *content* rather than object
   // identity, which changes on every render.
@@ -97,6 +107,8 @@ export function useEdges(
       return;
     }
 
+    const delay = fetchDelay(structViewRef.current, viewKey, DEBOUNCE_MS);
+    structViewRef.current = viewKey;
     clearTimeout(structTimerRef.current);
     structTimerRef.current = setTimeout(async () => {
       if (structAbortRef.current) structAbortRef.current.abort();
@@ -107,6 +119,9 @@ export function useEdges(
       const { xmin, ymin, xmax, ymax } = viewport;
       const body = { xmin, ymin, xmax, ymax, density: Math.max(0.01, Math.min(1.0, density)) };
       if (minStrength != null && minStrength > 0) body.min_strength = minStrength;
+      // The metadata colour-by column rides on these rows as `color_value`,
+      // instead of a separate whole-file request (see useEdgeColors).
+      if (colorField) body.color_field = colorField;
       // Filters go to the server so they apply before the density sample;
       // filtering the response instead would sample first and leave a fraction
       // of the subset. The cell layer's own filter is deliberately NOT sent —
@@ -116,7 +131,8 @@ export function useEdges(
       if (edgeFilterBodies.length) body.edge_filters = edgeFilterBodies;
 
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-grouped${efParam}`, {
+        const res = await loggedFetch("edges/query-grouped", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-grouped${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -128,10 +144,10 @@ export function useEdges(
       } finally {
         if (structAbortRef.current === ctrl) setLoadingStructural(false);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
 
     return () => clearTimeout(structTimerRef.current);
-  }, [apiBase, dataset, viewport, imageSize, enabled, minStrength, density, efParam, filterKey]); // eslint-disable-line
+  }, [apiBase, dataset, viewport, imageSize, enabled, minStrength, density, efParam, filterKey, colorField]); // eslint-disable-line
 
   // ── Effect 1b: tissue-graph fetch ─────────────────────────────────────────
   // Takes no filter arguments at all, and depends on no filter state — so no
@@ -142,6 +158,8 @@ export function useEdges(
       setGraphEdges([]);
       return;
     }
+    const delay = fetchDelay(graphViewRef.current, viewKey, DEBOUNCE_MS);
+    graphViewRef.current = viewKey;
     clearTimeout(graphTimerRef.current);
     graphTimerRef.current = setTimeout(async () => {
       if (graphAbortRef.current) graphAbortRef.current.abort();
@@ -149,7 +167,8 @@ export function useEdges(
       graphAbortRef.current = ctrl;
       const { xmin, ymin, xmax, ymax } = viewport;
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-structure${efParam}`, {
+        const res = await loggedFetch("edges/query-structure", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-structure${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ xmin, ymin, xmax, ymax,
@@ -160,7 +179,7 @@ export function useEdges(
       } catch (e) {
         if (e.name !== "AbortError") setGraphEdges([]);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
     return () => clearTimeout(graphTimerRef.current);
   }, [apiBase, dataset, viewport, imageSize, graphEnabled, graphDensity, efParam]); // eslint-disable-line
 
@@ -196,6 +215,12 @@ export function useEdges(
       return;
     }
 
+    // An LRM toggle leaves the viewport where it is, so it is not debounced:
+    // the server answers it from its cached per-viewport score matrix in a few
+    // milliseconds, and the previous request, if still in flight, is aborted
+    // (which cancels it on the server too).
+    const delay = fetchDelay(scoreViewRef.current, viewKey, DEBOUNCE_MS);
+    scoreViewRef.current = viewKey;
     clearTimeout(scoreTimerRef.current);
     scoreTimerRef.current = setTimeout(async () => {
       if (scoreAbortRef.current) scoreAbortRef.current.abort();
@@ -204,7 +229,11 @@ export function useEdges(
 
       setLoadingScores(true);
       const { xmin, ymin, xmax, ymax } = viewport;
-      const body = { xmin, ymin, xmax, ymax };
+      // The same density as the structural fetch. The server applies the same
+      // deterministic per-edge predicate, so every drawn edge still finds its
+      // score — and at the default 0.1 the response is a tenth of the size it
+      // was when scores came back for every edge in the viewport.
+      const body = { xmin, ymin, xmax, ymax, density: Math.max(0.01, Math.min(1.0, density)) };
 
       // Choose the smaller set to minimise the IN-list and maximise DuckDB pruning.
       // included_lrms → WHERE lrm IN (...): reads only matching rows (~visibleCount/totalLrms fraction).
@@ -218,7 +247,8 @@ export function useEdges(
       }
 
       try {
-        const res = await fetch(`${apiBase}/edges/${dataset}/query-scores${efParam}`, {
+        const res = await loggedFetch("edges/query-scores", { dataset, edgeFile },
+          `${apiBase}/edges/${dataset}/query-scores${efParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -239,10 +269,10 @@ export function useEdges(
       } finally {
         if (scoreAbortRef.current === ctrl) setLoadingScores(false);
       }
-    }, DEBOUNCE_MS);
+    }, delay);
 
     return () => clearTimeout(scoreTimerRef.current);
-  }, [apiBase, dataset, viewport, imageSize, enabled, hiddenLrms, lrmCatalogue, efParam]); // eslint-disable-line
+  }, [apiBase, dataset, viewport, imageSize, enabled, hiddenLrms, lrmCatalogue, efParam, density]); // eslint-disable-line
 
   // ── Merge: overlay scores onto structural edges ───────────────────────────
   // edgeScores === null → no filter; use score_sum from structural as visible_score_sum
@@ -250,12 +280,12 @@ export function useEdges(
   const edges = useMemo(() => {
     if (structuralEdges.length === 0) return [];
     if (edgeScores === null) {
-      // No LRM filter — visible_* fields equal the unfiltered totals
-      return structuralEdges.map(e => ({
-        ...e,
-        visible_lrm_count: e.lrm_count ?? 1,
-        visible_score_sum: e.score_sum  ?? null,
-      }));
+      // No LRM filter: the structural rows already carry the unfiltered totals
+      // as lrm_count / score_sum, and every consumer falls back to those when
+      // the visible_* fields are absent (Viewer's hasVisibleLrms, useEdgeColors).
+      // Returning the array as-is saves copying every edge object on each pan —
+      // at a few hundred thousand edges that copy was a visible GC pause.
+      return structuralEdges;
     }
     // LRM filter active — overlay scores; missing entries → 0 visible LRMs
     return structuralEdges.map(e => {

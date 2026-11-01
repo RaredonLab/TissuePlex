@@ -50,6 +50,7 @@ the image width: a ratio near pixel_size means microns, a ratio near 1.0 means
 pixels. On the reference dataset those ratios are 0.106 / 0.107 / 0.999, which
 separates the cases by two orders of magnitude. The verdict is logged on load.
 """
+import logging
 import json
 import math
 import re
@@ -60,6 +61,8 @@ import pandas as pd
 
 from app.readers import duck, spatial_cache
 from app.readers.base_reader import _UNSET, SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.seqfish")
 
 # Fallback when the DAPI OME-XML carries no PhysicalSizeX. This is the documented
 # GenePS value and matches the reference dataset (0.107161).
@@ -81,6 +84,7 @@ class SeqfishReader(SpatialDatasetReader):
         self._layout_cache = _UNSET
         self._pixel_size_cache: Optional[float] = None
         self._image_size_cache: Optional[tuple] = None
+        self._ref_size_cache = _UNSET
         self._cxg_cache = _UNSET
         self._cells_full_cache = _UNSET
         self._divisor_log: set = set()
@@ -112,7 +116,7 @@ class SeqfishReader(SpatialDatasetReader):
             return {}
 
         if len(matches) > 1:
-            print(f"[seqfish] {self.path.name}: {len(matches)} ROIs present "
+            log.info(f"{self.path.name}: {len(matches)} ROIs present "
                   f"({', '.join(m.name for m in matches)}); using {matches[0].name}. "
                   f"TissuePlex expects one ROI per folder — split them to see the rest.")
 
@@ -177,7 +181,7 @@ class SeqfishReader(SpatialDatasetReader):
                         if val > 0:
                             self._pixel_size_cache = val
             except Exception as exc:
-                print(f"[seqfish] could not read PhysicalSizeX from {img.name}: {exc}; "
+                log.warning(f"could not read PhysicalSizeX from {img.name}: {exc}; "
                       f"falling back to {_DEFAULT_PIXEL_SIZE} µm/px")
         return self._pixel_size_cache
 
@@ -195,9 +199,65 @@ class SeqfishReader(SpatialDatasetReader):
             h, w = shape[-2], shape[-1]
             self._image_size_cache = (int(w), int(h))
         except Exception as exc:
-            print(f"[seqfish] could not read image dimensions from {img.name}: {exc}")
+            log.warning(f"could not read image dimensions from {img.name}: {exc}")
             return None
         return self._image_size_cache
+
+    def _reference_size(self) -> Optional[tuple]:
+        """(width, height) in *pixels* that the µm-or-px decision is measured against.
+
+        The DAPI image when there is one. Without it, the unit test below used
+        to return 1.0 for every table — cells and transcripts (microns on every
+        GenePS v2 export seen) were then drawn at a hundredth of their size in
+        one corner while the boundaries (pixels) sat where they belonged, so a
+        dataset shipped without its DAPI rendered its segments and edges
+        nowhere near its cells. The GeoJSON boundaries are a pixel-space table
+        whatever else is present, so their extent stands in for the image; on
+        the v1 layout the label mask's dimensions do.
+        """
+        size = self._image_size()
+        if size:
+            return size
+        if self._ref_size_cache is not _UNSET:
+            return self._ref_size_cache
+        ref: Optional[tuple] = None
+        lay = self._layout()
+        path = lay.get("boundaries")
+        if path is not None:
+            try:
+                with open(path) as fh:
+                    gj = json.load(fh)
+                mx = my = 0.0
+                for feat in gj.get("features") or []:
+                    geom = feat.get("geometry") or {}
+                    coords, gtype = geom.get("coordinates"), geom.get("type")
+                    if not coords:
+                        continue
+                    rings = ([coords[0]] if gtype == "Polygon"
+                             else [part[0] for part in coords] if gtype == "MultiPolygon"
+                             else [])
+                    for ring in rings:
+                        for pt in ring:
+                            if len(pt) >= 2:
+                                mx = max(mx, float(pt[0])); my = max(my, float(pt[1]))
+                if mx > 0 and my > 0:
+                    ref = (mx, my)
+            except Exception as exc:
+                log.warning(f"could not measure boundary extent from {path.name}: {exc}")
+        if ref is None and lay.get("mask") is not None:
+            try:
+                import tifffile
+                with tifffile.TiffFile(lay["mask"]) as tif:
+                    shape = tif.series[0].shape
+                ref = (int(shape[-1]), int(shape[-2]))
+            except Exception as exc:
+                log.warning(f"could not read mask dimensions from {lay['mask'].name}: {exc}")
+        if ref is not None:
+            log.info(f"{self.path.name}: no DAPI image; using the "
+                     f"{'boundary extent' if lay.get('boundaries') else 'label mask'} "
+                     f"({ref[0]:.0f} x {ref[1]:.0f} px) as the pixel reference")
+        self._ref_size_cache = ref
+        return ref
 
     # ── Unit detection ────────────────────────────────────────────────────────
 
@@ -208,9 +268,10 @@ class SeqfishReader(SpatialDatasetReader):
         max/width ratio lands near `pixel_size`. A table already in pixels spans
         the image itself, so the ratio lands near 1.0. Pick whichever hypothesis
         the observed ratio is closer to, in log space so the comparison is
-        scale-free.
+        scale-free. "Image width" is `_reference_size`, which has a fallback for
+        datasets shipped without their DAPI.
         """
-        size = self._image_size()
+        size = self._reference_size()
         ps = self.pixel_size
         if not size or max_x <= 0 or ps <= 0:
             return 1.0
@@ -223,7 +284,7 @@ class SeqfishReader(SpatialDatasetReader):
         micron = d_um < d_px
         if label not in self._divisor_log:
             self._divisor_log.add(label)
-            print(f"[seqfish] {label}: extent ratio {ratio:.4f} vs pixel_size {ps:.6f} "
+            log.info(f"{label}: extent ratio {ratio:.4f} vs pixel_size {ps:.6f} "
                   f"→ treating as {'MICRONS (divide by pixel_size)' if micron else 'PIXELS (no conversion)'}")
         return ps if micron else 1.0
 
@@ -421,7 +482,7 @@ class SeqfishReader(SpatialDatasetReader):
             with open(path) as fh:
                 gj = json.load(fh)
         except Exception as exc:
-            print(f"[seqfish] could not read {path.name}: {exc}")
+            log.warning(f"could not read {path.name}: {exc}")
             return {"boundaries": [], "total": 0}
 
         features = gj.get("features") or []
@@ -505,7 +566,7 @@ class SeqfishReader(SpatialDatasetReader):
                 df.index.name = "cell_id"
                 self._cxg_cache = df
             except Exception as exc:
-                print(f"[seqfish] could not read {counts.name}: {exc}")
+                log.warning(f"could not read {counts.name}: {exc}")
         return self._cxg_cache  # type: ignore[return-value]
 
     def cell_expression(self, cell_id: str) -> dict:

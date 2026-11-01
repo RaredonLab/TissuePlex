@@ -80,6 +80,21 @@ export function valueToColor(value, vmin, vmax, palette = "viridis") {
   return scalarToColor((value - vmin) / (vmax - vmin), palette);
 }
 
+/**
+ * Alpha (0–255) for a value at normalised position `t` in the colour window,
+ * when the layer's opacity has a draggable minimum: the lowest value draws at
+ * `minFrac` of the layer's opacity, the highest at the full opacity, linearly
+ * between. `minFrac` is opacityMin / opacity, so with the minimum at the
+ * maximum every value gets 255 and the layer looks exactly as it did before
+ * the minimum existed. The layer's `opacity` prop still multiplies the result,
+ * which is what makes the existing slider the ceiling.
+ */
+export function fadeAlpha(t, minFrac) {
+  const f = Math.max(0, Math.min(1, minFrac ?? 1));
+  const u = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0;
+  return Math.round(255 * (f + (1 - f) * u));
+}
+
 export function legendGradient(palette = "viridis") {
   const stops = (PALETTES[palette] ?? PALETTES.viridis)
     .map(([t, [r, g, b]]) => `rgb(${r},${g},${b}) ${Math.round(t * 100)}%`)

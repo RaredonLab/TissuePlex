@@ -9,6 +9,7 @@
  */
 import React, { useEffect, useState } from "react";
 import { useStore } from "../store";
+import { BLANK_IMAGE_NAME } from "../utils/frame";
 
 const SECTION_HEADER = {
   fontSize: 10, fontFamily: "monospace", color: "#555",
@@ -39,7 +40,10 @@ export function DatasetPicker({ panelIndex = 0, compact = false }) {
   const setPanelEdgeFile = useStore((s) => s.setPanelEdgeFile);
   const edgeFile = useStore((s) => s.panels[panelIndex].edgeFile);
   const [datasets, setDatasets] = useState([]);
-  const [images, setImages] = useState([]);
+  // null until /images answers for the current dataset, so the viewer neither
+  // opens the previous dataset's image nor flashes the data frame before the
+  // real image list arrives.
+  const [images, setImages] = useState(null);
   const [edgeFiles, setEdgeFiles] = useState([]);
 
   // Fetch dataset list; auto-initialize to first entry if this panel has none.
@@ -60,10 +64,13 @@ export function DatasetPicker({ panelIndex = 0, compact = false }) {
   // Fetch available images for this panel's dataset
   useEffect(() => {
     if (!dataset) return;
+    setImages(null);
+    let cancelled = false;
     fetch(`${apiBase}/spatial/${dataset}/images`)
       .then((r) => r.ok ? r.json() : [])
-      .then((list) => { if (Array.isArray(list)) setImages(list); })
-      .catch(() => setImages([]));
+      .then((list) => { if (!cancelled) setImages(Array.isArray(list) ? list : []); })
+      .catch(() => { if (!cancelled) setImages([]); });
+    return () => { cancelled = true; };
   }, [apiBase, dataset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Edge sources for this panel's dataset (issue #46). Kept beside the dataset
@@ -88,12 +95,14 @@ export function DatasetPicker({ panelIndex = 0, compact = false }) {
   // This is a separate, declarative effect rather than a branch inside the fetch
   // above because the fetch only re-runs on dataset change: with activeImage
   // captured in its closure, whether it got set depended on the order the two
-  // state updates landed in, which left datasets whose only image is the
-  // synthesised placeholder with activeImage stuck at null and no viewer at all.
+  // state updates landed in. A dataset with no image at all gets the sentinel,
+  // and the viewer opens the data frame (utils/frame.js) instead of an image.
   useEffect(() => {
-    if (images.length > 0 && !images.includes(activeImage)) {
-      patchPanel(panelIndex, { activeImage: images[0] });
-    }
+    if (images === null) return;
+    const want = images.length > 0
+      ? (images.includes(activeImage) ? activeImage : images[0])
+      : BLANK_IMAGE_NAME;
+    if (want !== activeImage) patchPanel(panelIndex, { activeImage: want });
   }, [images, activeImage, panelIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (datasets.length === 0) {
@@ -123,7 +132,7 @@ export function DatasetPicker({ panelIndex = 0, compact = false }) {
                 style={sel} title="Dataset shown in this panel">
           {datasets.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
-        {images.length > 1 && (
+        {(images?.length ?? 0) > 1 && (
           <select value={activeImage || ""}
                   onChange={(e) => patchPanel(panelIndex, { activeImage: e.target.value })}
                   style={sel} title="Background image">
@@ -142,7 +151,7 @@ export function DatasetPicker({ panelIndex = 0, compact = false }) {
               style={sel}>
         {datasets.map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
-      {images.length > 1 && (
+      {(images?.length ?? 0) > 1 && (
         <>
           <div style={{ ...SECTION_HEADER, marginTop: 8 }}>Image</div>
           <select value={activeImage || ""}

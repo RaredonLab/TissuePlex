@@ -36,6 +36,7 @@ affine mapping microns → mosaic pixels. Its scale term is pixels *per* micron,
 ``pixel_size = 1 / M[0][0]``. On the reference data that is 1/9.2625 = 0.10796,
 which is where the commonly quoted 0.108 comes from.
 """
+import logging
 import json
 import struct
 from pathlib import Path
@@ -46,6 +47,8 @@ import pandas as pd
 
 from app.readers import duck
 from app.readers.base_reader import _UNSET, SpatialDatasetReader
+
+log = logging.getLogger("tissueplex.merscope")
 
 # Fallback when the transform file is missing. Matches the measured 0.10796.
 _DEFAULT_PIXEL_SIZE = 0.108
@@ -132,7 +135,7 @@ class MerscopeReader(SpatialDatasetReader):
                 try:
                     return np.genfromtxt(p)
                 except Exception as exc:
-                    print(f"[merscope] could not read {p.name}: {exc}")
+                    log.warning(f"could not read {p.name}: {exc}")
         return None
 
     # ── Experiment metadata ───────────────────────────────────────────────────
@@ -192,7 +195,7 @@ class MerscopeReader(SpatialDatasetReader):
         if {"global_x", "global_y"} <= cols:
             xcol, ycol = "global_x", "global_y"
         else:
-            print("[merscope] detected_transcripts.csv has no global_x/global_y; "
+            log.warning("detected_transcripts.csv has no global_x/global_y; "
                   "cannot place transcripts in the slide frame")
             return {"transcripts": [], "total": 0}
         gene_col = "gene" if "gene" in cols else None
@@ -248,7 +251,7 @@ class MerscopeReader(SpatialDatasetReader):
         try:
             df = pd.read_csv(meta)
         except Exception as exc:
-            print(f"[merscope] could not read cell_metadata.csv: {exc}")
+            log.warning(f"could not read cell_metadata.csv: {exc}")
             return None
         rename = {}
         for c in df.columns:
@@ -336,7 +339,7 @@ class MerscopeReader(SpatialDatasetReader):
         try:
             df = pd.read_parquet(path, columns=["EntityID", "ZIndex", "Geometry"])
         except Exception as exc:
-            print(f"[merscope] could not read {path.name}: {exc}")
+            log.warning(f"could not read {path.name}: {exc}")
             return {"boundaries": [], "total": 0}
         if df.empty:
             return {"boundaries": [], "total": 0}
@@ -413,7 +416,7 @@ class MerscopeReader(SpatialDatasetReader):
                     if g != key and not str(g).lower().startswith("blank")
                     and pd.notna(v) and v > 0}
         except Exception as exc:
-            print(f"[merscope] cell_expression failed: {exc}")
+            log.warning(f"cell_expression failed: {exc}")
             return {}
 
     # ── Colour values ─────────────────────────────────────────────────────────
@@ -445,7 +448,7 @@ class MerscopeReader(SpatialDatasetReader):
                     f'SELECT CAST("{key}" AS VARCHAR) AS cid, {expr} AS total '
                     f"FROM {duck.scan_csv(cbg)}").df()
         except Exception as exc:
-            print(f"[merscope] gene-set colouring failed: {exc}")
+            log.warning(f"gene-set colouring failed: {exc}")
             return empty
         if df.empty:
             return empty

@@ -223,8 +223,8 @@
     <a href="#cell-segments">Cell Segments</a>
     <a href="#filtering">Filtering by metadata</a>
     <a href="#transcripts">Transcripts</a>
-    <a href="#tissue-graph">Tissue Graph</a>
-    <a href="#directed-edges">Directed Edges</a>
+    <a href="#tissue-graph">Edge Data</a>
+    <a href="#directed-edges">Edges</a>
     <a href="#clicking">Clicking to explore</a>
     <a href="#split-screen">Split-screen mode</a>
     <a href="#annotations">Annotation tools</a>
@@ -234,6 +234,10 @@
   <div class="toc-group">
     <div class="toc-label">Help</div>
     <a href="#troubleshooting">Troubleshooting</a>
+  </div>
+  <div class="toc-group">
+    <div class="toc-label">See also</div>
+    <a href="vignettes.html">Worked examples ↗</a>
   </div>
 </nav>
 
@@ -249,10 +253,12 @@
   <div class="sub">Setup and operation guide</div>
   <p>TissuePlex is a web-based viewer for spatial transcriptomics data. It layers
   cell positions, gene expression, cell-to-cell signaling, and custom analysis
-  results on top of a tissue morphology image, running in a browser on your local
-  machine.</p>
+  results on top of a tissue morphology image when one is available, running in
+  a browser on your local machine.</p>
   <p>No programming experience is required. This guide covers installation, data
   setup, and every control in the interface.</p>
+  <p>Prefer to see it first? The <a href="vignettes.html">worked examples</a> are
+  seven short, screenshot-led tours on the demo datasets.</p>
   <p>Six platforms are supported — Xenium, Visium, Visium HD, MERSCOPE, CosMx and
   seqFISH — and TissuePlex works out which one it is looking at from the files in
   the folder. The examples below use Xenium; everything transfers, and the
@@ -277,7 +283,9 @@
       is the folder containing <code>experiment.xenium</code>,
       <code>morphology.ome.tif</code> and <code>transcripts.parquet</code>; for the
       Visium platforms it is the contents of Space Ranger's <code>outs/</code>. See
-      the platform table in step 5.</p>
+      the platform table in step 5. The image is optional: a dataset without its
+      morphology or DAPI still shows its cells, transcripts and edges, on a plain
+      frame.</p>
     </div>
     <div class="card">
       <h4>An internet connection</h4>
@@ -359,10 +367,19 @@ takes a single command.</p>
     </div>
 
     <h4>Recommended: increase Docker's memory limit</h4>
-    <p>In Docker Desktop, go to <strong>Settings</strong> (gear icon) &rarr;
-    <strong>Resources</strong>. If your machine has 16 GB of RAM or more, set
-    the memory limit to at least <strong>8 GB</strong>, then click
-    <strong>Apply &amp; Restart</strong>.</p>
+    <p><strong>Mac:</strong> in Docker Desktop, go to <strong>Settings</strong>
+    (gear icon) &rarr; <strong>Resources</strong>. If your machine has 16 GB of
+    RAM or more, set the memory limit to at least <strong>8 GB</strong>, then
+    click <strong>Apply &amp; Restart</strong>.</p>
+    <p><strong>Windows:</strong> Docker Desktop runs on WSL 2, which must be
+    enabled (the installer offers to do this; it also needs virtualization
+    turned on in your PC's firmware). There is no memory slider under
+    Resources. To raise the limit, create a text file called
+    <code>.wslconfig</code> in your user folder
+    (<code>C:\Users\yourname</code>) containing:</p>
+    <pre><code>[wsl2]
+memory=8GB</code></pre>
+    <p>then quit and restart Docker Desktop.</p>
 
     <div class="callout tip">
       <strong class="label">Tip:</strong> Docker Desktop must be running each
@@ -395,7 +412,11 @@ cd TissuePlex</code></pre>
     <div class="callout tip">
       <strong class="label">Tip:</strong> To update TissuePlex later, navigate
       back to this folder (<code>cd ~/Documents/TissuePlex</code>), run
-      <code>git pull</code>, then <code>docker compose up --build</code>.
+      <code>git pull</code>, then <code>docker compose up --build</code>. The
+      version badge at the foot of the right-hand panel turns
+      <strong>red</strong> when the browser is showing an older build than the
+      backend is running &mdash; a sign to hard-refresh the page or rebuild as
+      described below.
     </div>
 
     <div class="callout warn">
@@ -415,22 +436,47 @@ docker compose up</code></pre>
   <div class="step-num">4</div>
   <div class="step-body">
     <h3>First Launch</h3>
-    <p>TissuePlex includes a small sample dataset for verifying the installation.
-    With Docker Desktop running, run the following from inside the TissuePlex
+    <p>TissuePlex comes with four small demo datasets, one per platform family,
+    so you can verify the installation before loading your own data:</p>
+    <ul>
+      <li><code>mouse_ileum_tiny</code> &mdash; Xenium, 36 cells, with example
+      <code>cell-metadata/</code> and <code>edge-metadata/</code> folders and
+      two extra edge sets to switch between;</li>
+      <li><code>visium_hd_tiny</code> &mdash; a real 10x Genomics Visium HD
+      mouse-brain subset (CC BY 4.0);</li>
+      <li><code>visium_tiny</code> &mdash; a synthetic classic Visium slide,
+      252 spots;</li>
+      <li><code>seqfish_synthetic</code> &mdash; a synthetic seqFISH (Spatial
+      Genomics) region.</li>
+    </ul>
+    <p>Larger real datasets for Xenium (human breast, two fields of view),
+    MERSCOPE, CosMx and classic Visium (mouse kidney) are not included in the
+    download because of their size; <code>python3 sample_data/fetch_samples.py</code>
+    downloads them into <code>sample_data/</code> once you have Python
+    installed. The demo gene and mechanism lists used later in this guide are
+    in <code>sample_data/example_lists/</code>.</p>
+    <p>With Docker Desktop running, run the following from inside the TissuePlex
     folder:</p>
 
     <pre><code>docker compose up --build</code></pre>
 
     <p>The first run downloads and builds all container images, which takes
     <strong>5–15 minutes</strong> depending on internet speed. A large amount of
-    build output will scroll by. When you see messages containing
-    <code>uvicorn running</code> and <code>nginx</code>, TissuePlex is ready.</p>
+    build output will scroll by. When you see a line like
+    <code>Uvicorn running on http://0.0.0.0:8000</code>, TissuePlex is ready.
+    Leave this terminal window open while you use it; you can close and reopen
+    the browser tab at any time.</p>
 
     <p>Open Chrome or Firefox and go to:</p>
 
     <pre><code>http://localhost:3000</code></pre>
 
-    <p>The TissuePlex viewer should load with the sample dataset.</p>
+    <p>The TissuePlex viewer should load with the first demo dataset, and the
+    <span class="ui">Dataset</span> dropdown at the top of the right-hand panel
+    lists the other three. The canvas starts dark with the cell outlines drawn:
+    the <span class="ui">Morphology</span>, <span class="ui">Transcripts</span>
+    and <span class="ui">Edges</span> layers are <strong>off by default</strong>
+    &mdash; tick their checkboxes to turn them on.</p>
 
     <div class="callout warn">
       <strong class="label">Note:</strong> The first time a dataset is opened,
@@ -478,11 +524,15 @@ docker compose up</code></pre>
 
     <h4>Windows (Git Bash)</h4>
     <pre><code>DATA_PATH="C:/Users/yourname/xenium-data" docker compose up --build</code></pre>
+    <p>If you use PowerShell instead of Git Bash, set the variable first:</p>
+    <pre><code>$env:DATA_PATH="C:\Users\yourname\xenium-data"; docker compose up --build</code></pre>
 
     <div class="callout warn">
       <strong class="label">Important:</strong> The path must be
-      <strong>absolute</strong> (starting from the filesystem root). On Windows
-      in Git Bash, use forward slashes (<code>/</code>).
+      <strong>absolute</strong> (starting from the filesystem root) and must
+      not contain a colon other than a Windows drive letter &mdash; a network
+      mount path such as <code>/Volumes/server:share/…</code> will not work.
+      On Windows in Git Bash, use forward slashes (<code>/</code>).
     </div>
 
     <p>TissuePlex detects the platform from the files present in each subfolder:</p>
@@ -499,19 +549,21 @@ docker compose up</code></pre>
 
     <p>Folders without a matching sentinel file are silently skipped.</p>
 
-    <div class="note">
+    <div class="callout note">
       <strong class="label">Point at the right folder.</strong> For the 10x array
       platforms, the dataset folder is the <em>contents</em> of Space Ranger's
       <code>outs/</code> directory — the folder that directly contains
       <code>spatial/</code> — not its parent.
     </div>
 
-    <p>The interface adapts to whichever platform is loaded. Panels are relabelled
+    <p>The interface adapts to whichever platform is loaded. Panels are relabeled
     to match the unit — a Visium dataset says <em>Spot Segments</em>, <em>Spot
-    Filter</em> and <em>Spot Info</em> where a Xenium one says <em>Cell</em>, and
-    Visium HD says <em>Bin</em>. Layers a platform cannot serve are hidden
-    entirely: the two Visium platforms measure counts per spot or bin rather than
-    per molecule, so the Transcripts layer does not appear for them.</p>
+    Color</em>, <em>Spot Filter</em> and <em>Spot Info</em> where a Xenium one
+    says <em>Cell</em>, and Visium HD says <em>Bin</em>. (In split-screen mode
+    with two different unit types, the label becomes the neutral <em>unit</em>.)
+    Layers a platform cannot serve are hidden entirely: the two Visium platforms
+    measure counts per spot or bin rather than per molecule, so the Transcripts
+    layer does not appear for them.</p>
   </div>
 </div>
 
@@ -524,7 +576,7 @@ docker compose up</code></pre>
   <div class="part-label">Part II</div>
   <h2>Enriching Your Data</h2>
 </div>
-<p>TissuePlex can display enriched data alongside the standard Xenium output:
+<p>TissuePlex can display enriched data alongside the standard platform output:
 <strong>cell-cell communication edges</strong> from the NICHESv2 R pipeline,
 and <strong>custom cell metadata</strong> such as clustering labels or pseudotime
 scores. Both are optional; the core viewer works without them.</p>
@@ -546,14 +598,15 @@ scores. Both are optional; the core viewer works without them.</p>
 
     <p>The output TissuePlex reads is a single file, <code>edges.parquet</code>,
     placed in the dataset folder alongside <code>experiment.xenium</code>. When
-    present, the edge layers appear in the Layer Panel. When absent, those layers
-    are hidden and all other features work as normal.</p>
+    it is present, the <span class="ui">LRM Mechanisms</span> checklist appears
+    inside the <span class="ui">Edge Data</span> section and lines are drawn
+    on the tissue. When it is absent, the Edge Data controls are still shown
+    but draw nothing, and all other features work as normal.</p>
 
     <div class="callout note">
-      <strong class="label">Note:</strong> Running NICHESv2 requires R and
-      several packages and can take significant time for large datasets. Ask a
-      lab member for guidance on your first run. The steps below outline the
-      workflow.
+      <strong class="label">Note:</strong> Running NICHESv2 requires R and a
+      few packages, and can take some time for large datasets. The two steps
+      below cover the installation and the one command that produces the file.
     </div>
   </div>
 </div>
@@ -581,10 +634,14 @@ scores. Both are optional; the core viewer works without them.</p>
     <p>Open RStudio. In the <strong>Console</strong> panel, paste the following
     and press <strong>Enter</strong>:</p>
 
-    <pre><code>install.packages(c("Seurat", "arrow", "dplyr", "devtools"))</code></pre>
+    <pre><code>install.packages(c("arrow", "Matrix", "jsonlite", "remotes", "BiocManager"))
+BiocManager::install("rhdf5")
+remotes::install_github("RaredonLab/NICHESv2", ref = "dev")</code></pre>
 
-    <p>Installation may take several minutes. Then install the NICHESv2 package;
-    ask a lab member for the current installation command.</p>
+    <p>Installation may take several minutes. The last line installs NICHESv2
+    from its <code>dev</code> branch; that matters, because the
+    <code>export_to_TissuePlex()</code> function that writes the edge file
+    exists only there.</p>
 
     <div class="callout tip">
       <strong class="label">Tip:</strong> R, RStudio, and installed packages
@@ -599,26 +656,28 @@ scores. Both are optional; the core viewer works without them.</p>
   <div class="step-num">8</div>
   <div class="step-body">
     <h3>Run NICHESv2 and Export Edge Data</h3>
-    <p>The workflow has three steps: load your Xenium data into R, run NICHESv2
-    to score cell-cell communication, and export the result for TissuePlex.</p>
+    <p>The TissuePlex download includes a ready-made script for each platform in
+    its <code>r/</code> folder. Each one reads the dataset, runs NICHESv2 to
+    score every neighboring cell pair, and writes <code>edges.parquet</code>
+    into the dataset folder. You run it from Terminal (or Git Bash), not from
+    inside RStudio. For a Xenium dataset:</p>
 
-    <pre><code>library(Seurat)
-library(NICHESv2)
+    <pre><code>cd ~/Documents/TissuePlex
+Rscript r/niches_xenium.R /path/to/your/xenium-dataset --species human --rad 30</code></pre>
 
-# 1. Load your Xenium data into R
-xenium_obj &lt;- LoadXenium("/path/to/your/xenium-dataset")
+    <ul>
+      <li><code>--species</code> is <code>human</code>, <code>mouse</code>,
+      <code>rat</code> or <code>pig</code>; it selects the ligand-receptor
+      database.</li>
+      <li><code>--rad</code> is the neighborhood radius in microns: two cells
+      closer than this are scored as a communicating pair.</li>
+      <li>The other scripts work the same way: <code>niches_visium.R</code>,
+      <code>niches_visium_hd.R</code>, <code>niches_merscope.R</code>,
+      <code>niches_cosmx.R</code> and <code>niches_seqfish.R</code>. The
+      <code>r/README.md</code> file in that folder describes each one.</li>
+    </ul>
 
-# 2. Run NICHESv2 (ask a lab member for recommended parameters)
-niches_result &lt;- RunNICHES(xenium_obj, ...)
-
-# 3. Export for TissuePlex (writes edges.parquet to the dataset folder)
-export_to_TissuePlex(
-  niches_result,
-  output_dir = "/path/to/your/xenium-dataset"
-)</code></pre>
-
-    <p><code>export_to_TissuePlex()</code> writes <code>edges.parquet</code>
-    to your dataset folder. The resulting structure:</p>
+    <p>The resulting structure:</p>
 
     <div class="tree">my-experiment-2024/
   experiment.xenium
@@ -627,19 +686,31 @@ export_to_TissuePlex(
   cells.parquet
   <span class="hl">edges.parquet</span>              <span class="cmt">&lt;- newly created by NICHESv2</span></div>
 
+    <div class="callout note">
+      <strong class="label">Several edge sets on one tissue.</strong> Add
+      <code>--out /path/to/your/xenium-dataset/edges/radius50.parquet</code> to
+      write the result into an <code>edges/</code> subfolder instead. Every
+      file in that folder becomes a choice in the
+      <span class="ui">Edge source</span> dropdown, so you can compare two
+      radii or two scoring settings on the same cells without copying the
+      dataset.
+    </div>
+
     <div class="callout warn">
-      <strong class="label">Important:</strong> The exact arguments for
-      <code>RunNICHES()</code> depend on your dataset and the current version of
-      NICHESv2. <strong>Ask a lab member for guidance on your first run.</strong>
-      This step can take significant time for large datasets.
+      <strong class="label">Important:</strong> This step can take a long time
+      for large datasets. If the script stops with a message about
+      <em>scorable pairs</em>, the gene panel has no complete ligand-receptor
+      pair for that species; that is a property of the panel, not an error in
+      your data.
     </div>
 
     <h4>Verify the result</h4>
-    <p>Restart TissuePlex. The <span class="ui">Tissue Graph</span> and
-    <span class="ui">Directed Edges</span> sections should appear in the Layer
-    Panel. If they do not, confirm that <code>edges.parquet</code> is directly
-    inside the dataset folder at the same level as
-    <code>experiment.xenium</code>.</p>
+    <p>Restart TissuePlex and open the dataset. The <span class="ui">LRM
+    Mechanisms</span> checklist should appear inside the
+    <span class="ui">Edge Data</span> section, and ticking the
+    <span class="ui">Edges</span> layer should draw lines on the tissue. If
+    not, confirm that <code>edges.parquet</code> is directly inside the dataset
+    folder at the same level as <code>experiment.xenium</code>.</p>
   </div>
 </div>
 
@@ -706,14 +777,27 @@ write.csv(
     <span class="hl">my_clusters.csv</span>          <span class="cmt">&lt;- your exported metadata</span></div>
 
     <p>After adding the file, restart TissuePlex. Metadata columns appear
-    automatically under
-    <span class="ui">Cell Segments &rarr; Color by &rarr; Cell metadata</span>.</p>
+    automatically in the <span class="ui">Cell Color</span> section: tick
+    <span class="ui">Color cells</span>, choose <span class="ui">Cell
+    metadata</span> from the mode dropdown, then pick the column. They also
+    appear in the <span class="ui">Cell Filter</span> dropdown.</p>
 
     <div class="callout tip">
       <strong class="label">Tip:</strong> Multiple CSV files are supported in
       <code>cell-metadata/</code>. TissuePlex merges them on the barcode key;
       each file can contain different columns.
     </div>
+
+    <h4>The same idea for cell pairs: edge-metadata/</h4>
+    <p>To annotate <em>edges</em> rather than cells &mdash; a curation call, a
+    confidence score, a review flag &mdash; put a CSV in a folder named
+    <code>edge-metadata</code> next to <code>edges.parquet</code>. Its key
+    column is the edge name, <code>SendingCell|ReceivingCell</code>; R's
+    <code>write.csv()</code> with that as the row names works unchanged. The
+    columns appear in the <span class="ui">edge color</span> and edge filter
+    dropdowns, and show as an <strong>Annotations</strong> block when you click
+    an edge. The <code>mouse_ileum_tiny</code> demo dataset includes a worked
+    example of both folders.</p>
   </div>
 </div>
 
@@ -740,30 +824,46 @@ write.csv(
     <li><strong>The Layer Panel.</strong> The right-hand panel for controlling
     layer visibility, color mappings, gene filters, and LRM selections.</li>
     <li><strong>The Annotation Toolbar.</strong> A compact bar at the top of the
-    viewer with tools for drawing regions, measuring distances, toggling
-    split-screen mode, and saving images.</li>
-    <li><strong>Info Panels.</strong> Floating panels that appear when you click
-    on a cell or edge, showing metadata and scores for that object.</li>
+    viewer with tools for drawing regions, measuring distances, framing and
+    saving images, rotating the view, and (on the left-hand panel only)
+    switching split-screen mode on and off.</li>
+    <li><strong>Info Panels.</strong> The <strong>Cell Info</strong> panel is
+    docked at the bottom of the Layer Panel and reads <em>Click a cell to
+    inspect</em> until you do. The <strong>Edge Info</strong> panel floats over
+    the bottom-right of the viewer when you click an edge.</li>
   </ul>
 
   <h3>Dataset &amp; Image Picker</h3>
-  <p>At the top of the Layer Panel are two dropdowns:</p>
+  <p>At the top of the Layer Panel are up to three dropdowns:</p>
   <ul>
     <li><span class="ui">Dataset</span>: lists all datasets found in your
     <code>DATA_PATH</code> folder.</li>
-    <li><span class="ui">Image</span>: lists the available OME-TIFF files in
-    the dataset. Most Xenium datasets have one.</li>
+    <li><span class="ui">Image</span>: appears only when the dataset has more
+    than one image. It lists every TIFF or PNG in the dataset folder and one
+    level below it &mdash; for Xenium, the <code>morphology_focus/</code>
+    channels alongside the main <code>morphology.ome.tif</code>.</li>
+    <li><span class="ui">Edge source</span>: appears only when the dataset has
+    more than one edge file (see Step 8).</li>
   </ul>
   <p>Switching datasets reloads all layers automatically. The first time each
   image is viewed, TissuePlex builds a tile pyramid (10–30 seconds); if the
   canvas looks blank, wait and refresh.</p>
 
   <p>In <a href="#split-screen">split-screen mode</a> these dropdowns move into
-  each panel's own header instead, because the two panels can show different
-  datasets and an image or edge file only means something relative to one of
-  them.</p>
+  a strip at the bottom-left of each panel instead, because the two panels can
+  show different datasets and an image or edge file only means something
+  relative to one of them.</p>
 
-  <div class="note">
+  <h3>Status Badges</h3>
+  <p>A <span class="ui">Computing…</span> badge appears at the bottom-right of
+  the viewer while data for the current view is loading. A red
+  <span class="ui">⚠ … failed</span> badge means a request to the backend
+  failed (see <a href="#troubleshooting">Troubleshooting</a>). At the foot of
+  the Layer Panel, a small <span class="ui">TissuePlex v…</span> badge shows
+  the version; it turns red if the page in your browser is older than the
+  backend, which happens after an update until you hard-refresh or rebuild.</p>
+
+  <div class="callout note">
     <p>Changing a panel's dataset clears the settings that name a column, gene or
     mechanism — metadata filters, the color-by field, the gene selection, the
     mechanism checklist. It has to: those names come from the dataset you just
@@ -784,8 +884,10 @@ write.csv(
   <h2 class="section-title">Morphology Image</h2>
   <p>The morphology image is the tissue photograph that forms the base of the
   viewer. In the Layer Panel, the <span class="ui">Morphology</span> row lets
-  you toggle it on or off and adjust its opacity. Reducing opacity can help other
-  data layers stand out more clearly on a dark background.</p>
+  you toggle it on or off and adjust its opacity. It starts <strong>off</strong>,
+  so a freshly opened dataset shows its cells on a dark background; tick the
+  box to see the tissue. Reducing opacity can help other data layers stand out
+  more clearly.</p>
 
   <p>The image is streamed as a tile pyramid, so it renders sharply at every zoom
   level without loading the entire file into memory at once.</p>
@@ -805,28 +907,35 @@ write.csv(
   <ul>
     <li>Use the checkbox next to <span class="ui">Cell Segments</span> to show
     or hide boundaries entirely.</li>
-    <li>The <span class="ui">fill</span> slider adjusts interior opacity.</li>
-    <li>The <span class="ui">outline</span> slider adjusts the border line
-    weight.</li>
+    <li>The <span class="ui">fill</span> slider adjusts interior opacity
+    (100% by default).</li>
+    <li>The <span class="ui">outline</span> slider adjusts the opacity of the
+    border line (0% by default, so outlines are invisible until you raise
+    it).</li>
   </ul>
 
   <p>The <span class="ui">sample</span> slider controls what fraction of cell
-  boundaries are loaded. At low zoom it adjusts automatically; raise it when
-  zoomed in to load more cells.</p>
+  boundaries are loaded. It starts in <span class="ui">auto</span> mode (green
+  tag), which aims for about 5,000 cells at any zoom; dragging it switches to a
+  fixed fraction, and the <span class="ui">↺</span> button returns it to auto.
+  The counter beside the layer name shows how many cells are drawn out of how
+  many are in view, and turns green at 100%.</p>
 
   <div class="callout tip">
     <strong class="label">Tip:</strong> Outlines at full opacity with fill at
     5–10% gives a clean view of cell shape while keeping the morphology image
-    visible.
+    visible &mdash; the opposite of the defaults, which favor solid fills for
+    color overlays.
   </div>
 
-  <h3>Color By</h3>
-  <p>The <span class="ui">Color by</span> dropdown colors each cell by a data
-  value.</p>
+  <h3>Cell Color</h3>
+  <p>The <span class="ui">Cell Color</span> section, just below Cell Segments,
+  colors each cell by a data value. Tick <span class="ui">Color cells</span>,
+  then choose a mode from the dropdown beside it.</p>
 
   <h4>Off (default)</h4>
-  <p>Cells shown in a neutral color. Use this to view cell positions without a
-  data overlay.</p>
+  <p>With <span class="ui">Color cells</span> unticked, cells are shown in a
+  neutral color. Use this to view cell positions without a data overlay.</p>
 
   <h4>Gene Set</h4>
   <p>Colors each cell by the combined expression of a selected set of genes.
@@ -834,26 +943,38 @@ write.csv(
   cells at the cold end.</p>
   <ul>
     <li>The gene set is defined by the selection in the
-    <span class="ui">Transcripts</span> gene filter.</li>
+    <span class="ui">Transcript Species</span> section (see
+    <a href="#transcripts">Transcripts</a>). On Visium and Visium HD, which
+    have no transcript layer, every gene in the panel is summed.</li>
     <li>Choose a <strong>color palette</strong>: viridis (yellow&rarr;purple),
     plasma (yellow&rarr;magenta), magma (yellow&rarr;black), or inferno.
     <em>Viridis</em> is recommended for colorblind accessibility.</li>
-    <li>A color legend shows the data range. Use the <strong>clamp</strong>
-    sliders to restrict the color range to a specific window, useful when
-    outliers at the high end compress the variation across the rest of the
-    dataset.</li>
+    <li>A color legend shows the data range. Use the <span class="ui">lo</span>
+    and <span class="ui">hi</span> sliders to restrict the color range to a
+    specific window, useful when outliers at the high end compress the variation
+    across the rest of the dataset; <span class="ui">reset range</span> puts
+    the full range back.</li>
+    <li>The <span class="ui">fade to</span> slider sets the fill opacity of the
+    <em>lowest</em>-expressing cells; the <span class="ui">fill</span> slider
+    stays the maximum. At the maximum nothing fades. Drag it down to let
+    low-expressing cells recede so the high expressers stand out.</li>
   </ul>
 
   <h4>Cell Metadata</h4>
   <p>Colors each cell by any metadata column, including supplemental columns
   added to the <code>cell-metadata/</code> folder.</p>
   <ul>
-    <li>Use the <span class="ui">field</span> dropdown to select the column.</li>
+    <li>Use the column dropdown (<span class="ui">— select column —</span>) to
+    pick the column.</li>
     <li><strong>Continuous columns</strong> (pseudotime, module scores, etc.)
-    use a gradient palette with clamp controls.</li>
+    use a gradient palette with the same <span class="ui">lo</span> /
+    <span class="ui">hi</span> range sliders.</li>
     <li><strong>Categorical columns</strong> (cluster labels, cell type names,
     etc.) are assigned distinct colors automatically, one per category, with a
-    legend of editable color swatches.</li>
+    legend. Click any swatch in the legend to change that category's color;
+    <span class="ui">import palette</span> / <span class="ui">export
+    palette</span> save and load the whole set as a CSV, and
+    <span class="ui">reset</span> restores the automatic colors.</li>
   </ul>
 
   <h4>Treat as Categorical</h4>
@@ -869,7 +990,7 @@ write.csv(
     <li><strong>Checked</strong> — one distinct, editable color per value, with the
     legend in <em>numeric</em> order, so cluster 10 comes after cluster 2 rather
     than between 1 and 2.</li>
-    <li><strong>Unchecked</strong> — a continuous gradient with clamp sliders. Useful
+    <li><strong>Unchecked</strong> — a continuous gradient with range sliders. Useful
     for a coded column with few levels that you would rather read as a scale.</li>
     <li>An <span class="ui">auto</span> button returns the column to automatic
     detection.</li>
@@ -911,7 +1032,7 @@ write.csv(
     transcript-to-cell assignment at all, so there is nothing to match on.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <strong class="label">Why the subset stays dense.</strong> The filter is applied
     on the server, before sampling. If it were applied afterwards you would see a
     sample of a subset — narrowing to a cluster holding 5% of cells while the
@@ -932,20 +1053,22 @@ write.csv(
     free — "everything sent from crypt cells, to anywhere".</li>
     <li>Set <strong>both</strong> and you get the intersection: senders in one
     group, receivers in the other. This is how you ask for
-    fibroblast&nbsp;&rarr;&nbsp;endothelial signalling and nothing else.</li>
+    fibroblast&nbsp;&rarr;&nbsp;endothelial signaling and nothing else.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <p>These are <strong>independent of the Cell Filter</strong> above. Narrowing
     the cells you draw does not narrow the edges, and vice versa. An edge may
     therefore terminate on a cell that is not currently drawn — that is intended,
     so the graph structure can be read on its own terms.</p>
   </div>
 
-  <p>Below the two dropdowns, a third filter works on columns of the
+  <p>Below the two dropdowns, a third dropdown filters on columns of the
   <em>edge table itself</em>, including annotations from an
   <code>edge-metadata/</code> folder — a curation call, a confidence score, a
-  review flag.</p>
+  review flag. It works like the cell filter: checkboxes for a categorical
+  column, <span class="ui">min</span> / <span class="ui">max</span> boxes for
+  a continuous one, and <span class="ui">clear filter</span> to remove it.</p>
 
   <p>All of these are distinct from the <span class="ui">LRM Mechanisms</span>
   checklist. The checklist chooses which <em>mechanisms</em> are scored on every
@@ -955,15 +1078,15 @@ write.csv(
   <p>Understanding this makes the controls predictable:</p>
   <ol>
     <li>every edge in view</li>
-    <li><strong>density</strong> — keeps a spatially random fraction</li>
+    <li><strong>sample</strong> — keeps a spatially random fraction</li>
     <li>the result is the <strong>Tissue Graph</strong> layer</li>
     <li><strong>sending</strong>, then <strong>receiving</strong>, then the
     edge-table filter</li>
-    <li>the result is the <strong>Edge Data</strong> layer</li>
+    <li>the result is the <strong>Edges</strong> layer</li>
   </ol>
   <p>Because the edge data is filtered <em>from</em> the tissue graph, it can never
   appear where there is no graph edge beneath it. Both layers respond to the one
-  density slider and stay aligned as you move it.</p>
+  sample slider and stay aligned as you move it.</p>
 </section>
 
 
@@ -971,7 +1094,9 @@ write.csv(
 <section id="transcripts">
   <h2 class="section-title">Transcripts</h2>
   <p>The <span class="ui">Transcripts</span> layer renders individual detected
-  RNA molecules as colored dots, each colored by gene identity.</p>
+  RNA molecules as colored dots, each colored by gene identity. The layer is
+  <strong>off by default</strong>; tick its checkbox to draw it. Hover over a
+  dot to see its gene name (and, on Xenium, its Q-Score).</p>
 
   <div class="callout note">
     <strong class="label">Note:</strong> Transcripts draw at every zoom level.
@@ -996,16 +1121,22 @@ write.csv(
     Other platforms are unaffected.</li>
   </ul>
 
-  <h3>Gene Filter</h3>
+  <h3>Transcript Species — the gene filter</h3>
   <p>By default, transcripts from all detected genes are shown, each in its own
-  color. To restrict the display to specific genes:</p>
+  color. The <span class="ui">Transcript Species</span> section restricts the
+  display to specific genes:</p>
 
   <ul>
     <li>The current status reads either <span class="ui">all N genes</span>
     or <span class="ui">M / N genes selected</span>.</li>
     <li>Click <span class="ui">select ▼</span> (or <span class="ui">edit
-    ▼</span> if a filter is active) to open the gene picker.</li>
-    <li>Search by gene name and check or uncheck any gene.</li>
+    ▼</span> if a filter is active) to open the gene picker;
+    <span class="ui">▲</span> closes it again.</li>
+    <li>Type in the <span class="ui">filter genes…</span> box to search, and
+    check or uncheck any gene.</li>
+    <li>The swatch beside each gene is its dot color. Click it to choose
+    another; <span class="ui">reset</span> appears once any color has been
+    changed and restores the automatic colors.</li>
     <li>Click <span class="ui">all</span> to remove the filter, or
     <span class="ui">none</span> to start a fresh selection.</li>
     <li>Selected genes have an <span class="ui">✕</span> button for individual
@@ -1041,7 +1172,8 @@ Muc2,goblet</code></pre>
   <div class="callout warn">
     <strong class="label">Note:</strong> Keep list files outside the dataset
     folder. A CSV placed in the dataset folder itself is read as cell metadata
-    (see <em>Add Custom Cell Metadata</em>).
+    (see <em>Add Custom Cell Metadata</em>). The demo lists for
+    <code>mouse_ileum_tiny</code> are in <code>sample_data/example_lists/</code>.
   </div>
 
   <p>Gene-color assignments can be <strong>imported</strong> and
@@ -1051,27 +1183,32 @@ Muc2,goblet</code></pre>
 
   <div class="callout tip">
     <strong class="label">Tip:</strong> The gene selection is shared with the
-    "Gene Set" cell coloring mode. Select marker genes, switch Cell Segments to
-    "Gene Set", and both the per-cell expression overlay and individual transcript
-    locations will reflect that selection simultaneously.
+    "Gene set" cell coloring mode. Select marker genes, tick
+    <span class="ui">Color cells</span> and choose "Gene set", and both the
+    per-cell expression overlay and individual transcript locations will
+    reflect that selection simultaneously.
   </div>
 </section>
 
 
 <!-- ── Tissue Graph ───────────────────────────────────────────────────── -->
 <section id="tissue-graph">
-  <h2 class="section-title">Connectivity Layers</h2>
-  <p>These layers require <code>edges.parquet</code> in the dataset folder (see
-  Step 8). They visualize cell-cell communication as a spatial graph overlaid
-  on the tissue.</p>
+  <h2 class="section-title">Edge Data</h2>
+  <p>The <span class="ui">Edge Data</span> section holds everything to do with
+  cell-cell connectivity. Its layers require <code>edges.parquet</code> in the
+  dataset folder (see Step 8). They visualize cell-cell communication as a
+  spatial graph overlaid on the tissue.</p>
 
-  <h3>Edge Density</h3>
-  <p>The <span class="ui">density</span> slider controls what fraction of
-  available edges are rendered. The default is <strong>10%</strong>.</p>
+  <h3>Sample</h3>
+  <p>The <span class="ui">sample</span> slider, at the top of the
+  <span class="ui">Edge Data</span> section, controls what fraction of the
+  available edges are drawn — for the Tissue Graph and the Edges alike,
+  so the two always line up. It works exactly like the <span class="ui">sample</span>
+  slider under Cell Segments. The default is <strong>10%</strong>.</p>
   <ul>
-    <li>At <strong>low density</strong> (1–10%): a sparse graph useful for
+    <li>At a <strong>low sample</strong> (1–10%): a sparse graph useful for
     viewing overall connectivity patterns.</li>
-    <li>At <strong>high density</strong> (50–100%): many more edges, revealing
+    <li>At a <strong>high sample</strong> (50–100%): many more edges, revealing
     densely connected hubs. Rendering may slow for large datasets.</li>
   </ul>
 
@@ -1081,55 +1218,64 @@ Muc2,goblet</code></pre>
   </div>
 
   <h3>Tissue Graph</h3>
-  <p>The <span class="ui">Tissue Graph</span> is a structural background layer
-  showing which cells are spatial neighbors, independent of any LRM information.
-  Each line indicates spatial adjacency between two cells. Use the checkbox to
-  toggle it and the opacity slider to adjust its visual weight.</p>
+  <p>The <span class="ui">Tissue Graph</span> row, just below the sample slider,
+  is a structural background layer showing which cells are spatial neighbors,
+  independent of any LRM information. Each line indicates spatial adjacency
+  between two cells. Use the checkbox to toggle it and the opacity slider to
+  adjust its visual weight. It is on by default at <strong>5%</strong>
+  opacity, which is deliberately faint; raise it to see the graph on its
+  own.</p>
 
-  <div class="note">
-    <p>The tissue graph is <strong>ground truth</strong>: the total set of edges in
-    view. No filter narrows it — it is shown or hidden, nothing else. Only the
-    density slider changes how many of its lines are drawn, and that applies
-    equally to the Edge Data layer on top, so the two always align.</p>
-    <p>Use <strong>opacity</strong>, not density, to make it recede behind the edge
-    data. Lowering density removes lines from a layer whose whole purpose is to
-    show the complete structure.</p>
+  <div class="callout note">
+    <p>The tissue graph is the <strong>complete set of neighbor pairs</strong>
+    in view. No filter ever removes any of its lines — it is shown or hidden,
+    nothing else. Only the sample slider changes how many are drawn, and that
+    applies equally to the Edges on top, so the two always align.</p>
+    <p>Use <strong>opacity</strong>, not the sample, to make it recede behind the
+    edge data. Lowering the sample removes lines from a layer whose whole purpose
+    is to show the complete structure.</p>
   </div>
 </section>
 
 
-<!-- ── Directed Edges ─────────────────────────────────────────────────── -->
+<!-- ── Edges ──────────────────────────────────────────────────────────── -->
 <section id="directed-edges">
-  <h2 class="section-title">Directed Edges</h2>
-  <p>The <span class="ui">Directed Edges</span> layer is the quantitative
-  counterpart to the Tissue Graph. Each arrow represents a directed signal from
-  a <em>sending</em> cell to a <em>receiving</em> cell, with appearance
-  determined by the active ligand-receptor mechanisms (LRMs).</p>
+  <h2 class="section-title">Edges</h2>
+  <p>The <span class="ui">Edges</span> row, below Tissue Graph in the
+  <span class="ui">Edge Data</span> section, is the quantitative counterpart to
+  the Tissue Graph. Each line represents a directed signal from a
+  <em>sending</em> cell to a <em>receiving</em> cell, with appearance determined
+  by the active ligand-receptor mechanisms (LRMs). The layer is
+  <strong>off by default</strong>; tick its checkbox to draw it. Its opacity
+  slider starts at 25%.</p>
 
   <p>When two cells communicate in both directions (A &rarr; B and B &rarr; A),
-  both arrows are offset from each other, keeping bidirectional signals visually
-  distinct.</p>
+  the two lines can be offset from each other to keep bidirectional signals
+  visually distinct.</p>
 
   <h3>Style Controls</h3>
 
   <h4>Directional</h4>
-  <p>The <span class="ui">Directional</span> checkbox renders A &rarr; B and
-  B &rarr; A as two offset parallel lines. On by default.</p>
+  <p>The <span class="ui">Directional</span> checkbox, on by default, treats
+  A &rarr; B and B &rarr; A as two separate lines. They sit on top of each
+  other until you raise <span class="ui">offset</span> (below), which starts
+  at 0.</p>
 
   <h4>Arrowheads</h4>
   <p>The <span class="ui">Arrowheads</span> checkbox adds directional tips at
   the receiving end of each edge (available only when Directional is on). Two
   additional controls appear when arrowheads are active:</p>
   <ul>
-    <li><span class="ui">arrow scale</span>: adjusts arrowhead size.</li>
+    <li><span class="ui">arrow</span>: adjusts arrowhead size (1.00× by
+    default).</li>
     <li><span class="ui">Full</span> / <span class="ui">Harpoon</span>: solid
     triangle or single-sided chevron. Harpoon style mimics the chemistry
     &#8652; notation and is often cleaner for dense graphs.</li>
   </ul>
 
   <h4>Autocrine</h4>
-  <p>The <span class="ui">Autocrine</span> checkbox draws autocrine signalling —
-  a cell signalling to itself — as a ring around that cell. NICHESv2 emits one
+  <p>The <span class="ui">Autocrine</span> checkbox draws autocrine signaling —
+  a cell signaling to itself — as a ring around that cell. NICHESv2 emits one
   autocrine edge per cell, so on real output expect a ring on every cell that has
   any self-signal.</p>
   <p>Autocrine rings behave exactly like directed edges in every other respect:</p>
@@ -1142,7 +1288,8 @@ Muc2,goblet</code></pre>
     <li>They <strong>obey the LRM Mechanisms checklist</strong>. Narrow to one
     mechanism and only the cells with autocrine signal through that mechanism keep
     their ring.</li>
-    <li>They obey the cell and edge metadata filters, and the density slider.</li>
+    <li>They obey the sending, receiving and edge-table filters, and the sample
+    slider. (Like all edges, they ignore the Cell Filter.)</li>
     <li>Clicking a ring opens the same edge detail panel, listing the mechanisms
     scored for that self-edge.</li>
   </ul>
@@ -1156,7 +1303,7 @@ Muc2,goblet</code></pre>
     <strong class="label">Seeing nothing?</strong> The
     <span class="ui">Edges</span> layer must be on for rings to appear —
     <span class="ui">Autocrine</span> lives inside it. Also check the
-    <span class="ui">density</span> slider: at the default 10% only a tenth of
+    <span class="ui">sample</span> slider: at the default 10% only a tenth of
     edges, rings included, are drawn.
   </div>
 
@@ -1164,38 +1311,42 @@ Muc2,goblet</code></pre>
   <ul>
     <li><span class="ui">width</span>: thickness of all edge lines.</li>
     <li><span class="ui">offset</span> (visible when Directional is on):
-    perpendicular separation between the A &rarr; B and B &rarr; A lines.</li>
+    perpendicular separation between the A &rarr; B and B &rarr; A lines.
+    0 by default; raise it to see the two directions as parallel lines.</li>
   </ul>
-
-  <h3>Minimum Strength Filter</h3>
-  <p>The <span class="ui">min strength</span> slider hides edges below a total
-  interaction score threshold. Raising it restricts the view to stronger
-  interactions and reduces visual clutter.</p>
 
   <h3>Edge Color</h3>
   <p>The <span class="ui">edge color</span> dropdown has three modes:</p>
   <ul>
-    <li><strong>Default (uniform):</strong> all edges in a single neutral color.</li>
-    <li><strong>LRM Set (selected mechanisms):</strong> edges colored by total
-    communication score across active LRMs. The color scale adapts to the
-    current viewport. A palette picker and clamp controls appear below.</li>
-    <li><strong>Metadata column:</strong> color edges by a metadata field such
-    as sending or receiving cell type. Continuous fields use a gradient palette;
-    categorical fields use distinct colors with a legend.</li>
+    <li><strong>LRM Set (selected mechanisms)</strong> — the default: edges
+    colored by total communication score across active LRMs. The color scale
+    adapts to the current viewport. A palette picker, a <span class="ui">fade to</span>
+    slider and clamp controls appear below. <em>Fade to</em> is the opacity of
+    the weakest edge: leave it at the maximum and every edge draws at the
+    Edges opacity; drag it down and weak edges become translucent while the
+    strongest keep the full opacity.</li>
+    <li><strong>Default (uniform):</strong> all edges in a single neutral
+    color.</li>
+    <li><strong>Metadata column:</strong> color edges by a column of the edge
+    file or of an <code>edge-metadata/</code> folder, such as sending or
+    receiving cell type. Continuous fields use a gradient palette; categorical
+    fields use distinct colors with a legend.</li>
   </ul>
 
   <h3>LRM Mechanisms Checklist</h3>
   <p>The <span class="ui">LRM Mechanisms</span> list shows every ligand-receptor
-  mechanism in your <code>edges.parquet</code> data. Toggle individual mechanisms
-  on or off to focus the visualization.</p>
+  mechanism in your <code>edges.parquet</code> data, written as
+  <em>Ligand → Receptor</em>. Toggle individual mechanisms on or off to focus
+  the visualization.</p>
 
   <ul>
     <li>A counter shows how many are active (e.g.
     <span class="ui">488 / 488 active</span>).</li>
     <li>The <span class="ui">all</span> and <span class="ui">none</span> buttons
     select or deselect everything.</li>
-    <li>Use the <strong>search box</strong> to filter by gene name (e.g. type
-    "Tgfb" to find all TGF-&beta; mechanisms).</li>
+    <li>Use the <span class="ui">filter mechanisms…</span> search box to
+    filter by gene name (e.g. type "Tgfb" to find all TGF-&beta;
+    mechanisms).</li>
     <li>Hiding an LRM reduces each edge's visible score by that mechanism's
     contribution; edges whose score reaches zero are hidden.</li>
   </ul>
@@ -1241,19 +1392,22 @@ Notch1,Dll4</code></pre>
 <!-- ── Clicking ───────────────────────────────────────────────────────── -->
 <section id="clicking">
   <h2 class="section-title">Clicking to Explore</h2>
-  <p>Clicking on cells or edges opens floating info panels with detailed
-  information.</p>
+  <p>Clicking on cells or edges fills in the info panels with details about
+  that object. A click on empty canvas clears both selections.</p>
 
   <h3>Clicking on a Cell</h3>
-  <p>Click inside a cell to open the <strong>Cell Info Panel</strong>, which
-  shows the barcode ID, all metadata values for that cell, and the current
-  color-by value highlighted. Click on empty canvas to dismiss.</p>
+  <p>Click inside a cell to fill the <strong>Cell Info</strong> panel at the
+  bottom of the Layer Panel. It shows the cell's barcode, position, transcript
+  and total counts, cell and nucleus area, its expression of the selected genes,
+  and &mdash; when cells are colored by a metadata column &mdash; that column's
+  value, highlighted. Other metadata columns are not listed here; use the
+  color-by or filter dropdowns to see them.</p>
 
   <h3>The Local Neighbourhood</h3>
   <p>With a cell selected, <span class="ui">show local neighbourhood</span> at the
   bottom of the info panel reveals everything that cell is connected to in the
   tissue graph. The canvas marks the clicked cell in white, its connected
-  neighbours in yellow, and draws a circle at the distance of the furthest one.
+  neighbors in amber, and draws a circle at the distance of the furthest one.
   The panel reports:</p>
 
   <ul>
@@ -1261,34 +1415,38 @@ Notch1,Dll4</code></pre>
     cells it touches, and how many directed edges that is;</li>
     <li><strong>radius</strong> in µm, so the reach can be quoted without
     measuring it off the screen;</li>
-    <li><strong>composition</strong> — the neighbours broken down by whichever
-    metadata column you are colouring cells by;</li>
+    <li><strong>composition</strong> — the neighbors broken down by whichever
+    metadata column you are coloring cells by (the panel says so if cells are
+    not currently colored by one);</li>
     <li><strong>mechanisms</strong> — the strongest LRMs across its edges.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <p>The circle is a convenience, not the answer. Connectivity is not evenly
-    spread — a cell at the edge of a tissue has neighbours on one side only — so
-    the circle usually contains cells it is <em>not</em> connected to. The yellow
-    marks are the neighbourhood; the circle only shows how far it reaches.</p>
+    spread — a cell at the edge of a tissue has neighbors on one side only — so
+    the circle usually contains cells it is <em>not</em> connected to. The amber
+    marks are the neighborhood; the circle only shows how far it reaches.</p>
   </div>
 
-  <div class="note">
+  <div class="callout note">
     <p>The summary is computed on the full data, so it is unaffected by the
-    density slider, by the sending and receiving filters, or by how far you are
+    sample slider, by the sending and receiving filters, or by how far you are
     zoomed in. It describes the tissue, not the current view. Clicking another
     cell replaces it; <span class="ui">hide highlight</span> removes it.</p>
   </div>
 
   <h3>Clicking on an Edge or Tissue Graph Line</h3>
-  <p>Click on any line in the Tissue Graph or Directed Edges layer to open the
-  <strong>Edge Info Panel</strong>, showing the sending and receiving cell
-  barcodes and the top-scoring LRMs for that edge.</p>
+  <p>Click on any line in the Tissue Graph or Edges layer (or an autocrine
+  ring) to open the floating <strong>Edge Info</strong> panel. It shows the
+  sending and receiving cell barcodes, every mechanism scored on that edge
+  with its score and share of the total, and &mdash; if the dataset has an
+  <code>edge-metadata/</code> folder &mdash; an <strong>Annotations</strong>
+  block with that edge's values.</p>
 
   <div class="callout tip">
     <strong class="label">Tip:</strong> When edges and cells overlap, a normal
     click selects the cell. Hold <strong>Shift</strong> to prioritize edges
-    instead.
+    instead. A plain click on empty space deselects.
   </div>
 </section>
 
@@ -1302,18 +1460,22 @@ Notch1,Dll4</code></pre>
   other. Both panels can also show the same dataset rendered two different ways.</p>
 
   <ul>
-    <li>Click <span class="ui">⊞ Split</span> in the annotation toolbar to
-    enter split-screen mode.</li>
-    <li>Click <span class="ui">□ Single</span> to return to a single panel.</li>
-    <li>In split mode each panel gets its own <strong>dataset, image and edge-source
-    picker in its header</strong>, since those only mean something relative to one
-    dataset.</li>
+    <li>Click <span class="ui">⊞ Split</span> in the left-hand panel's
+    annotation toolbar to enter split-screen mode.</li>
+    <li>Click <span class="ui">□ Single</span> in the same place to return to
+    a single panel.</li>
+    <li>In split mode each panel gets its own <strong>dataset, image and
+    edge-source pickers</strong> in a strip at its bottom-left, since those only
+    mean something relative to one dataset. The Layer Panel's header reads
+    <em>Comparing 2 panels — pick each dataset in its header</em>.</li>
   </ul>
 
   <h3>Choosing Which Panel You Are Editing</h3>
-  <p>The sidebar drives both panels. At the top of it,
+  <p>The Layer Panel drives both panels. At the top of it,
   <span class="ui">Panel 1</span> / <span class="ui">Panel 2</span> tabs choose
-  which one your edits apply to, and a checkbox below them controls whether they
+  which one your edits apply to, and a checkbox below them &mdash; reading
+  <span class="ui">settings linked — edits apply to both panels</span> or
+  <span class="ui">editing panel N only</span> &mdash; controls whether they
   are linked:</p>
 
   <ul>
@@ -1326,19 +1488,21 @@ Notch1,Dll4</code></pre>
     or two palettes, or two filters.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <p>Switching the checkbox back on <strong>re-syncs</strong> both panels to the
-    tab you are currently on. That is deliberate: a control labelled "linked"
+    tab you are currently on. That is deliberate: a control labeled "linked"
     over two visibly different panels would not be telling you the truth. Pick
     the tab whose look you want to keep <em>before</em> you re-link.</p>
   </div>
 
   <h3>Copying Settings From One Panel to the Other</h3>
   <p>While the panels are unlinked, a
-  <span class="ui">copy panel 1 → panel 2</span> button appears under the
-  checkbox. It copies every display setting from the tab you are on to the other
-  panel in one go, and then leaves the panels independent again — so you can
-  establish a common baseline and diverge from it.</p>
+  <span class="ui">copy panel 1 → panel 2</span> button (or
+  <span class="ui">copy panel 2 → panel 1</span>, depending on the tab you are
+  on) appears under the checkbox. It copies every display setting from the tab
+  you are on to the other panel in one go, and then leaves the panels
+  independent again — so you can establish a common baseline and diverge from
+  it.</p>
 
   <p>Settings that name something the other dataset does not have are dropped
   rather than copied: a metadata filter on a column it lacks, a gene allowlist
@@ -1350,7 +1514,7 @@ Notch1,Dll4</code></pre>
   <p>The <span class="ui">⇔ Match</span> button sets the other panel to your
   current panel's zoom while each panel stays centered on its own region.</p>
 
-  <div class="note">
+  <div class="callout note">
     <p>Match works in <strong>microns, not pixels</strong>, so the same physical
     distance spans the same width on screen in both panels — exactly as a scale
     bar would. This matters when the panels hold different platforms: 20% of a
@@ -1359,8 +1523,9 @@ Notch1,Dll4</code></pre>
   </div>
 
   <h3>Color Scales Across Panels</h3>
-  <p>The <span class="ui">shared colour scale across panels</span> checkbox, on
-  by default, makes both panels map color through one range computed across both.
+  <p>The <span class="ui">shared colour scale across panels</span> checkbox in
+  the <span class="ui">Cell Color</span> section, on by default, makes both
+  panels map color through one range computed across both.
   Leave it on for any figure. Two panels that each auto-scaled to their own data
   <em>look</em> comparable and are not — one panel's yellow might be 40 counts and
   the other's 4,000. Turn it off only when one panel's range is so much narrower
@@ -1376,8 +1541,11 @@ Notch1,Dll4</code></pre>
   <ul>
     <li><span class="ui">Pan</span>: the default mode. Click and drag to pan.</li>
     <li><span class="ui">⬡ Region</span>: draw a polygon on the tissue. Click
-    to place vertices; double-click to close. Regions are colored and labeled,
-    and remain visible on top of all data layers.</li>
+    to place vertices; double-click to close (a double-click with fewer than
+    three vertices cancels the polygon). Each region gets its own color and
+    remains visible on top of all data layers; its name and cell count appear
+    in the Layer Panel's <strong>Regions</strong> list rather than on the
+    canvas.</li>
     <li><span class="ui">⟷ Measure</span>: click two points to measure the
     distance between them in micrometers.</li>
     <li><span class="ui">▭ Rectangle</span>: drag a rectangle to frame an area
@@ -1385,18 +1553,27 @@ Notch1,Dll4</code></pre>
     <a href="#exporting">Saving Images</a>.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <p><strong>⬡ Region and ▭ Rectangle do different things.</strong> A region
     selects <em>cells</em>, and its output is a CSV of barcodes. A rectangle
     frames an <em>image</em>, and its output is a PNG. Drawing a region does not
     affect what an export contains, and vice versa.</p>
   </div>
 
-  <p>The <span class="ui">Clear</span> button removes the regions, measurements
-  and export rectangle belonging to <em>that panel</em> — each panel has its own
-  toolbar, so clearing one leaves the other's work alone.</p>
+  <p>The <span class="ui">Clear</span> button, which appears once there is
+  something to clear, removes the regions, measurements and export rectangle
+  belonging to <em>that panel</em> — each panel has its own toolbar, so
+  clearing one leaves the other's work alone.</p>
 
-  <div class="note">
+  <h3>Rotating the View</h3>
+  <p>The toolbar's <span class="ui">⟲</span> and <span class="ui">⟳</span>
+  buttons rotate the panel by 90° either way, and the box between them takes
+  any angle from 0 to 359°. Both the image and every data layer rotate
+  together, so a tissue can be set upright for a figure. A
+  <span class="ui">×</span> button appears beside the angle whenever it is not
+  zero and resets it. Each panel rotates independently.</p>
+
+  <div class="callout note">
     <p>In split-screen mode, regions and measurements belong to the panel they
     were drawn in and appear only there. They are stored in that dataset's
     coordinates, so a region drawn on one tissue would land somewhere meaningless
@@ -1406,8 +1583,10 @@ Notch1,Dll4</code></pre>
 
   <h3>Exporting Cells Within a Region</h3>
   <p>Each drawn region appears in the Layer Panel's <strong>Regions</strong>
-  list. The export button saves a CSV of the barcodes of all enclosed cells,
-  for downstream analysis in R.</p>
+  list with its cell count. The <span class="ui">CSV</span> button saves the
+  barcodes of all enclosed cells as
+  <code>[dataset]_region_[n].csv</code>, for downstream analysis in R; the
+  <span class="ui">×</span> beside it removes that region.</p>
 </section>
 
 
@@ -1434,12 +1613,19 @@ Notch1,Dll4</code></pre>
   <ol>
     <li>Optionally choose <span class="ui">▭ Rectangle</span> and drag to frame
     the area you want. Without a rectangle, the whole current view is used.</li>
-    <li>Click <span class="ui">Export…</span>.</li>
-    <li>Set the output <strong>width in pixels</strong> and the <strong>DPI</strong>,
-    then click <span class="ui">Export PNG</span>.</li>
+    <li>Click <span class="ui">Export…</span>. The <em>Export figure</em>
+    dialog opens.</li>
+    <li>Set <span class="ui">width (px)</span> and <span class="ui">DPI
+    (metadata)</span>, or click one of the preset buttons
+    (<span class="ui">3.5in @500</span>, <span class="ui">7in @500</span>,
+    <span class="ui">7in @600</span>), then click
+    <span class="ui">Export PNG</span>. The dialog shows the resulting output
+    size in pixels and inches as you type, warns above 8,000&nbsp;px, and
+    confirms with <em>Saved W × H px.</em> The file is named
+    <code>tissueplex_[dataset]_[timestamp].png</code>.</li>
   </ol>
 
-  <div class="note">
+  <div class="callout note">
     <p><strong>Resolution is pixels, not DPI.</strong> A PNG contains pixels; DPI
     only means something once you fix a print width. So decide the width in
     inches your figure will be printed at, multiply by the DPI you need, and use
@@ -1456,18 +1642,25 @@ Notch1,Dll4</code></pre>
 
   <h4>Options</h4>
   <ul>
-    <li><strong>Background</strong> — black by default, matching the viewer.
+    <li><span class="ui">background</span> — <em>black (as shown)</em> by
+    default, matching the viewer; also <em>transparent</em> and <em>white</em>.
     Transparent is useful for compositing in Illustrator or Photoshop; white
     suits a printed page. Some submission systems flatten transparency
     unpredictably, so choose a solid background if you are unsure.</li>
-    <li><strong>Scale bar</strong> — drawn in a margin band <em>below</em> the
-    plot rather than over the tissue, at a rounded length (50&nbsp;µm,
-    100&nbsp;µm, 500&nbsp;µm…) computed from the dataset's pixel size.</li>
-    <li><strong>Include annotations</strong> — off by default; turn it on to
-    draw your regions and measurements into the figure.</li>
+    <li><span class="ui">scale bar</span> — drawn in a margin band
+    <em>below</em> the plot rather than over the tissue, at a rounded length
+    (50&nbsp;µm, 100&nbsp;µm, 500&nbsp;µm…) computed from the dataset's pixel
+    size.</li>
+    <li><span class="ui">include annotations</span> — off by default; turn it
+    on to draw your <span class="ui">⬡ Region</span> polygons and
+    <span class="ui">⟷ Measure</span> lines into the figure. "Annotations"
+    here means only those drawn shapes, not cell metadata or clusters; with
+    nothing drawn, the box changes nothing.</li>
+    <li><span class="ui">clear ▭</span> — removes the framing rectangle from
+    inside the dialog.</li>
   </ul>
 
-  <div class="note">
+  <div class="callout note">
     <p><strong>The morphology image is not included in Export….</strong> It is a
     photograph, so unlike the data layers it cannot be redrawn at a higher
     resolution than it was acquired at, and including it would cap the whole
@@ -1479,17 +1672,23 @@ Notch1,Dll4</code></pre>
   <h4>Points to watch</h4>
   <ul>
     <li><strong>Sampling is not changed for you.</strong> The figure shows
-    exactly what the panel shows, including the edge density and transcript
+    exactly what the panel shows, including the edge sample and transcript
     sampling in effect. If you want the full edge set in a figure, raise the
-    density slider before exporting — and record the value you used in the
-    legend.</li>
+    <span class="ui">sample</span> slider in the <span class="ui">Edge
+    Data</span> section before exporting — and record the value you used in
+    the legend.</li>
     <li><strong>Keep the rectangle on screen.</strong> Data is loaded for the
     current view, so if you pan away from your rectangle the export would be
     missing whatever is off screen. The dialog warns you when this happens.</li>
-    <li><strong>Line weights are preserved, not re-tuned.</strong> Strokes are
-    scaled so the export matches what you approved on screen. A weight that
-    reads well on a monitor may still look heavy or thin in print — adjust
-    <span class="ui">edge width</span> for the figure and export again.</li>
+    <li><strong>Line weights are fixed in output pixels.</strong> A line is the
+    same number of pixels wide whatever size you export at, so the larger the
+    export, the thinner the lines look relative to the tissue, and two panels
+    exported at different widths will have mismatched line weights.
+    <strong>Export every panel of one figure at the same pixel width.</strong>
+    To make edges clearer, raise the Edges opacity, lower the
+    <span class="ui">sample</span> slider, or switch the Tissue Graph off;
+    those have a far larger effect than the <span class="ui">width</span>
+    slider.</li>
     <li><strong>If you rotate after drawing the rectangle</strong>, the export
     keeps the orientation the rectangle was drawn at. Redraw it to use the new
     angle.</li>
@@ -1510,9 +1709,17 @@ Notch1,Dll4</code></pre>
   <table>
     <tr><th>Problem</th><th>What to do</th></tr>
     <tr>
-      <td>Blank or grey canvas after the dataset loads</td>
-      <td>TissuePlex is still processing the morphology image. Wait 15–30 seconds
-      and refresh the page.</td>
+      <td>Dark canvas with cell outlines but no tissue image</td>
+      <td>The <span class="ui">Morphology</span> layer is off by default; tick
+      its checkbox. If the image still does not appear, TissuePlex may be
+      building the tile pyramid: wait 15–30 seconds and refresh the page.</td>
+    </tr>
+    <tr>
+      <td>Blank or gray canvas that never loads, even after a refresh</td>
+      <td>The cached tile pyramid may be corrupt (for example after the
+      computer slept mid-build). Stop TissuePlex, run
+      <code>docker compose down -v</code> to clear the cache, then start it
+      again; the pyramid is rebuilt on the next open.</td>
     </tr>
     <tr>
       <td>Black screen after updating (especially on Windows)</td>
@@ -1523,16 +1730,20 @@ Notch1,Dll4</code></pre>
       <td>My dataset doesn't appear in the dropdown</td>
       <td>Check that <code>DATA_PATH</code> points to the parent folder and that
       the dataset folder contains the platform sentinel file (e.g.
-      <code>experiment.xenium</code>).</td>
+      <code>experiment.xenium</code>). A fresh download lists only the four
+      built-in demo datasets; the larger ones need
+      <code>python3 sample_data/fetch_samples.py</code> first (Step 4).</td>
     </tr>
     <tr>
-      <td>Tissue Graph and Directed Edges don't appear in the panel</td>
+      <td>No lines appear and there is no LRM Mechanisms list</td>
       <td><code>edges.parquet</code> is missing or in the wrong place. It must be
       directly inside the dataset folder, alongside
-      <code>experiment.xenium</code>.</td>
+      <code>experiment.xenium</code>. If the list is there but no lines are,
+      tick the <span class="ui">Edges</span> checkbox — the layer is off by
+      default.</td>
     </tr>
     <tr>
-      <td>My metadata columns don't appear in the Color-by dropdown</td>
+      <td>My metadata columns don't appear in the Cell Color column dropdown</td>
       <td>Check that the CSV is in a folder named exactly
       <code>cell-metadata</code> inside the dataset folder, with barcodes as
       the first column. R's default <code>write.csv()</code> writes barcodes
@@ -1540,15 +1751,44 @@ Notch1,Dll4</code></pre>
     </tr>
     <tr>
       <td>Transcripts are not showing</td>
-      <td>Transcripts only appear when zoomed in close enough to see individual
-      cells. Try zooming in more. Also confirm the Transcripts toggle is on in
-      the Layer Panel.</td>
+      <td>The <span class="ui">Transcripts</span> layer is off by default; tick
+      its checkbox. On Xenium, transcripts with a Q-Score below 20 are hidden
+      unless you tick <span class="ui">show low-quality (Q &lt; 20) in
+      gray</span>. And check the <span class="ui">Transcript Species</span>
+      section: with no gene selected, nothing is drawn — click
+      <span class="ui">all</span>.</td>
     </tr>
     <tr>
       <td>TissuePlex is running slowly or edges lag</td>
-      <td>Reduce the <span class="ui">density</span> slider to 5% or lower.
+      <td>Reduce the <span class="ui">sample</span> slider to 5% or lower.
       Also check that Docker Desktop has at least 8 GB of memory allocated
-      (Settings → Resources).</td>
+      (Settings → Resources on a Mac; <code>.wslconfig</code> on Windows, see
+      Step 2).</td>
+    </tr>
+    <tr>
+      <td>A red <span class="ui">⚠ … failed: HTTP … — logged</span> badge
+      appears at the bottom of the canvas, or the viewer just stops
+      updating</td>
+      <td>A data request to the backend failed; the layer it was for is left
+      empty rather than crashing the viewer. The badge disappears after a few
+      seconds. Every such failure, every slow request and every backend crash is
+      written to a log file that survives restarts:<br>
+      <code>docker compose exec backend tail -n 300 /cache/logs/tissueplex.log</code><br>
+      If the badge keeps reappearing, restart with <code>docker compose
+      restart backend</code> and send the log to whoever maintains your
+      deployment. Opening a very large edge file for the first time is slow for
+      a minute or two while an index is built in the background; that is
+      normal and happens once.</td>
+    </tr>
+    <tr>
+      <td>My dataset has no DAPI / morphology image, or the badge says the
+      image <span class="ui">could not be opened</span></td>
+      <td>Both are handled. Without an image the cells, transcripts and edges
+      are drawn on a plain dark frame sized from the data, and there is no
+      Morphology row. If an image exists but cannot be read, the viewer reports
+      it (badge and log file) and draws the data on the same frame, so nothing
+      else is lost. The log line names the file; re-exporting it as a standard
+      OME-TIFF, or removing it, resolves the badge.</td>
     </tr>
     <tr>
       <td>Error: port 3000 is already in use</td>

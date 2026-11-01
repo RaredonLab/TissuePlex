@@ -10,21 +10,61 @@ BBox query parameters are also expected in image pixel space.
 Uses DuckDB for all parquet queries so large files (1+ GB) are processed in
 streaming chunks without loading the full dataset into RAM.
 """
+import logging
 import math
 import os
+import threading
+import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 import duckdb
+import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from app.readers import duck, metadata_filter, supplemental
+from app.readers import duck, metadata_filter, spatial_cache, supplemental
 from app.readers.metadata_filter import MetadataFilter
+
+log = logging.getLogger("tissueplex.edges")
 
 
 
 _UNSET = object()
+
+
+def _records(df: pd.DataFrame) -> list[dict]:
+    """DataFrame → JSON-safe records, without a Python loop over every value.
+
+    The old form, `{c: (None if not isfinite(v) else v) for c, v in row.items()}`
+    over `df.to_dict("records")`, visited every cell of the result in Python —
+    for a 500K-edge viewport that is six million isfinite calls per pan, more
+    time than the DuckDB query itself. Here the non-finite check is vectorised
+    per float column and the per-row fix-up runs only on columns that actually
+    contain a NaN or Inf (usually none). Building rows from column lists is also
+    ~2.5x faster than pandas' own to_dict.
+
+    Same output as before, including None in place of NaN/Inf, so the golden
+    snapshot digests do not move.
+    """
+    if df.empty:
+        return []
+    names = list(df.columns)
+    cols = []
+    for c in names:
+        col = df[c]
+        if col.dtype.kind == "f":
+            arr = col.to_numpy()
+            if not np.isfinite(arr).all():
+                col = col.astype(object).where(np.isfinite(arr), None)
+        elif col.dtype == object and col.isna().any():
+            # A NaN float inside an object column (a null string in pandas'
+            # hands) must become None too, as it did before.
+            col = col.where(col.notna(), None)
+        cols.append(col.tolist())
+    return [dict(zip(names, row)) for row in zip(*cols)]
 
 
 # The pipeline, in one place:
@@ -74,6 +114,99 @@ def density_predicate(density: float, key_sql: str = '"edge"') -> str:
     return f"(hash(CAST({key_sql} AS VARCHAR)) % {_DENSITY_MODULUS}) < {cut}"
 
 
+def _density_cut(density: float) -> int:
+    return _DENSITY_MODULUS if density is None or density >= 1.0 \
+        else max(1, int(density * _DENSITY_MODULUS))
+
+
+# ── Density tier ──────────────────────────────────────────────────────────────
+#
+# At whole-tissue zoom nothing can be pruned by position, so every LRM toggle
+# and every pan at that zoom was a scan of the full edge file. But the density
+# predicate is deterministic: the edges kept at density ≤ 0.1 are a *fixed*
+# subset of the file, and a query at any density ≤ 0.1 selects a subset of that
+# subset. So the reader keeps a second derived parquet — the ≤10% tier, sorted
+# the same way — and reads it whenever the requested density allows. At the
+# default density that is a tenth of the rows for every query, zoomed in or out.
+TIER_DENSITY = 0.1
+
+
+# ── Per-viewport score matrix ─────────────────────────────────────────────────
+#
+# Toggling a mechanism in the LRM list does not change which edges are in view,
+# only which of their rows count. The SQL path re-scanned the viewport's rows and
+# re-aggregated them on every click; this keeps those rows in memory once, as
+# three flat arrays (edge index, LRM index, score), so a toggle is a masked
+# `bincount` — a few milliseconds for a few hundred thousand rows — instead of
+# a query. The matrix is a pure function of (bbox, density), so it is keyed on
+# exactly that; filters do not enter because `query_scores` never applied them
+# (the frontend overlays scores onto the already-filtered structural rows).
+#
+# Bounded: entries are evicted least-recently-used once the process-wide budget
+# is reached, and a viewport whose rows would exceed the budget on its own is
+# simply not cached and answered by SQL as before.
+
+def _score_budget_bytes() -> int:
+    env = (os.getenv("SCORE_CACHE_MB") or "").strip()
+    if env:
+        return int(float(env) * 1024 * 1024)
+    avail = duck._available_memory_bytes() or (2 << 30)
+    return int(min(256 << 20, avail * 0.08))
+
+
+_SCORE_BUDGET = _score_budget_bytes()
+_score_entries: "OrderedDict[tuple, _ScoreMatrix]" = OrderedDict()
+_score_bytes = 0
+_score_lock = threading.Lock()
+
+
+class _ScoreMatrix:
+    __slots__ = ("edges", "lrm_index", "edge_idx", "lrm_idx", "score", "nbytes", "has_score")
+
+    def __init__(self, edges, lrm_index, edge_idx, lrm_idx, score, has_score):
+        self.edges = edges            # np.ndarray[object], one id per distinct edge
+        self.lrm_index = lrm_index    # {lrm: column index}
+        self.edge_idx = edge_idx      # int32 per row
+        self.lrm_idx = lrm_idx        # int32 per row, -1 for a null lrm
+        self.score = score            # float64 per row (nulls → 0, NaN kept), or None
+        self.has_score = has_score
+        self.nbytes = (edge_idx.nbytes + lrm_idx.nbytes
+                       + (score.nbytes if score is not None else 0)
+                       + 80 * (len(edges) + len(lrm_index)))
+
+    def compute(self, included, excluded, max_limit: int) -> list[dict]:
+        n_lrm = len(self.lrm_index)
+        if included is not None:
+            vis = np.zeros(n_lrm, dtype=bool)
+            for l in included:
+                i = self.lrm_index.get(l)
+                if i is not None:
+                    vis[i] = True
+        else:
+            vis = np.ones(n_lrm, dtype=bool)
+            for l in (excluded or []):
+                i = self.lrm_index.get(l)
+                if i is not None:
+                    vis[i] = False
+        mask = (self.lrm_idx >= 0) & vis[np.maximum(self.lrm_idx, 0)]
+        n_edges = len(self.edges)
+        counts = np.bincount(self.edge_idx[mask], minlength=n_edges)
+        cols = {"edge": self.edges, "visible_lrm_count": counts}
+        if self.score is not None:
+            cols["visible_score_sum"] = np.bincount(
+                self.edge_idx[mask], weights=self.score[mask], minlength=n_edges)
+        elif included is not None:
+            cols["visible_score_sum"] = np.zeros(n_edges, dtype=np.int64)
+        df = pd.DataFrame(cols)
+        if included is not None:
+            # The SQL form filters rows first and so never produces an edge with
+            # nothing visible; the exclusion form reports every edge in view.
+            df = df[df["visible_lrm_count"] > 0]
+        if len(df) > max_limit:
+            df = df.iloc[:max_limit]
+        return _records(df.reset_index(drop=True))
+
+
 class EdgeReader:
     def __init__(self, path: Path, pixel_size: float = 1.0):
         self.path = path
@@ -83,6 +216,14 @@ class EdgeReader:
         self._lrm_catalogue_cache = None
         self._pixel_size = pixel_size
         self._supp_cache = _UNSET
+        # Longest edge in the file, native units; see _bbox_sql. _UNSET until
+        # first needed, None when it cannot be measured.
+        self._max_edge_len = _UNSET
+        # Per-field colour summaries (type, categories, range) — see
+        # edge_color_summary — and per-column filter summaries.
+        self._summary_cache: dict = {}
+        self._col_summary_cache: dict = {}
+        self._matrix_lock = threading.Lock()
 
     # ── Supplemental edge metadata ────────────────────────────────────────────
     #
@@ -128,8 +269,102 @@ class EdgeReader:
             self._schema_cache = pq.read_schema(self.path)
         return self._schema_cache
 
-    def _from(self) -> str:
-        return f"read_parquet('{self._sql_path}')"
+    def _from(self, density: float = 1.0) -> str:
+        """FROM fragment for the edge file — the spatially-sorted copy when there is one.
+
+        Same mechanism the transcript and boundary readers use (`spatial_cache`):
+        a one-time background rewrite of the file sorted by a coarse grid on the
+        sending centroid, with small row groups, so the bbox predicate can skip
+        most of the file. Until the build lands, or for files under the size
+        threshold, this is the original file and the query is simply slower.
+        Results are identical either way — every query here aggregates or
+        filters by edge id, and nothing depends on row order.
+
+        A query that will apply the density predicate at ≤ `TIER_DENSITY` reads
+        the tier file instead (see the module note): the same rows the predicate
+        would keep, and nothing else, so the query's own predicate is a no-op on
+        it and the scan is a tenth of the size. Derived from the sorted file once
+        that exists, so the two builds never run at the same time.
+        """
+        src = spatial_cache.sorted_path(
+            self.path, self._dataset_dir, "x1", "y1", cache_name=self._cache_name())
+        if src is None:
+            return f"read_parquet('{self._sql_path}')"
+        if (density is not None and _density_cut(density) <= _density_cut(TIER_DENSITY)
+                and "edge" in self._parquet_schema().names):
+            tier = spatial_cache.sorted_path(
+                src, self._dataset_dir, "x1", "y1",
+                cache_name=f"{self._cache_name()}.d{int(round(TIER_DENSITY * 100)):02d}",
+                where_sql=density_predicate(TIER_DENSITY))
+            if tier is not None:
+                return duck.scan(tier)
+        return duck.scan(src)
+
+    def _cache_name(self) -> str:
+        # "edges" for the top-level file, "edges__edge.raw.minimum" for one in
+        # edges/, so two edge sources in one dataset never share a cache file.
+        rel = self.path.relative_to(self._dataset_dir) if self.path.is_relative_to(
+            self._dataset_dir) else Path(self.path.name)
+        stem = str(rel.with_suffix("")).replace(os.sep, "__")
+        return stem
+
+    def max_edge_length(self) -> Optional[float]:
+        """Length of the longest edge in native units, measured once per file."""
+        if self._max_edge_len is _UNSET:
+            self._max_edge_len = None
+            if {"x1", "y1", "x2", "y2"} <= set(self._parquet_schema().names):
+                try:
+                    with self._conn() as conn:
+                        v = conn.execute(
+                            f"SELECT MAX(sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))) "
+                            f"FROM read_parquet('{self._sql_path}')").fetchone()[0]
+                    if v is not None and math.isfinite(float(v)):
+                        self._max_edge_len = float(v)
+                except Exception as exc:
+                    log.warning("%s: could not measure max edge length: %s", self.path.name, exc)
+        return self._max_edge_len
+
+    def _bbox_sql(self, bbox: Optional[tuple]) -> str:
+        """WHERE fragment keeping edges with either endpoint in `bbox` (pixel space).
+
+        Two parts, and both are needed:
+
+        * The *exact* test, `(x1,y1) in box OR (x2,y2) in box`. This is what the
+          layer means, but DuckDB cannot prune parquet row groups through an OR
+          over two different column pairs — measured on a 33M-row sorted file, it
+          scanned every row group whatever the viewport.
+        * A *prunable* envelope on the sending centroid alone: `x1,y1` within the
+          box grown by the longest edge in the file. Any edge whose receiving end
+          is in view has its sending end within that distance of the box, so the
+          envelope keeps a superset of the exact set and changes nothing — but it
+          is a plain conjunction on one column pair, which is exactly what zone
+          maps can use. On the same file this took a 10% viewport from 231 ms to
+          28 ms and a 2% viewport from 213 ms to 16 ms.
+
+        Bounds are inlined as literals rather than bound as `?`, because DuckDB
+        prunes at plan time and bound values are not known then (see
+        `duck.bbox_predicate`, where this was measured). Every value goes through
+        `float()` first, so only finite numeric literals can reach the SQL.
+        """
+        if not bbox or None in bbox:
+            return ""
+        ps = self.pixel_size
+        try:
+            vals = [float(v) * ps for v in bbox]
+        except (TypeError, ValueError):
+            return ""
+        if not all(math.isfinite(v) for v in vals):
+            return ""
+        xmin, ymin, xmax, ymax = (repr(v) for v in vals)
+        exact = (f"((x1 >= {xmin} AND x1 <= {xmax} AND y1 >= {ymin} AND y1 <= {ymax}) OR "
+                 f"(x2 >= {xmin} AND x2 <= {xmax} AND y2 >= {ymin} AND y2 <= {ymax}))")
+        reach = self.max_edge_length()
+        if reach is None:
+            return exact
+        ex0, ey0, ex1, ey1 = (repr(v) for v in (
+            vals[0] - reach, vals[1] - reach, vals[2] + reach, vals[3] + reach))
+        envelope = f"(x1 >= {ex0} AND x1 <= {ex1} AND y1 >= {ey0} AND y1 <= {ey1})"
+        return f"{envelope} AND {exact}"
 
     def _conn(self):
         # Shared with the spatial readers via duck.connect(), which also gives a
@@ -189,7 +424,8 @@ class EdgeReader:
 
     def edge_color_values(self, mode: str, lrms: list[str] | None = None,
                           field: str | None = None,
-                          categorical: bool | None = None) -> dict:
+                          categorical: bool | None = None,
+                          summary: bool = False) -> dict:
         """
         Return per-directed-edge color values.
 
@@ -197,7 +433,14 @@ class EdgeReader:
         mode='metadata' — group by edge, take first value of `field` per edge;
                           categorical vs continuous auto-detected unless the caller
                           overrides it with `categorical` (issue #35)
+
+        `summary=True` (metadata mode) returns the column's type, categories and
+        range *without* the per-edge values — what a legend or a filter needs.
+        The viewer no longer asks for the full map at all: the per-edge value
+        rides on `query_grouped` rows as `color_value`.
         """
+        if summary and mode == "metadata":
+            return self.edge_color_summary(field, categorical)
         col_names = set(self._parquet_schema().names)
 
         if mode == "lrm_set":
@@ -262,6 +505,80 @@ class EdgeReader:
             }
 
         return {"type": "continuous", "values": {}, "min": 0, "max": 0}
+
+    def edge_color_summary(self, field: str | None,
+                           categorical: bool | None = None) -> dict:
+        """Type, categories and range of an edge metadata column, cached per field.
+
+        The legend, the filter panel and the colour panel all need to know what
+        kind of column this is and what its span is — none of them need a value
+        per edge, which is what they used to download (a GROUP BY over the whole
+        file and a map with one entry per edge in the dataset) just to read
+        `type` and `categories` off it. Distinct values are a single-column scan;
+        the continuous range aggregates per-edge first values once, so `p95`
+        matches what the old client-side percentile over the full map gave.
+        """
+        empty = {"type": "continuous", "min": 0.0, "max": 0.0, "p95": None,
+                 "categories": [], "empty": True}
+        if not field:
+            return empty
+        key = (field, categorical)
+        hit = self._summary_cache.get(key)
+        if hit is not None:
+            return hit
+        col_names = set(self._parquet_schema().names)
+        res = empty
+        try:
+            if field in col_names:
+                q = f'"{field}"'
+                with self._conn() as conn:
+                    distinct = conn.execute(
+                        f"SELECT DISTINCT {q} FROM {self._from()} WHERE {q} IS NOT NULL"
+                    ).df().iloc[:, 0]
+                if distinct.empty:
+                    res = empty
+                elif metadata_filter.is_categorical(distinct, categorical):
+                    res = {"type": "categorical", "empty": False,
+                           "categories": metadata_filter.sort_categories(
+                               distinct.astype(str).unique())}
+                else:
+                    with self._conn() as conn:
+                        row = conn.execute(f"""
+                            SELECT MIN(v), MAX(v), quantile_cont(v, 0.95) FROM (
+                                SELECT FIRST({q}) AS v FROM {self._from()} GROUP BY edge
+                            ) WHERE v IS NOT NULL AND isfinite(v)
+                        """).fetchone()
+                    if row is None or row[0] is None:
+                        res = empty
+                    else:
+                        res = {"type": "continuous", "min": float(row[0]),
+                               "max": float(row[1]), "p95": float(row[2]),
+                               "categories": [], "empty": False}
+            else:
+                supp = self._supplemental()
+                if supp is not None and field in supp.columns:
+                    col = supp.set_index("edge")[field].dropna()
+                    if col.empty:
+                        res = empty
+                    elif metadata_filter.is_categorical(col, categorical):
+                        labels = col.astype(str)
+                        res = {"type": "categorical", "empty": False,
+                               "categories": metadata_filter.sort_categories(labels.unique())}
+                    else:
+                        num = pd.to_numeric(col, errors="coerce").dropna()
+                        num = num[np.isfinite(num)]
+                        if num.empty:
+                            res = empty
+                        else:
+                            res = {"type": "continuous", "min": float(num.min()),
+                                   "max": float(num.max()),
+                                   "p95": float(num.quantile(0.95)),
+                                   "categories": [], "empty": False}
+        except Exception as exc:
+            log.warning("%s: could not summarise column %s: %s", self.path.name, field, exc)
+            res = empty
+        self._summary_cache[key] = res
+        return res
 
     # ── Metadata filtering (issue #45) ────────────────────────────────────────
 
@@ -446,11 +763,24 @@ class EdgeReader:
             "score_basis": "score" if has_score else "count",
         }
 
-    def edge_detail(self, edge_id: str) -> dict | None:
-        """Return all LRM rows for a single directed edge, structured for the info panel."""
+    def edge_detail(self, edge_id: str, near: Optional[tuple] = None) -> dict | None:
+        """Return all LRM rows for a single directed edge, structured for the info panel.
+
+        `near` is the edge's sending centroid in pixel space, when the caller has
+        it (the clicked row carries `x1`/`y1`). Matching on the id alone is a
+        scan of the whole file's `edge` column — about a second per click on a
+        lab-scale file; with the position the bbox envelope prunes it to the row
+        groups around that cell. The id is still what decides the match.
+        """
+        where, params = "WHERE edge = ?", [edge_id]
+        if near is not None and None not in near:
+            x, y = near
+            loc = self._bbox_sql((x - 2, y - 2, x + 2, y + 2))
+            if loc:
+                where += f" AND {loc}"
         with self._conn() as conn:
             df = conn.execute(
-                f"SELECT * FROM {self._from()} WHERE edge = ?", [edge_id]
+                f"SELECT * FROM {self._from()} {where}", params
             ).df()
         if df.empty:
             return None
@@ -491,6 +821,14 @@ class EdgeReader:
         col_names = set(self._parquet_schema().names)
         if column not in col_names:
             return {"type": "categorical", "values": [], "count": 0}
+        hit = self._col_summary_cache.get(column)
+        if hit is not None:
+            return hit
+        res = self._column_summary(column)
+        self._col_summary_cache[column] = res
+        return res
+
+    def _column_summary(self, column: str) -> dict:
         quoted = f'"{column}"'
         try:
             with self._conn() as conn:
@@ -543,12 +881,8 @@ class EdgeReader:
             return []
         ps = self.pixel_size
 
-        where, params = "", []
-        if bbox and None not in bbox:
-            xmin, ymin, xmax, ymax = (v * ps for v in bbox)
-            where = ("WHERE ((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                     "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))")
-            params = [xmin, xmax, ymin, ymax, xmin, xmax, ymin, ymax]
+        bbox_sql = self._bbox_sql(bbox)
+        where, params = (f"WHERE {bbox_sql}" if bbox_sql else ""), []
 
         has_edge = "edge" in cols
         key = "edge" if has_edge else "x1, y1, x2, y2"
@@ -564,14 +898,14 @@ class EdgeReader:
         with self._conn() as conn:
             df = conn.execute(f"""
                 SELECT * FROM (
-                    SELECT {sel} FROM {self._from()} {where} GROUP BY {key}
+                    SELECT {sel} FROM {self._from(density)} {where} GROUP BY {key}
                 ) {sample}
                 LIMIT {max_limit}
             """, params).df()
 
         for c in ("x1", "y1", "x2", "y2"):
             df[c] = df[c] / ps
-        return df.to_dict("records")
+        return _records(df)
 
     def query_grouped(
         self,
@@ -582,6 +916,7 @@ class EdgeReader:
         sending_ids: Optional[set] = None,
         receiving_ids: Optional[set] = None,
         edge_filters: Optional[list] = None,
+        color_field: Optional[str] = None,
     ) -> list[dict]:
         """
         Return one row per directed edge (GROUP BY edge), pre-aggregated.
@@ -606,6 +941,13 @@ class EdgeReader:
         narrowing to a rare subset keeps it at full density rather than sampling
         it away. Density is last, and deliberately so — it is a rendering-volume
         control, not a selection criterion.
+
+        `color_field` names an edge metadata column (parquet or edge-metadata/)
+        whose per-edge value is returned as `color_value` on each row. The
+        metadata colour-by used to be a separate request that grouped the
+        *whole* file and shipped a value for every edge in the dataset; carrying
+        it on the rows already being fetched costs one extra aggregate over the
+        viewport and nothing else. Unknown fields are ignored.
         """
         ps = self.pixel_size
         schema_names = set(self._parquet_schema().names)
@@ -615,17 +957,9 @@ class EdgeReader:
         where_conditions: list[str] = []
         where_params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                where_conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                      xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            where_conditions.append(bbox_sql)
 
         # Build SELECT columns
         agg_cols = ["edge"]
@@ -636,6 +970,16 @@ class EdgeReader:
         for coord in ("x1", "y1", "x2", "y2"):
             if coord in schema_names:
                 agg_cols.append(f'FIRST("{coord}") AS "{coord}"')
+
+        supp_color = None
+        if color_field:
+            if color_field in schema_names:
+                agg_cols.append(f'FIRST("{color_field}") AS color_value')
+            else:
+                supp = self._supplemental()
+                if supp is not None and color_field in supp.columns:
+                    supp_color = supp[["edge", color_field]].copy()
+                    supp_color["edge"] = supp_color["edge"].astype(str)
 
         # lrm_count  = total LRMs for this edge (tissue-graph structural layer)
         # score_sum  = SUM(all scores) — default visible_score_sum when no LRM filter
@@ -675,13 +1019,21 @@ class EdgeReader:
             sql = f"""
                 SELECT * FROM (
                     SELECT {select}
-                    FROM {self._from()}
+                    FROM {self._from(density)}
                     {where}
                     GROUP BY edge
                     HAVING lrm_count >= 1
                 ) {sample_clause}
                 LIMIT {max_limit}
             """
+            if supp_color is not None:
+                # The colour column lives in edge-metadata/, one row per edge, so
+                # it joins onto the grouped rows rather than into the aggregate.
+                conn.register("tp_color_supp", supp_color)
+                sql = f"""
+                    SELECT g.*, s."{color_field}" AS color_value
+                    FROM ({sql}) g LEFT JOIN tp_color_supp s ON g.edge = s.edge
+                """
             df = conn.execute(sql, where_params).df()
 
         for col in ("x1", "y1", "x2", "y2"):
@@ -691,11 +1043,7 @@ class EdgeReader:
         if "is_autocrine" in df.columns:
             df["is_autocrine"] = df["is_autocrine"].astype(bool)
 
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+        return _records(df)
 
     def query_scores(
         self,
@@ -703,6 +1051,7 @@ class EdgeReader:
         included_lrms: Optional[list] = None,
         excluded_lrms: Optional[list] = None,
         max_limit: int = 500_000,
+        density: float = 1.0,
     ) -> list[dict]:
         """
         Return per-edge LRM visibility scores: visible_lrm_count + visible_score_sum.
@@ -720,8 +1069,15 @@ class EdgeReader:
             All bbox edges appear in the result.
 
         The frontend picks whichever produces the smaller IN-list.
-        No density sampling — returns scores for all bbox edges so the
-        density-sampled structural edges always find their matching scores.
+
+        `density` applies the *same* deterministic predicate as `query_grouped`
+        (hash of the edge id), so the sampled structural edges always find their
+        scores — the two selections are identical by construction, not by luck.
+        It used to be absent here, which meant every LRM toggle aggregated and
+        shipped scores for every edge in the viewport while the layer drew a
+        tenth of them: at default density, ten times the rows for no benefit.
+        The predicate is applied before the GROUP BY, so the aggregation itself
+        shrinks with it. Defaults to 1.0 (unchanged behaviour).
         """
         ps = self.pixel_size
         schema_names = set(self._parquet_schema().names)
@@ -731,20 +1087,24 @@ class EdgeReader:
         if not has_lrm:
             return []
 
+        # A viewport query with a real filter is what the LRM checklist sends on
+        # every click; answer it from the cached matrix when there is one. The
+        # whole-file form (no bbox) and the empty exclusion are left to SQL —
+        # the first is unbounded, the second is never sent by the UI.
+        if bbox and None not in bbox and (included_lrms is not None or excluded_lrms):
+            mat = self._score_matrix(bbox, density)
+            if mat is not None:
+                return mat.compute(included_lrms, excluded_lrms, max_limit)
+
         where_conditions: list[str] = []
         where_params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                where_conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                where_params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                      xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            where_conditions.append(bbox_sql)
+        dens = density_predicate(density)
+        if dens:
+            where_conditions.append(dens)
 
         where = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
 
@@ -764,7 +1124,7 @@ class EdgeReader:
                 SELECT edge,
                        COUNT(*) AS visible_lrm_count,
                        {score_col}
-                FROM {self._from()}
+                FROM {self._from(density)}
                 {full_where}
                 GROUP BY edge
                 LIMIT {max_limit}
@@ -791,7 +1151,7 @@ class EdgeReader:
                 SELECT edge,
                        {vis_count} AS visible_lrm_count
                        {vis_score}
-                FROM {self._from()}
+                FROM {self._from(density)}
                 {where}
                 GROUP BY edge
                 LIMIT {max_limit}
@@ -803,12 +1163,85 @@ class EdgeReader:
 
         if df.empty:
             return []
+        return _records(df)
 
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+    def _score_matrix(self, bbox: tuple, density: float) -> Optional[_ScoreMatrix]:
+        """The viewport's (edge, lrm, score) rows as flat arrays, cached; see the module note.
+
+        Returns None when the rows would not fit the budget, in which case the
+        caller falls back to the SQL aggregate. The build runs outside the
+        request's cancellation scope: it is the *next* toggle that benefits from
+        it, and a user clicking quickly would otherwise interrupt it on every
+        click and never see it land.
+        """
+        global _score_bytes
+        try:
+            key = (self._sql_path, tuple(float(v) for v in bbox), _density_cut(density))
+        except (TypeError, ValueError):
+            return None
+        with _score_lock:
+            hit = _score_entries.get(key)
+            if hit is not None:
+                _score_entries.move_to_end(key)
+                return hit
+        # One build at a time per reader: concurrent toggles for the same view
+        # wait for the first build rather than each scanning the file.
+        with self._matrix_lock:
+            with _score_lock:
+                hit = _score_entries.get(key)
+                if hit is not None:
+                    _score_entries.move_to_end(key)
+                    return hit
+            mat = self._build_score_matrix(bbox, density)
+            if mat is None:
+                return None
+            with _score_lock:
+                _score_entries[key] = mat
+                _score_bytes += mat.nbytes
+                while _score_bytes > _SCORE_BUDGET and len(_score_entries) > 1:
+                    _, old = _score_entries.popitem(last=False)
+                    _score_bytes -= old.nbytes
+            return mat
+
+    def _build_score_matrix(self, bbox: tuple, density: float) -> Optional[_ScoreMatrix]:
+        schema_names = set(self._parquet_schema().names)
+        has_score = "score" in schema_names
+        conds = [c for c in (self._bbox_sql(bbox), density_predicate(density)) if c]
+        where = f"WHERE {' AND '.join(conds)}" if conds else ""
+        cols = "edge, lrm" + (", score" if has_score else "")
+        t0 = time.perf_counter()
+        with duck.uninterruptible(), self._conn() as conn:
+            tbl = conn.execute(f"SELECT {cols} FROM {self._from(density)} {where}").arrow()
+        n = tbl.num_rows
+        # Rough size before decoding, so an oversized viewport costs no more
+        # than the scan it would have cost anyway.
+        if n * 16 > _SCORE_BUDGET:
+            log.info("%s: %s rows in view exceed the score cache budget; using SQL",
+                     self.path.name, f"{n:,}")
+            return None
+        if n == 0:
+            return _ScoreMatrix(np.empty(0, dtype=object), {}, np.empty(0, np.int32),
+                                np.empty(0, np.int32),
+                                np.empty(0, np.float64) if has_score else None, has_score)
+        e = pc.dictionary_encode(tbl.column("edge").combine_chunks())
+        edges = np.asarray(e.dictionary.to_pylist(), dtype=object)
+        edge_idx = e.indices.to_numpy(zero_copy_only=False).astype(np.int32)
+        l = pc.dictionary_encode(tbl.column("lrm").combine_chunks())
+        lrm_index = {v: i for i, v in enumerate(l.dictionary.to_pylist())}
+        lrm_idx = pc.fill_null(l.indices, -1).to_numpy(zero_copy_only=False).astype(np.int32)
+        score = None
+        if has_score:
+            sc = tbl.column("score").combine_chunks()
+            score = sc.to_numpy(zero_copy_only=False).astype(np.float64, copy=True)
+            # SUM() skips NULLs but propagates NaN; keep both behaviours.
+            nulls = sc.is_null().to_numpy(zero_copy_only=False)
+            if nulls.any():
+                score[nulls] = 0.0
+        mat = _ScoreMatrix(edges, lrm_index, edge_idx, lrm_idx, score, has_score)
+        log.info("%s: cached score matrix for the view: %s rows, %s edges, %.0f MB in %.0f ms",
+                 self.path.name, f"{n:,}", f"{len(edges):,}", mat.nbytes / 1e6,
+                 (time.perf_counter() - t0) * 1000)
+        return mat
 
     def query(
         self,
@@ -823,17 +1256,9 @@ class EdgeReader:
         conditions: list[str] = []
         params: list = []
 
-        if bbox:
-            xmin, ymin, xmax, ymax = bbox
-            if None not in (xmin, ymin, xmax, ymax):
-                xmin_u, ymin_u = xmin * ps, ymin * ps
-                xmax_u, ymax_u = xmax * ps, ymax * ps
-                conditions.append(
-                    "((x1 >= ? AND x1 <= ? AND y1 >= ? AND y1 <= ?) OR "
-                    "(x2 >= ? AND x2 <= ? AND y2 >= ? AND y2 <= ?))"
-                )
-                params.extend([xmin_u, xmax_u, ymin_u, ymax_u,
-                                xmin_u, xmax_u, ymin_u, ymax_u])
+        bbox_sql = self._bbox_sql(bbox)
+        if bbox_sql:
+            conditions.append(bbox_sql)
 
         if filters:
             for col, val in filters.items():
@@ -893,8 +1318,4 @@ class EdgeReader:
             if col in df.columns:
                 df[col] = df[col] / ps
 
-        return [
-            {c: (None if isinstance(v, float) and not math.isfinite(v) else v)
-             for c, v in row.items()}
-            for row in df.to_dict(orient="records")
-        ]
+        return _records(df)

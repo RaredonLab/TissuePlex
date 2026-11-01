@@ -1,9 +1,43 @@
 # Public Datasets for Development & Testing
 
 This document lists publicly available datasets suitable for developing and testing
-TissuePlex across platforms, tissue types, species, and data configurations. Most of it
-covers 10x Xenium; see the classic Visium section at the end for the datasets the Visium
-reader was verified against.
+TissuePlex across platforms, tissue types, species, and data configurations. It opens
+with what the repository actually distributes and under which licence; the rest is a
+catalogue of further public data, mostly 10x Xenium.
+
+---
+
+## What ships with TissuePlex, and how
+
+| Dataset | Platform | Where it comes from | Licence | Size |
+|---|---|---|---|---|
+| `mouse_ileum_tiny` | Xenium | **in git** — 10x "Xenium Prime Mouse Ileum tiny" crop; edges are synthetic (`make_edges.py`) because the crop's expression matrix is a near-empty placeholder | CC BY 4.0 (10x) | 1.6 MB |
+| `visium_hd_tiny` | Visium HD | **in git** — subset of 10x "Visium HD Tiny Mouse Brain"; see its `PROVENANCE.md` | CC BY 4.0 (10x) | 26 MB |
+| `visium_tiny` | Visium | **in git** — synthetic, `make_visium.py` | — | 0.9 MB |
+| `seqfish_synthetic` | seqFISH | **in git** — synthetic, `make_seqfish.py` | — | 0.8 MB |
+| `xenium_human_breast_2fov` | Xenium | **release asset** via `sample_data/fetch_samples.py` — trimmed copy of 10x "Human Breast 2 FOV" plus NICHESv2 edges | CC BY 4.0 (10x) | 290 MB |
+| `visium_mouse_kidney` | Visium | **release asset** — 10x `V1_Mouse_Kidney` (two files, see below) plus NICHESv2 edges | CC BY 4.0 (10x) | 39 MB |
+| `cosmx-mousebrain` | CosMx | **release asset** — modified subset of the Bruker/NanoString 1000-plex mouse brain as archived by the OSTA project (OSF `5n4q3`, folder `CosMx1k_MouseBrain2`); `tx_file.csv` truncated to FOV 1 | Bruker "Data License Agreement for Non-Commercial Use" — PDF ships in the folder; **non-commercial only**, not MIT | 58 MB |
+| `merscope-vpt-smallset` | MERSCOPE | **not distributed** — Vizgen's U2OS "small set" from the `vizgen-postprocessing` vignette (1 GB zip; the `cell_by_gene` / `cell_metadata` tables are VPT outputs). No licence is stated for the data and Vizgen's terms of use reserve redistribution, so it stays a local-only development set | unclear | 43 MB local |
+| `seqfish_instrument2` | seqFISH | **not distributed** — Spatial Genomics' `seqfish-2-test-dataset.zip` used by scverse CI; downloads from spatialgenomics.com are gated and "all rights reserved" | not open | 2 MB local |
+
+The release assets are attached to the GitHub release tagged `v1.0.0` (the code release; the data
+zips are extra files on it, pinned by `RELEASE_TAG` in the script). Each zip holds
+only the files TissuePlex reads, a `PROVENANCE.md` stating source, licence and every
+modification, and (for CosMx) the licence PDF. `fetch_samples.py` verifies a SHA-256
+per asset before unpacking.
+
+Two consequences for anyone cutting a new release of the demo data:
+
+- **Keep the three licences separate.** The 10x sets are CC BY 4.0 and only need
+  attribution. The Bruker set may be redistributed only with its licence text, a
+  notice of what was modified, a link to Bruker, and for non-commercial use — none of
+  which the repository's MIT licence can grant, which is why it is a release asset
+  with its own `PROVENANCE.md` rather than a file in git.
+- **MERSCOPE has no demo a stranger can download.** The honest options are a synthetic
+  fixture in the style of `make_seqfish.py` / `make_visium.py`, or written permission
+  from Vizgen for the small set. Until one of those exists the MERSCOPE reader is
+  exercised only on the authors' machines.
 
 ---
 
@@ -27,7 +61,7 @@ tar xzf V1_Mouse_Kidney_spatial.tar.gz && rm V1_Mouse_Kidney_spatial.tar.gz
 
 | Dataset | Size | Spots in tissue | Notes |
 |---|---|---|---|
-| `V1_Mouse_Kidney` | 12 MB + 8 MB | 1,438 of 4,992 | The verification dataset. `visium_mouse_*/` is gitignored. |
+| `V1_Mouse_Kidney` | 12 MB + 8 MB | 1,438 of 4,992 | The verification dataset. `visium_mouse_*/` is gitignored; `fetch_samples.py` delivers it with its edge layer. |
 | `V1_Adult_Mouse_Brain` | 21 MB + 9 MB | — | Used only to cross-check the lattice geometry. |
 
 **What they established**, none of which the synthetic fixture could:

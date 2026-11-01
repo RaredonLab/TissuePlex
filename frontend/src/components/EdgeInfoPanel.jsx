@@ -29,7 +29,7 @@ const ROW_STYLE = {
   borderBottom: "1px solid #222",
 };
 
-export default function EdgeInfoPanel({ apiBase, dataset, edgeId, edgeFile = "edges.parquet", onClose }) {
+export default function EdgeInfoPanel({ apiBase, dataset, edgeId, edgeFile = "edges.parquet", hint = null, onClose }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -37,13 +37,18 @@ export default function EdgeInfoPanel({ apiBase, dataset, edgeId, edgeFile = "ed
     if (!edgeId) return;
     setLoading(true);
     setDetail(null);
-    const efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
+    let efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
+    // Position hint: lets the backend prune the lookup instead of scanning the
+    // whole file's id column (about a second per click on a lab-scale file).
+    if (hint && typeof hint.x === "number" && typeof hint.y === "number") {
+      efParam += `&x=${hint.x}&y=${hint.y}`;
+    }
     fetch(`${apiBase}/edges/${dataset}/edge/${encodeURIComponent(edgeId)}${efParam}`)
       .then((r) => (r.ok ? r.json() : null))
       .then(setDetail)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [apiBase, dataset, edgeId, edgeFile]);
+  }, [apiBase, dataset, edgeId, edgeFile, hint?.x, hint?.y]); // eslint-disable-line
 
   const totalScore = detail?.lrms?.reduce((s, r) => s + (r.score ?? 0), 0) ?? 0;
 

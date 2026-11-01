@@ -36,12 +36,16 @@ either way — but it is why enabling the cache moves sampled golden probes.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 from app.readers import duck
+
+log = logging.getLogger("tissueplex.spatial_cache")
 
 # Files below this are not worth rewriting. 64 MB is comfortably above the
 # bundled sample datasets and comfortably below a real Xenium transcript file.
@@ -99,15 +103,30 @@ def sorted_path(
     dataset_dir: Path,
     x_col: str,
     y_col: str,
+    cache_name: Optional[str] = None,
+    where_sql: Optional[str] = None,
 ) -> Optional[Path]:
     """Return a spatially-sorted copy of `source`, building it if needed.
 
     Returns None when caching is disabled, the file is too small to benefit, or
     the build fails — callers then query the original file, so this can never
     make a dataset unreadable.
+
+    `cache_name` overrides the cache file's stem. The default is the source's
+    own stem, which is right for one transcripts file per dataset but collides
+    for edge files: `edges/edge.raw.minimum.parquet` and
+    `edges/edge.normalized.product.parquet` both reduce to "edge", and two
+    sources sharing one cache file would rebuild it on every alternate request.
+
+    `where_sql` keeps only the rows matching a predicate — a *tier*, such as the
+    edges the deterministic density sample retains at ≤ 10%. It is part of the
+    cache identity (key and manifest), and a caller must pass a `cache_name` with
+    it so the tier never shadows the full file.
     """
     if not ENABLED or not source.exists():
         return None
+    if where_sql and not cache_name:
+        raise ValueError("where_sql requires an explicit cache_name")
 
     # Keyed on the sort columns as well as the path. The manifest check below
     # already refuses a cache sorted on a different column pair, but this memo
@@ -115,7 +134,7 @@ def sorted_path(
     # call — defeating the check written to prevent it. Not reachable today
     # (each source is queried with one fixed column pair) but silent if it ever
     # were: the data would be right and the row-group pruning wrong.
-    key = f"{source.resolve()}::{x_col}::{y_col}"
+    key = f"{source.resolve()}::{x_col}::{y_col}::{where_sql or ''}"
     if key in _resolved:
         return _resolved[key]
 
@@ -127,7 +146,7 @@ def sorted_path(
         _resolved[key] = None
         return None
 
-    stem = source.name.split(".")[0]
+    stem = cache_name or source.name.split(".")[0]
     cache_file = _cache_root(dataset_dir) / f"{stem}.sorted.parquet"
     manifest = _manifest_for(cache_file)
     stamp = _source_stamp(source)
@@ -147,13 +166,14 @@ def sorted_path(
                 # by the wrong axis, and silently so.
                 if (m.get("source") == stamp
                         and m.get("x_col") == x_col
-                        and m.get("y_col") == y_col):
+                        and m.get("y_col") == y_col
+                        and (m.get("where") or None) == (where_sql or None)):
                     _resolved[key] = cache_file
                     return cache_file
             except Exception:
                 pass  # unreadable manifest → rebuild
-            print(f"[spatial_cache] {source.name}: cache is stale "
-                  f"(source or sort columns changed); rebuilding")
+            log.info("%s: cache is stale (source or sort columns changed); rebuilding",
+                     source.name)
 
         # Build off the request thread and serve the source file meanwhile.
         #
@@ -168,7 +188,8 @@ def sorted_path(
         # The unsorted file answers the same query correctly, just slower, so
         # there is no reason to make anyone wait for the index. Queries are
         # served from the source until the build lands, then pick it up.
-        _start_background_build(key, source, cache_file, manifest, stamp, x_col, y_col)
+        _start_background_build(key, source, cache_file, manifest, stamp, x_col, y_col,
+                                where_sql)
         return None
 
 
@@ -180,6 +201,7 @@ def _start_background_build(
     stamp: dict,
     x_col: str,
     y_col: str,
+    where_sql: Optional[str] = None,
 ) -> None:
     """Kick off an index build in a daemon thread, at most one per source.
 
@@ -195,7 +217,7 @@ def _start_background_build(
 
     def run() -> None:
         try:
-            built = _build(source, cache_file, manifest, stamp, x_col, y_col)
+            built = _build(source, cache_file, manifest, stamp, x_col, y_col, where_sql)
             # A failed build resolves to None on purpose — retrying a build that
             # just failed on every subsequent viewport change would turn one bad
             # file into a rebuild storm.
@@ -205,14 +227,14 @@ def _start_background_build(
             # something unexpected. Catch it anyway: an exception escaping a
             # thread is printed to stderr and then lost, leaving the key stuck
             # in _building so no later request would ever retry the build.
-            print(f"[spatial_cache] background build for {source.name} failed: {exc}")
+            log.error("background build for %s failed: %s", source.name, exc)
             _resolved[key] = None
         finally:
             with _locks_guard:
                 _building.discard(key)
 
-    print(f"[spatial_cache] {source.name}: building index in the background; "
-          f"queries use the unsorted file until it is ready")
+    log.info("%s: building spatial index in the background; "
+             "queries use the unsorted file until it is ready", source.name)
     threading.Thread(target=run, name=f"spatial-index-{source.name}",
                      daemon=True).start()
 
@@ -224,6 +246,7 @@ def _build(
     stamp: dict,
     x_col: str,
     y_col: str,
+    where_sql: Optional[str] = None,
 ) -> Optional[Path]:
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -238,7 +261,15 @@ def _build(
             return None
 
         # Write to a temp name and rename, so a crashed or concurrent build never
-        # leaves a half-written file that looks complete.
+        # leaves a half-written file that looks complete. A `.building-*` file
+        # from a process that died mid-build (an OOM kill, a container restart)
+        # is garbage by definition — only this process builds this cache — so
+        # clear any before starting rather than leaving them to accumulate.
+        for leftover in cache_file.parent.glob(f"{cache_file.stem}.building-*.parquet"):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
         tmp = cache_file.with_suffix(f".building-{os.getpid()}.parquet")
 
         with duck.connect() as conn:
@@ -252,11 +283,13 @@ def _build(
             span = max(float(xmax) - float(xmin), float(ymax) - float(ymin), 1e-9)
             cell = span / GRID_DIVISIONS
 
-            print(f"[spatial_cache] building spatial index for {source.name} "
-                  f"({n:,} rows, {source.stat().st_size / 1e6:.0f} MB) — one-time")
+            log.info("building spatial index for %s (%s rows, %.0f MB) — one-time",
+                     source.name, f"{n:,}", source.stat().st_size / 1e6)
+            t0 = time.perf_counter()
+            where = f"WHERE {where_sql}" if where_sql else ""
             conn.execute(f"""
                 COPY (
-                    SELECT * FROM {src}
+                    SELECT * FROM {src} {where}
                     ORDER BY floor("{x_col}" / {cell}), floor("{y_col}" / {cell})
                 ) TO '{str(tmp).replace("'", "''")}'
                 (FORMAT PARQUET, ROW_GROUP_SIZE {ROW_GROUP_SIZE})
@@ -266,17 +299,18 @@ def _build(
         manifest.write_text(json.dumps({
             "source": stamp,
             "x_col": x_col, "y_col": y_col,
+            "where": where_sql or None,
             "row_group_size": ROW_GROUP_SIZE,
             "grid_divisions": GRID_DIVISIONS,
         }, indent=2))
-        print(f"[spatial_cache] built {cache_file.name} "
-              f"({cache_file.stat().st_size / 1e6:.0f} MB)")
+        log.info("built %s (%.0f MB) in %.1f s", cache_file.name,
+                 cache_file.stat().st_size / 1e6, time.perf_counter() - t0)
         return cache_file
 
     except Exception as exc:
         # Never let an indexing failure break the query — fall back to the source.
-        print(f"[spatial_cache] could not build index for {source.name}: {exc}; "
-              f"querying the original file")
+        log.error("could not build index for %s: %s; querying the original file",
+                  source.name, exc)
         try:
             for leftover in cache_file.parent.glob(f"{cache_file.stem}.building-*.parquet"):
                 leftover.unlink()
