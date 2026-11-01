@@ -220,7 +220,7 @@ sample_data/                 Partially gitignored — default data mount for loc
                              visium_tiny, visium_hd_tiny); larger and licence-restricted
                              datasets are ignored. See *Demo Data Distribution* below.
   fetch_samples.py           Downloads the three redistributable real datasets from the
-                             `demo-data-v1` GitHub release (sha256-verified zips, each with
+                             `v1.0.0` GitHub release (sha256-verified zips, each with
                              a PROVENANCE.md). Stdlib only.
   make_edges.py              Synthetic edges.parquet generator
   make_seqfish.py            Synthetic seqFISH v2 ROI generator (committable fixture)
@@ -323,7 +323,7 @@ split by licence, recorded in `docs/public_datasets.md` (*What ships with Tissue
 
 | Dataset | How it ships | Why |
 |---|---|---|
-| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (`demo-data-v1`) | 10x example data, CC BY 4.0 |
+| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.0` release) | 10x example data, CC BY 4.0 |
 | `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Not MIT. |
 | `merscope-vpt-smallset` | not distributed | Vizgen's U2OS "small set" from the VPT vignette; no licence stated, terms of use reserve redistribution |
 | `seqfish_instrument2` | not distributed | Spatial Genomics test set used by scverse CI; gated download, no open licence |

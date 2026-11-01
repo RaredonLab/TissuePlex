@@ -21,7 +21,8 @@ catalogue of further public data, mostly 10x Xenium.
 | `merscope-vpt-smallset` | MERSCOPE | **not distributed** — Vizgen's U2OS "small set" from the `vizgen-postprocessing` vignette (1 GB zip; the `cell_by_gene` / `cell_metadata` tables are VPT outputs). No licence is stated for the data and Vizgen's terms of use reserve redistribution, so it stays a local-only development set | unclear | 43 MB local |
 | `seqfish_instrument2` | seqFISH | **not distributed** — Spatial Genomics' `seqfish-2-test-dataset.zip` used by scverse CI; downloads from spatialgenomics.com are gated and "all rights reserved" | not open | 2 MB local |
 
-The release assets live on the GitHub release tagged `demo-data-v1`. Each zip holds
+The release assets are attached to the GitHub release tagged `v1.0.0` (the code release; the data
+zips are extra files on it, pinned by `RELEASE_TAG` in the script). Each zip holds
 only the files TissuePlex reads, a `PROVENANCE.md` stating source, licence and every
 modification, and (for CosMx) the licence PDF. `fetch_samples.py` verifies a SHA-256
 per asset before unpacking.

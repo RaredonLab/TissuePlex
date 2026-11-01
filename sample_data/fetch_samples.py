@@ -2,7 +2,7 @@
 """Fetch the larger TissuePlex demo datasets into sample_data/.
 
 Four small datasets are committed to the repository. The real, larger ones are
-too big for git and are published as assets of a GitHub release instead. This
+too big for git and are attached to the v1.0.0 GitHub release instead. This
 script downloads them, verifies their SHA-256 checksums, and unpacks each into
 its own folder beside this file, where `docker compose up` (which mounts
 sample_data/ as /data) and the dev backend (DATA_ROOT=../sample_data) find them.
@@ -31,7 +31,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-RELEASE_TAG = "demo-data-v1"
+RELEASE_TAG = "v1.0.0"
 RELEASE_BASE = f"https://github.com/RaredonLab/TissuePlex/releases/download/{RELEASE_TAG}"
 
 # name -> metadata. `sha256` is of the zip asset; `size_mb` is the download size.
