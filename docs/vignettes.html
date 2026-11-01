@@ -248,28 +248,36 @@ everything in it works the same on a full run.</p>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex4"><span class="num">4</span>Spots and bins: the array platforms</h2>
-<p class="meta">Datasets <code>visium_mouse_kidney</code> (fetched) and <code>visium_hd_tiny</code> (in the clone) · 3 minutes</p>
-<p>Classic Visium measures 55 µm spots on a 100 µm lattice, each covering one to ten
-cells; Visium HD tiles the capture area with 2, 8 or 16 µm square bins. Neither has
-per-molecule coordinates. TissuePlex draws a polygon per unit, a 16-sided circle for a
-spot and a square for a bin, so colouring, clicking, filtering and NICHESv2 edges all
+<p class="meta">Datasets <code>visium_mouse_kidney</code> (fetched) and <code>visium_hd_tiny</code> (in the clone) · 4 minutes</p>
+<p>Classic Visium measures 55 µm spots on a 100 µm hexagonal lattice, each covering one
+to ten cells; Visium HD tiles the capture area with 2, 8 or 16 µm square bins. Neither
+has per-molecule coordinates. TissuePlex draws a polygon per unit, a 16-sided circle for
+a spot and a square for a bin, so colouring, clicking, filtering and NICHESv2 edges all
 work exactly as they do for cells. The sidebar relabels itself: <strong>Spot Segments</strong>
 and <strong>Spot Info</strong> on Visium, <strong>Bin Segments</strong> on HD.</p>
 <ol>
-  <li>Choose <span class="ui">visium_mouse_kidney</span>; tick <span class="ui">Morphology</span> and <span class="ui">Edges</span>.</li>
-  <li>Spots are drawn at their detected ~65 µm footprint, as Loupe and scanpy draw them. Use <span class="ui">⟷ Measure</span> between two spot centres: the label reads 100 µm, the lattice pitch, which is how the pixel size of this platform is derived.</li>
+  <li>Choose <span class="ui">visium_mouse_kidney</span>. Tick <span class="ui">Morphology</span> and raise it to about 85%: this one is a brightfield H&amp;E, so it wants to be bright. Set spot <span class="ui">fill</span> to 0 and <span class="ui">outline</span> to 50% so the stain shows through the rings.</li>
+  <li>Tick <span class="ui">Edges</span> (100%, width 1), leave the <span class="ui">Tissue Graph</span> at 15%, and set both <span class="ui">sample</span> sliders to 100%. Keep the colour range on <span class="ui">robust 5–95%</span>: spot-level scores are summed over many cells and have a long tail.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/visium_kidney.jpg" alt="A coronal mouse kidney section with Visium spots drawn as circles over the H&E image and NICHESv2 spot-to-spot edges between neighbouring spots">
-  <figcaption>Mouse kidney, classic Visium. Each circle is a spot; the lines are spot–spot NICHESv2 edges. Top mechanisms in this dataset include Apoe→Lrp2 and Cst3→Lrp2, megalin-mediated uptake in the proximal tubule.</figcaption>
+  <img src="img/vignettes/ex4_kidney.jpg" alt="A coronal mouse kidney section on a Visium slide: H&E in grey, every capture spot as a light-blue ring, and NICHESv2 spot-to-spot edges in viridis with yellow concentrated in the cortex and medulla">
+  <figcaption><strong>4a · Mouse kidney, classic Visium, whole capture area.</strong> 1,438 spots on tissue, each a ring; the fiducial frame of the slide is visible at the edges of the H&amp;E. Lines are spot–spot NICHESv2 edges coloured by summed score. The top mechanisms in this dataset include Apoe→Lrp2 and Cst3→Lrp2, megalin-mediated uptake in the proximal tubule, which is why the cortex lights up.</figcaption>
 </figure>
 <ol start="3">
-  <li>Choose <span class="ui">visium_hd_tiny</span>. The tissue sits in one corner of the frame, because 10x's "tiny" dataset is a corner crop; zoom into it.</li>
-  <li>The bins follow the edge file: this dataset was scored at 16 µm, so 16 µm bins are shown. (Barcodes are bin-size specific; showing 8 µm bins under 16 µm edges would leave nothing to click.)</li>
+  <li>Zoom into the cortex until the lattice resolves and raise <span class="ui">offset</span> to 2. Each spot now shows its six neighbours' edges as paired half-arrows converging on its centre.</li>
+  <li>Use <span class="ui">⟷ Measure</span> between two adjacent spot centres: the label reads 100 µm, the lattice pitch, which is how the pixel size of this platform is derived (Space Ranger does not record one).</li>
 </ol>
 <figure>
-  <img src="img/vignettes/visium_hd.jpg" alt="Visium HD bins drawn as a grid of small squares over the tissue image, with edges between neighbouring bins">
-  <figcaption>Visium HD, 16 µm bins over the hires image. Expression here is very shallow (32,000 UMIs over the whole corner), so gene-set colouring looks sparse; that is the data, not the viewer.</figcaption>
+  <img src="img/vignettes/ex4_kidney_lattice.jpg" alt="Close view of the Visium lattice: rings on a hexagonal grid over H&E, with paired directed edges and small arrowheads between every neighbouring pair">
+  <figcaption><strong>4b · The lattice at spot resolution.</strong> Spots are drawn at their detected ~65 µm footprint, as Loupe and scanpy draw them, not the 55 µm nominal capture diameter. Every spot has up to six neighbours, each connected in both directions; the yellow cluster at upper left is a group of spots whose summed scores sit in the top 5%.</figcaption>
+</figure>
+<ol start="5">
+  <li>Choose <span class="ui">visium_hd_tiny</span>. The tissue sits in one corner of the frame, because 10x's "tiny" dataset is a corner crop; zoom into it.</li>
+  <li>Untick <span class="ui">Edges</span> and <span class="ui">Tissue Graph</span>, tick <span class="ui">Color bins</span> and choose <span class="ui">Gene set (selected species)</span>. With every gene selected that is total UMI per bin, on an auto range.</li>
+</ol>
+<figure>
+  <img src="img/vignettes/ex4_hd_bins.jpg" alt="A grid of 16 µm Visium HD bins coloured by total expression with viridis: mostly purple with teal and yellow bins tracing tissue structures, over a grey CytAssist image">
+  <figcaption><strong>4c · Visium HD, 16 µm bins coloured by total expression.</strong> The bins follow the edge file: this dataset was scored at 16 µm, so 16 µm bins are shown (barcodes are bin-size specific, and 8 µm bins under 16 µm edges would leave nothing to click). The expression here is very shallow, 32,000 UMIs over the whole corner, so NICHESv2 scored only a handful of pairs and the edge layer is left off; the bins themselves still trace the tissue.</figcaption>
 </figure>
 <div class="callout warn"><strong class="label">A spot is a neighbourhood, not a cell</strong>
 <p>Edges on classic Visium connect spots, each a mix of one to ten cells. Say so in a figure legend. The HD bins are closer to single cells but still a grid, not a segmentation.</p></div>
