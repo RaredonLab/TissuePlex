@@ -324,7 +324,7 @@ split by licence, recorded in `docs/public_datasets.md` (*What ships with Tissue
 | Dataset | How it ships | Why |
 |---|---|---|
 | `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.0` release) | 10x example data, CC BY 4.0 |
-| `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Not MIT. |
+| `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Separate from the code licence. |
 | `merscope-vpt-smallset` | not distributed | Vizgen's U2OS "small set" from the VPT vignette; no licence stated, terms of use reserve redistribution |
 | `seqfish_instrument2` | not distributed | Spatial Genomics test set used by scverse CI; gated download, no open licence |
 
@@ -2048,6 +2048,8 @@ what makes the 132M-row build possible at all rather than merely slower.
 Other env knobs: `SPATIAL_CACHE=0` disables the spatial index entirely,
 `SPATIAL_CACHE_MIN_BYTES` (default 64 MB) sets the size below which files are left alone,
 and `CACHE_DIR` relocates both the DZI pyramids and the spatial index off the data volume.
+
+**Licence.** AGPL-3.0 from v1.0.0 (`LICENSE`, `package.json` `license` field, README *Licence* section), dual-licensed with a commercial option offered by the lab. Releases v0.2.0–v0.9.x were MIT and stay MIT. Any new file carrying a licence notice must say AGPL, and a contributor's code lands under AGPL — the lab needs the right to relicense commercially, so outside contributions of any size should come with that agreement.
 
 **Access control is opt-in and off by default.** The Caddyfile supports `basicauth`, but
 unless it is enabled anyone with the URL can view the data. There is no application-level

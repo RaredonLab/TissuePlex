@@ -6,6 +6,8 @@ An interactive spatial transcriptomics viewer for exploring cell-cell communicat
 
 ![TissuePlex demo](docs/demo.gif)
 
+Free and open source under the [GNU AGPL v3](LICENSE) for research and any use that keeps the source open; a commercial licence is available for use in closed products or services — see [Licence](#licence).
+
 📖 **[User manual](https://raredonlab.github.io/TissuePlex/)** — step-by-step setup and a reference for every control in the interface. No programming experience assumed.
 
 🔬 **[Worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html)** — seven short, screenshot-led tours on the demo datasets: where the signalling is, one cell's neighbourhood, your own annotations, spots and bins, platforms without an image, side-by-side comparison, and figures for a paper.
@@ -19,6 +21,7 @@ The release reviewed alongside the manuscript. Functionally the v0.9.x viewer, w
 - **Worked examples.** A new [screenshot-led tour](https://raredonlab.github.io/TissuePlex/vignettes.html) of seven workflows on the demo datasets, and a manual re-checked control by control against the software.
 - **Real demo data in one command.** `python3 sample_data/fetch_samples.py` adds the 10x Xenium breast, 10x Visium mouse kidney and Bruker CosMx mouse brain datasets, each with NICHESv2 edges and a provenance note, from the release's attached files.
 - **Two sidebar fixes.** The edge-table filter dropdown threw when a column was chosen; the inert *min strength* slider is gone.
+- **Licence change.** From this release TissuePlex is distributed under the GNU AGPL v3 with a commercial licence available; earlier releases remain under the MIT licence they were published with.
 
 ## What's new in v0.9.1
 
@@ -327,6 +330,15 @@ Tracked in [GitHub issues](https://github.com/RaredonLab/TissuePlex/issues).
 Large datasets are handled by a spatial index built automatically on first access, alongside the tile pyramid: transcript, boundary and edge files over 64 MB are rewritten sorted by a spatial grid, which makes viewport queries roughly 27× faster on a 40M-row transcript file and 13× on a 33M-row edge file, and also converts seqFISH CSV to parquet along the way. Edge files additionally get a 10% density tier for whole-tissue views. Set `SPATIAL_CACHE=0` to disable it.
 
 ---
+
+## Licence
+
+TissuePlex is **dual-licensed**.
+
+- **Open source: [GNU Affero General Public License v3.0](LICENSE).** Use it, modify it and share it freely. If you distribute a modified version, or let others use a modified version over a network, the AGPL requires you to make your modified source available under the same terms. Academic and non-profit use is unaffected by this in practice.
+- **Commercial licence.** If you want to use TissuePlex, or code derived from it, in a product or service without the AGPL's source-sharing obligations, contact the Raredon Lab for a commercial licence.
+
+Releases before v1.0.0 were published under the MIT licence and remain so. The demo datasets are not covered by either licence: each carries its own terms in its `PROVENANCE.md` (10x data under CC BY 4.0; the CosMx set under Bruker's non-commercial data licence).
 
 ## Citation
 
