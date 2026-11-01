@@ -1,6 +1,6 @@
 # TissuePlex
 
-**v0.9.1**
+**v1.0.0**
 
 An interactive spatial transcriptomics viewer for exploring cell-cell communication from [NICHESv2](https://github.com/RaredonLab/NICHESv2) directly on the tissue image.
 
@@ -11,6 +11,14 @@ An interactive spatial transcriptomics viewer for exploring cell-cell communicat
 🔬 **[Worked examples](https://raredonlab.github.io/TissuePlex/vignettes.html)** — seven short, screenshot-led tours on the demo datasets: where the signalling is, one cell's neighbourhood, your own annotations, spots and bins, platforms without an image, side-by-side comparison, and figures for a paper.
 
 ---
+
+## What's new in v1.0.0
+
+The release reviewed alongside the manuscript. Functionally the v0.9.x viewer, with the public-facing material brought up to date:
+
+- **Worked examples.** A new [screenshot-led tour](https://raredonlab.github.io/TissuePlex/vignettes.html) of seven workflows on the demo datasets, and a manual re-checked control by control against the software.
+- **Real demo data in one command.** `python3 sample_data/fetch_samples.py` adds the 10x Xenium breast, 10x Visium mouse kidney and Bruker CosMx mouse brain datasets, each with NICHESv2 edges and a provenance note, from the release's attached files.
+- **Two sidebar fixes.** The edge-table filter dropdown threw when a column was chosen; the inert *min strength* slider is gone.
 
 ## What's new in v0.9.1
 
