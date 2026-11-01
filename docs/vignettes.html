@@ -85,7 +85,7 @@
   <a href="#ex2">2 · One cell's neighbourhood</a>
   <a href="#ex3">3 · Your own annotations</a>
   <a href="#ex4">4 · Spots and bins (Visium)</a>
-  <a href="#ex5">5 · With and without an image</a>
+  <a href="#ex5">5 · Transcripts in their cells</a>
   <a href="#ex6">6 · Side by side</a>
   <a href="#ex7">7 · A figure for the paper</a>
   <div class="toc-label">Elsewhere</div>
@@ -122,7 +122,7 @@ datasets are published as release assets; one command fetches them:</p>
   <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells. In the clone.</td><td>5</td></tr>
   <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 2, 6, 7</td></tr>
   <tr><td><code>visium_mouse_kidney</code></td><td>Visium</td><td>10x's mouse kidney coronal section, 1,438 spots on tissue, NICHESv2 spot–spot edges. Fetched.</td><td>4</td></tr>
-  <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>5</td></tr>
+  <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, coronal section, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>1</td></tr>
 </table>
 <div class="callout note"><strong class="label">Three layers start switched off</strong>
 <p>When the viewer opens, <span class="ui">Morphology</span>, <span class="ui">Transcripts</span>
@@ -131,35 +131,48 @@ canvas. Every example below starts by ticking what it needs.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex1"><span class="num">1</span>Where is the signalling?</h2>
-<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 5 minutes · the core use case</p>
+<p class="meta">Dataset <code>cosmx-mousebrain</code> (fetched) · 5 minutes · the core use case</p>
 <p>NICHESv2 scores every neighbouring pair of cells for every ligand–receptor
 mechanism it can see in the panel. TissuePlex draws that as a graph on the tissue:
 first the <em>tissue graph</em>, every pair of cells close enough to be scored, then the
 <em>scores</em> as colour on those same lines. Start with the structure, then ask where
-the signalling is.</p>
+the signalling is. A coronal mouse brain section is a good first dataset because you
+already know its anatomy, so you can judge the answer.</p>
 <ol>
-  <li>Choose <span class="ui">xenium_human_breast_2fov</span> in the <span class="ui">Dataset</span> menu.</li>
-  <li>Under <strong>Cell Segments</strong>, drag <span class="ui">sample</span> to 100% and <span class="ui">fill</span> down to about 12%, so cells sit as a faint ghost under the lines. Leave <span class="ui">Morphology</span> off for this one; the image comes back in example 2.</li>
+  <li>Choose <span class="ui">cosmx-mousebrain</span> in the <span class="ui">Dataset</span> menu. This dataset ships no image, so the cells are drawn on a frame sized from the data.</li>
+  <li>Under <strong>Cell Segments</strong>, drag <span class="ui">sample</span> to 100% and <span class="ui">fill</span> down to about 12%, so the 38,996 cells sit as a faint ghost under the lines.</li>
   <li>Under <strong>Edge Data</strong>, drag <span class="ui">sample</span> to 100% and set the <span class="ui">Tissue Graph</span> opacity to about 60%. This is figure 1a.</li>
-  <li>Tick <span class="ui">Edges</span>, raise its opacity to 100% and lower <span class="ui">width</span> to 1. Drop the tissue graph back to 15% so it reads as a faint scaffold beneath the coloured lines. This is figure 1b.</li>
+  <li>Tick <span class="ui">Edges</span>, raise its opacity to 100%, lower <span class="ui">width</span> to 1, and drop the tissue graph back to 15% so it reads as a faint scaffold under the coloured lines.</li>
+  <li>In the legend under <span class="ui">edge color</span>, switch <span class="ui">auto</span> to <span class="ui">robust 5–95%</span>. This is figure 1b.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/ex1_graph.jpg" alt="The tissue graph of a two-field Xenium breast section: every pair of neighbouring cells joined by a thin grey line on a dark background">
-  <figcaption><strong>1a · The tissue graph.</strong> 7,275 cells, 44,759 neighbouring pairs, every one drawn. This layer never changes with the mechanism selection or the filters: it is the set of pairs NICHESv2 scored, and everything else in the viewer is a subset of it.</figcaption>
+  <img src="img/vignettes/ex1_brain_graph.jpg" alt="The tissue graph of a coronal mouse brain section: every pair of neighbouring cells joined by a thin grey line, with the hippocampus, cortex and midline visible as denser regions">
+  <figcaption><strong>1a · The tissue graph.</strong> 38,996 cells, 164,550 neighbouring pairs, every one drawn. This layer never changes with the mechanism selection or the filters: it is the set of pairs NICHESv2 scored, and everything else in the viewer is a subset of it. Dense cell layers, the hippocampal pyramidal layer and the dentate gyrus among them, read as bright bands because they have more pairs per unit area.</figcaption>
 </figure>
 <figure>
-  <img src="img/vignettes/ex1_scored.jpg" alt="The same graph coloured by summed ligand-receptor score with the viridis palette: mostly purple with teal and yellow lines where scores are high">
-  <figcaption><strong>1b · The same graph, scored.</strong> Each line is coloured by the summed score of all 20 mechanisms on that pair (viridis: purple low, yellow high). Colour range clamped to <strong>9.0–10.5</strong>; scores in view span 4.7–12.0 with a median of 9.1, so this window shows the variation across the bulk of the pairs and saturates the tails. The sidebar legend shows the window in use and says whether it is <em>auto</em> (the full range of what is drawn) or <em>clamped</em>.</figcaption>
+  <img src="img/vignettes/ex1_brain_scored.jpg" alt="The same graph coloured by summed ligand-receptor score: mostly purple, with the hippocampal cell layers and midline structures in teal and yellow">
+  <figcaption><strong>1b · The same graph, scored.</strong> Each line is coloured by the summed score of all mechanisms on that pair (viridis: purple low, yellow high). Range <strong>auto, robust 5–95%</strong>: the window is 5–976, the 5th to 95th percentile of the scores drawn, while the full span is 1–17,383 with a median of 137. On the full range every line would be purple; the robust window lets the structure in the bulk of the pairs show while the extreme tail saturates to yellow. The legend states which window is in use.</figcaption>
 </figure>
 <h3>What to notice</h3>
 <ul>
-  <li>Edges are <em>directed</em>. With <span class="ui">Directional</span> on and <span class="ui">offset</span> raised, A→B and B→A separate into two parallel lines with harpoon arrowheads, like a chemistry equilibrium arrow.</li>
+  <li>The strongest summed signalling follows the dense cell layers: the pyramidal layers of the hippocampus and the dentate gyrus light up, as do the midline structures. That is partly biology and partly geometry, since a cell with more neighbours accumulates more scored pairs. Example 2 is how you separate the two.</li>
   <li>Untick a mechanism in <strong>LRM Mechanisms</strong> and the colours update at once; the lines that only carried that mechanism disappear. Tick <span class="ui">none</span>, then one mechanism, to see where a single ligand–receptor pair is active.</li>
+  <li>Edges are <em>directed</em>. Zoom in, raise <span class="ui">offset</span>, and A→B and B→A separate into two parallel lines with harpoon arrowheads, like a chemistry equilibrium arrow.</li>
   <li>Hold <kbd>Shift</kbd> and click a line. A floating <strong>EDGE</strong> panel lists the sending and receiving cell, every mechanism scored on that pair with its share of the total, and any annotations from <code>edge-metadata/</code>.</li>
 </ul>
+<h3>The same two steps on a different platform</h3>
+<p>Nothing above is specific to CosMx. The pair below is the Xenium human breast example
+(two fields of view, 7,275 cells, 44,759 pairs) drawn with the same settings. Its scores are
+tightly bunched rather than heavy-tailed (median 9.1 in a span of 4.7–12.0), so here the
+range is a stated clamp rather than the robust window.</p>
+<figure class="pair">
+  <img src="img/vignettes/ex1_breast_graph.jpg" alt="The tissue graph of a two-field Xenium breast section drawn as thin grey lines">
+  <img src="img/vignettes/ex1_breast_scored.jpg" alt="The same breast graph scored with viridis: mostly purple with scattered yellow pairs">
+  <figcaption>Xenium breast, tissue graph and scored graph. Colour range clamped to <strong>9.0–10.5</strong>; scores in view span 4.7–12.0.</figcaption>
+</figure>
 <figure>
   <img src="img/vignettes/xenium_edge_info_pane.jpg" alt="The viewer with an edge selected; a floating panel lists sending cell, receiving cell, annotations and the scored mechanisms with their percentages">
-  <figcaption>Shift-click on an edge. The panel reads sending cell (Endothelial) → receiving cell (Smooth_Muscle), the demo annotations, then Fgf2→Fgfr1, Efnb1→Ephb4 and Vegfa→Flt1 with their scores.</figcaption>
+  <figcaption>Shift-click on an edge (breast dataset). The panel reads sending cell (Endothelial) → receiving cell (Smooth_Muscle), the demo annotations, then Fgf2→Fgfr1, Efnb1→Ephb4 and Vegfa→Flt1 with their scores.</figcaption>
 </figure>
 <div class="callout tip"><strong class="label">Try next</strong>
 <p>Open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to a cell-type column. Only edges leaving that cell type remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
@@ -241,25 +254,20 @@ and <strong>Spot Info</strong> on Visium, <strong>Bin Segments</strong> on HD.</
 <p>Edges on classic Visium connect spots, each a mix of one to ten cells. Say so in a figure legend. The HD bins are closer to single cells but still a grid, not a segmentation.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
-<h2 id="ex5"><span class="num">5</span>With and without an image</h2>
-<p class="meta">Datasets <code>seqfish_synthetic</code> (in the clone) and <code>cosmx-mousebrain</code> (fetched) · 3 minutes</p>
-<p>The morphology image is one optional layer. Every data layer is drawn in a shared
-coordinate frame sized from the data itself, so a dataset with no DAPI, or whose TIFF
-cannot be opened, still shows its cells, transcripts and edges where they belong.</p>
+<h2 id="ex5"><span class="num">5</span>Transcripts inside their cells</h2>
+<p class="meta">Dataset <code>seqfish_synthetic</code> (in the clone) · 2 minutes</p>
+<p>Imaging platforms record every transcript as a point. TissuePlex draws those points
+inside the cell outlines they were called in, coloured by gene, and filters them by
+gene in the browser with no round trip. The morphology image is one optional layer:
+example 1 was drawn with no image at all, and this one keeps its DAPI off so the
+geometry is the subject.</p>
 <ol>
-  <li>Choose <span class="ui">seqfish_synthetic</span>. Tick <span class="ui">Transcripts</span> and raise <span class="ui">Cell Segments → outline</span> to 100%. Hover a dot: the tooltip names the gene.</li>
+  <li>Choose <span class="ui">seqfish_synthetic</span>. Tick <span class="ui">Transcripts</span>, raise <span class="ui">Cell Segments → outline</span> to 100% and lower <span class="ui">fill</span> to about 30%. Hover a dot: the tooltip names the gene.</li>
+  <li>Under <strong>Transcript Species</strong>, click <span class="ui">select ▼</span> and untick all but two or three genes. The dots update at once.</li>
 </ol>
 <figure>
   <img src="img/vignettes/seqfish_synthetic.jpg" alt="Cell outline polygons with coloured transcript dots inside them on a synthetic seqFISH region">
   <figcaption>Spatial Genomics GenePS layout. Cell outlines come from the GeoJSON boundaries file (in pixels) and the transcript dots from the transcript list (in microns); the reader detects each table's units separately, which is why both land on the same cells.</figcaption>
-</figure>
-<ol start="2">
-  <li>Choose <span class="ui">cosmx-mousebrain</span>. There is no <span class="ui">Morphology</span> row, because the dataset has no image; the cells draw on a frame sized from their extent.</li>
-  <li>Tick <span class="ui">Edges</span>. The edge file here has 3.8 million rows; panning stays responsive because only the edges under the viewport are read, and the whole-tissue view reads a pre-sampled tier.</li>
-</ol>
-<figure>
-  <img src="img/vignettes/cosmx_noimage.jpg" alt="A mouse brain section drawn as cell polygons and edges on a dark frame with no underlying image">
-  <figcaption>CosMx mouse brain, 38,996 cells, no image. The polygons come from the platform's <code>polygons.csv</code>; the edges from NICHESv2.</figcaption>
 </figure>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
