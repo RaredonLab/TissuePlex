@@ -34,6 +34,9 @@ export function makeSettings() {
     // a number is the user's slider override.
     cellBoundaryFraction: null,
     transcriptFraction: 0.1,
+    // Largest radius a transcript dot draws at, in screen px. The world radius
+    // (4 image px) still rules when zoomed out; this is the cap when zoomed in.
+    transcriptDotPx: 3,
     // Xenium Explorer's default: transcripts with Q-Score < 20 are hidden, and
     // showing them draws them gray. Only datasets with a Q-Score are affected
     // (capability `has_transcript_qv`, Xenium only).
@@ -491,6 +494,7 @@ export const useStore = create((set, get) => ({
   setTranscriptFraction: (f) =>
     get().patchSettings({ transcriptFraction: Math.max(0.0001, Math.min(1.0, f)) }),
   setShowLowQualityTranscripts: (v) => get().patchSettings({ showLowQualityTranscripts: !!v }),
+  setTranscriptDotPx: (px) => get().patchSettings({ transcriptDotPx: Math.max(0.5, Math.min(12, px)) }),
 
   setCellColorClamp: (low, high) => get().patchSettings({ cellColorClamp: { low, high } }),
   setEdgeColorClamp: (low, high) => get().patchSettings({ edgeColorClamp: { low, high } }),

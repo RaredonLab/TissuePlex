@@ -1155,6 +1155,7 @@ function TranscriptLayerRow() {
   const {
     layers, setLayerProp, transcriptFraction, setTranscriptFraction,
     showLowQualityTranscripts, setShowLowQualityTranscripts,
+    transcriptDotPx, setTranscriptDotPx,
   } = usePanelSettings();
   const hasQv = useUnionCapabilities().has_transcript_qv;
   // Summed across the visible panels: with two datasets, "how much is on
@@ -1198,6 +1199,17 @@ function TranscriptLayerRow() {
               style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
             <span style={{ color: "#555", width: 28, textAlign: "right" }}>
               {Math.round(state.opacity * 100)}%
+            </span>
+          </div>
+          {/* Dot size: the largest radius a dot draws at, in screen px */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}
+            title="Largest radius a transcript dot is drawn at, in screen pixels. Zoomed out, dots are smaller than this.">
+            <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>dot</span>
+            <input type="range" min={0.5} max={8} step={0.5} value={transcriptDotPx}
+              onChange={(e) => setTranscriptDotPx(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
+            <span style={{ color: "#555", width: 28, textAlign: "right" }}>
+              {transcriptDotPx} px
             </span>
           </div>
           {/* Sample fraction */}

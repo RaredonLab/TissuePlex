@@ -1,12 +1,15 @@
 # Example list files
 
-CSV files for the **import** buttons in the sidebar, matched to `mouse_ileum_tiny` and `cosmx-mousebrain`.
+CSV files for the **import** buttons in the sidebar, matched to `mouse_ileum_tiny`, `cosmx-mousebrain` and `xenium_human_breast_2fov`.
 
 | File | Sidebar section | What it does |
 |---|---|---|
 | `mouse_ileum_genes.csv` | Transcript species | Shows only these 8 marker genes |
 | `mouse_ileum_lrms.csv` | LRM Mechanisms | Keeps only these 5 mechanisms active |
 | `mouse_brain_neuropeptides.csv` | LRM Mechanisms | `cosmx-mousebrain`: 31 neuropeptide → receptor mechanisms (worked example 6) |
+| `breast_stroma_markers.csv` | Transcript species | `xenium_human_breast_2fov`: LUM, ACTA2, CD68, PECAM1 (worked example 5) |
+| `breast_tumour_markers.csv` | Transcript species | `xenium_human_breast_2fov`: EPCAM, LUM, MKI67 (worked example 5) |
+| `breast_marker_palette.csv` | Transcript species → import palette | Colours for the six genes above, `gene,#hex` |
 | `mouse_brain_glial_support.csv` | LRM Mechanisms | `cosmx-mousebrain`: 22 glial lipid-transport, complement and microglial mechanisms (worked example 6) |
 
 `mouse_ileum_genes.csv` is in Xenium Explorer's gene-group format (`gene,group`),

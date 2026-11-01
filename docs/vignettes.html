@@ -120,7 +120,7 @@ datasets are published as release assets; one command fetches them:</p>
   <tr><td><code>visium_hd_tiny</code></td><td>Visium HD</td><td>A corner of 10x's "Tiny Mouse Brain" Space Ranger output, 8 µm and 16 µm bins. In the clone.</td><td>4</td></tr>
   <tr><td><code>visium_tiny</code></td><td>Visium</td><td>Synthetic classic Visium slide, 252 spots. In the clone.</td><td>—</td></tr>
   <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells. In the clone.</td><td>5</td></tr>
-  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 7</td></tr>
+  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 5, 7</td></tr>
   <tr><td><code>visium_mouse_kidney</code></td><td>Visium</td><td>10x's mouse kidney coronal section, 1,438 spots on tissue, NICHESv2 spot–spot edges. Fetched.</td><td>4</td></tr>
   <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, coronal section, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>1, 2, 6</td></tr>
 </table>
@@ -284,20 +284,68 @@ and <strong>Spot Info</strong> on Visium, <strong>Bin Segments</strong> on HD.</
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex5"><span class="num">5</span>Transcripts inside their cells</h2>
-<p class="meta">Dataset <code>seqfish_synthetic</code> (in the clone) · 2 minutes</p>
-<p>Imaging platforms record every transcript as a point. TissuePlex draws those points
-inside the cell outlines they were called in, coloured by gene, and filters them by
-gene in the browser with no round trip. The morphology image is one optional layer:
-example 1 was drawn with no image at all, and this one keeps its DAPI off so the
-geometry is the subject.</p>
+<p class="meta">Datasets <code>xenium_human_breast_2fov</code> (fetched) and <code>seqfish_synthetic</code> (in the clone) · 4 minutes</p>
+<p>Imaging platforms record every transcript as a point with a gene name. TissuePlex
+draws those points where they were detected, over the nuclear stain and inside the
+cell outlines they were assigned to, coloured by gene, and filters them by gene in the
+browser without a round trip to the server. The question this answers is the one a
+histologist asks of an in-situ stain: which cells, exactly, express this?</p>
 <ol>
-  <li>Choose <span class="ui">seqfish_synthetic</span>. Tick <span class="ui">Transcripts</span>, raise <span class="ui">Cell Segments → outline</span> to 100% and lower <span class="ui">fill</span> to about 30%. Hover a dot: the tooltip names the gene.</li>
-  <li>Under <strong>Transcript Species</strong>, click <span class="ui">select ▼</span> and untick all but two or three genes. The dots update at once.</li>
+  <li>Choose <span class="ui">xenium_human_breast_2fov</span>. Tick <span class="ui">Transcripts</span>
+  and drag its <span class="ui">sample</span> to 100%; leave <span class="ui">dot</span> at 3 px.
+  Under <span class="ui">Cell Segments</span>, drag <span class="ui">sample</span> to 100%,
+  <span class="ui">fill</span> to 0 and <span class="ui">outline</span> to 60%. Tick
+  <span class="ui">Morphology</span> at 70% for the DAPI.</li>
+  <li>Zoom into the stroma, the darker tissue to the left of the tumour, until single
+  cells are clear, about 200 µm across. Hover a dot: the tooltip names its gene and, on
+  Xenium, its Q-Score. This is figure 5a.</li>
+  <li>Under <strong>Transcript Species</strong>, click <span class="ui">select ▼</span>, then
+  <span class="ui">none</span>, and tick LUM, ACTA2, CD68 and PECAM1; or click
+  <span class="ui">import</span> and choose
+  <code>sample_data/example_lists/breast_stroma_markers.csv</code>. The dots update at once.
+  <span class="ui">import palette</span> with <code>breast_marker_palette.csv</code> gives
+  them the colours used here. This is figure 5b.</li>
+  <li>Pan right to the edge of the tumour and import <code>breast_tumour_markers.csv</code>
+  (EPCAM, LUM, MKI67). This is figure 5c.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/seqfish_synthetic.jpg" alt="Cell outline polygons with coloured transcript dots inside them on a synthetic seqFISH region">
-  <figcaption>Spatial Genomics GenePS layout. Cell outlines come from the GeoJSON boundaries file (in pixels) and the transcript dots from the transcript list (in microns); the reader detects each table's units separately, which is why both land on the same cells.</figcaption>
+  <img src="img/vignettes/ex5_stroma.jpg" alt="Breast stroma at cell resolution: elongated DAPI nuclei inside blue cell outlines, with transcripts of all 280 genes drawn as small coloured dots inside and between the cells">
+  <figcaption><strong>5a · Every transcript, every cell.</strong> A 203 µm field of
+  breast stroma: 162 cells and all 20,924 of their transcripts, 280 genes, each dot
+  coloured by gene. Both sample sliders are at 100%, so nothing is thinned. Dots fall
+  inside the outlines of the cells they were assigned to; the scattered ones between
+  cells were detected outside any segmented cell and belong to no cell.</figcaption>
 </figure>
+<figure>
+  <img src="img/vignettes/ex5_genes.jpg" alt="The same stroma field with four genes: LUM in amber filling the fibroblasts, ACTA2 in pink along vessel-like profiles, CD68 in green in a few scattered cells, PECAM1 in white">
+  <figcaption><strong>5b · Four genes, four cell types.</strong> The same field with
+  LUM (amber, fibroblasts), ACTA2 (pink, smooth muscle and myofibroblasts), CD68 (green,
+  macrophages) and PECAM1 (white, endothelium): 3,529 of the 20,924 transcripts. The
+  filter runs on the dots already in the browser, so the change is immediate, and the
+  counter reads 3.5k/3.5k because the sample is exact. Cell outlines still come from
+  the segmentation, so a cell with no dots is a cell expressing none of the four.</figcaption>
+</figure>
+<figure>
+  <img src="img/vignettes/ex5_boundary.jpg" alt="The edge of the tumour: tightly packed cells with EPCAM in amber in every one, a band of stroma at right where only LUM in pink is found, and a few green MKI67 dots in the tumour">
+  <figcaption><strong>5c · The tumour edge.</strong> 305 cells and 3,640 transcripts of
+  three genes. EPCAM (amber) marks every tumour cell and stops at the stromal band,
+  where LUM (pink) takes over; MKI67 (green) picks out the cells in cycle. Nothing here
+  was drawn by hand: this is the gene filter and three colours.</figcaption>
+</figure>
+<figure>
+  <img src="img/vignettes/ex5_seqfish.jpg" alt="Thirty-six synthetic cells in a grid, each a DAPI blob inside a polygon outline filled with coloured transcript dots">
+  <figcaption><strong>5d · The same layers on a Spatial Genomics GenePS export.</strong>
+  <code>seqfish_synthetic</code> is a 36-cell fixture made by <code>sample_data/make_seqfish.py</code>,
+  not tissue, and it exists for a reason worth knowing: on this platform the cell
+  outlines (GeoJSON) are in pixels and the transcripts (CSV) are in microns. The reader
+  decides each table's units separately, which is why both land on the same cells; a
+  viewer that applied one transform to everything would draw the dots at a hundredth
+  of the size of the outlines. All 10,026 transcripts of its 36 genes are drawn.</figcaption>
+</figure>
+<div class="callout note"><strong class="label">Quality filter</strong>
+<p>Xenium scores each transcript's decoding quality. Like Xenium Explorer, TissuePlex
+hides transcripts below Q&nbsp;20 by default; tick <span class="ui">show low-quality
+(Q &lt; 20) in gray</span> to draw them in gray. The counter counts only what is drawn.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex6"><span class="num">6</span>Side by side</h2>

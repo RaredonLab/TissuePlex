@@ -186,7 +186,7 @@ function ViewerPanel({ panelIndex }) {
     addMeasurement,
     setExportRect, clearExportRect,
     panelCount,
-    transcriptFraction, showLowQualityTranscripts,
+    transcriptFraction, showLowQualityTranscripts, transcriptDotPx,
     cellBoundaryFraction,
     setLoadingKey,
     panelRotations, setPanelRotation,
@@ -964,8 +964,8 @@ function ViewerPanel({ panelIndex }) {
     opacity: transcriptsOpacity,
     getPosition: (d) => [d.x_location, d.y_location],
     getRadius: 4,
-    radiusMinPixels: 1,
-    radiusMaxPixels: 8,
+    radiusMinPixels: Math.min(1, transcriptDotPx),
+    radiusMaxPixels: transcriptDotPx,
     // Low-quality transcripts reach the client only when the user asked to see
     // them, and are then drawn gray as in Xenium Explorer — so they read as
     // "shown on request", never as a gene's own colour.

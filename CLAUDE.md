@@ -579,6 +579,8 @@ makes that consumer silently stale, which is far worse than a redundant render.
   `{panelIndex, corners (image px), rotation}`. Panel-scoped like annotations;
   see the Figure Export section for why the corners are stored in image space
   and why the rotation travels with them.
+- **Transcript dot size**: `transcriptDotPx` (default 3) is the `radiusMaxPixels` of the
+  transcript layer; the world radius (4 image px) still rules zoomed out.
 - **Sampling**: `transcriptFraction` (default 0.1) and `cellBoundaryFraction`
   (`null` = auto) control how much of the viewport each hook requests;
   `transcriptStats` / `cellBoundaryStats` hold live `{shown, total}` counts that the
