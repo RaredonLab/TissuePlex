@@ -21,7 +21,7 @@ The release reviewed alongside the manuscript. Functionally the v0.9.x viewer, w
 - **Worked examples.** A new [screenshot-led tour](https://raredonlab.github.io/TissuePlex/vignettes.html) of seven workflows on the demo datasets, and a manual re-checked control by control against the software.
 - **Real demo data in one command.** `python3 sample_data/fetch_samples.py` adds the 10x Xenium breast, 10x Visium mouse kidney and Bruker CosMx mouse brain datasets, each with NICHESv2 edges and a provenance note, from the release's attached files.
 - **Two sidebar fixes.** The edge-table filter dropdown threw when a column was chosen; the inert *min strength* slider is gone.
-- **Licence change.** From this release TissuePlex is distributed under the GNU AGPL v3 with a commercial licence available; earlier releases remain under the MIT licence they were published with.
+- **Licence.** TissuePlex is distributed under the GNU AGPL v3, with a commercial licence available from the lab.
 
 ## What's new in v0.9.1
 
@@ -338,7 +338,7 @@ TissuePlex is **dual-licensed**.
 - **Open source: [GNU Affero General Public License v3.0](LICENSE).** Use it, modify it and share it freely. If you distribute a modified version, or let others use a modified version over a network, the AGPL requires you to make your modified source available under the same terms. Academic and non-profit use is unaffected by this in practice.
 - **Commercial licence.** If you want to use TissuePlex, or code derived from it, in a product or service without the AGPL's source-sharing obligations, contact the Raredon Lab for a commercial licence.
 
-Releases before v1.0.0 were published under the MIT licence and remain so. The demo datasets are not covered by either licence: each carries its own terms in its `PROVENANCE.md` (10x data under CC BY 4.0; the CosMx set under Bruker's non-commercial data licence).
+The demo datasets are not covered by either licence: each carries its own terms in its `PROVENANCE.md` (10x data under CC BY 4.0; the CosMx set under Bruker's non-commercial data licence).
 
 ## Citation
 

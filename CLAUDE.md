@@ -2049,7 +2049,7 @@ Other env knobs: `SPATIAL_CACHE=0` disables the spatial index entirely,
 `SPATIAL_CACHE_MIN_BYTES` (default 64 MB) sets the size below which files are left alone,
 and `CACHE_DIR` relocates both the DZI pyramids and the spatial index off the data volume.
 
-**Licence.** AGPL-3.0 from v1.0.0 (`LICENSE`, `package.json` `license` field, README *Licence* section), dual-licensed with a commercial option offered by the lab. Releases v0.2.0–v0.9.x were MIT and stay MIT. Any new file carrying a licence notice must say AGPL, and a contributor's code lands under AGPL — the lab needs the right to relicense commercially, so outside contributions of any size should come with that agreement.
+**Licence.** AGPL-3.0 from v1.0.0 (`LICENSE`, `package.json` `license` field, README *Licence* section), dual-licensed with a commercial option offered by the lab. Any new file carrying a licence notice must say AGPL, and a contributor's code lands under AGPL — the lab needs the right to relicense commercially, so outside contributions of any size should come with that agreement.
 
 **Access control is opt-in and off by default.** The Caddyfile supports `basicauth`, but
 unless it is enabled anyone with the URL can view the data. There is no application-level
