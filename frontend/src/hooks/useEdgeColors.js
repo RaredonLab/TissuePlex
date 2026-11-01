@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { valueToColor, QUAL_PALETTE, fadeAlpha } from "../utils/colormap";
+import { valueToColor, QUAL_PALETTE, fadeAlpha, rangeOf } from "../utils/colormap";
 import { loggedFetch } from "../utils/clientLog";
 
 const EMPTY = {
-  colorValues: null, type: "continuous", vmin: 0, vmax: 0,
+  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0,
   categories: [], categoryColors: new Map(),
 };
 
@@ -22,7 +22,8 @@ const EMPTY = {
  *   summary — the column's type and its categories.
  *
  * The colour range is the rule a reader expects of a legend: with no clamp,
- * `lo`/`hi` are the minimum and maximum of the values actually drawn, so the
+ * `lo`/`hi` come from the values actually drawn — their min and max
+ * (`rangeMode` "full") or their 5th and 95th percentiles ("robust") — so the
  * legend's endpoints are the colours' endpoints, and the range follows every
  * pan and every mechanism toggle. A clamp is only ever set by the user and
  * persists until they reset it. (There used to be a hidden 95th-percentile
@@ -44,7 +45,8 @@ export function useEdgeColors(
   edges,  // array from useEdges — carries visible_score_sum / color_value per row
   edgeFile = "edges.parquet",
   categorical = null,  // issue #35 override: null = auto-detect, true/false = forced
-  fadeFrac = null      // opacityMin / opacity for lrm_set, or null for no fade
+  fadeFrac = null,     // opacityMin / opacity for lrm_set, or null for no fade
+  rangeMode = "full"   // auto window: "full" (min..max) or "robust" (p5..p95)
 ) {
   const efParam = `?edge_file=${encodeURIComponent(edgeFile)}`;
   const mode = edgeColorBy?.mode;
@@ -65,16 +67,11 @@ export function useEdgeColors(
     // filter the rows are the raw structural rows and score_sum is the total.
     const n = edges.length;
     const scores = new Float64Array(n);
-    let min = Infinity, max = -Infinity;
-    for (let i = 0; i < n; i++) {
-      const v = edges[i].visible_score_sum ?? edges[i].score_sum ?? 0;
-      scores[i] = v;
-      if (v < min) min = v; if (v > max) max = v;
-    }
-    if (!isFinite(min)) min = 0;
-    if (!isFinite(max)) max = 0;
-    const lo = clamp?.low  ?? min;
-    const hi = clamp?.high ?? max;
+    for (let i = 0; i < n; i++) scores[i] = edges[i].visible_score_sum ?? edges[i].score_sum ?? 0;
+    const r = rangeOf(scores, rangeMode);
+    const { min, max } = r;
+    const lo = clamp?.low  ?? r.lo;
+    const hi = clamp?.high ?? r.hi;
     const colorMap = new Map();
     // The alpha channel carries the fade: 255 everywhere without a minimum,
     // otherwise fadeAlpha over the same window the colour uses, so the palette
@@ -86,8 +83,8 @@ export function useEdgeColors(
       const a = fadeFrac == null ? 255 : fadeAlpha(span > 0 ? (scores[i] - lo) / span : 1, fadeFrac);
       colorMap.set(edges[i].edge, [c[0], c[1], c[2], a]);
     }
-    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() };
-  }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac]);
+    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() };
+  }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac, rangeMode]);
 
   // ── metadata: one summary per column, then colours from the rows ─────────
   const [summary, setSummary] = useState(null);   // { key, type, categories, empty }
@@ -142,27 +139,26 @@ export function useEdgeColors(
         const label = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
         edgeColors.set(e.edge, colorMap.get(label) ?? [128, 128, 128, 255]);
       }
-      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap };
+      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, categories, categoryColors: colorMap };
     }
     // Continuous: range over the values in view, exactly as lrm_set does.
-    let min = Infinity, max = -Infinity;
+    const vals = [];
     for (const e of edges ?? []) {
       const v = e.color_value;
-      if (typeof v !== "number" || !isFinite(v)) continue;
-      if (v < min) min = v; if (v > max) max = v;
+      if (typeof v === "number" && isFinite(v)) vals.push(v);
     }
-    if (!isFinite(min)) min = 0;
-    if (!isFinite(max)) max = 0;
-    const lo = clamp?.low  ?? min;
-    const hi = clamp?.high ?? max;
+    const r = rangeOf(vals, rangeMode);
+    const { min, max } = r;
+    const lo = clamp?.low  ?? r.lo;
+    const hi = clamp?.high ?? r.hi;
     const edgeColors = new Map();
     for (const e of edges ?? []) {
       const v = e.color_value;
       if (typeof v !== "number" || !isFinite(v)) continue;
       edgeColors.set(e.edge, valueToColor(v, lo, hi, palette));
     }
-    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() };
-  }, [enabled, mode, field, summary, summaryKey, edges, clamp?.low, clamp?.high, palette]);
+    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() };
+  }, [enabled, mode, field, summary, summaryKey, edges, clamp?.low, clamp?.high, palette, rangeMode]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 

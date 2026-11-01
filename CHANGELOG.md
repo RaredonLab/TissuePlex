@@ -7,7 +7,7 @@ Release notes for TissuePlex. Earlier releases are listed on the
 
 In progress.
 
-- **Honest colour ranges.** The edge colour scale is now *auto* by default: its endpoints are the minimum and maximum of the edges actually drawn, recomputed on every pan and every mechanism toggle, and the legend says whether it is auto or clamped. Previously the viewer silently clamped the top of the scale at the 95th percentile of the viewport on every pan, so colours saturated at a value the legend did not show, `reset range` was undone by the next pan, and a clamp set by hand was overwritten.
+- **Honest colour ranges.** Cell and edge colour scales are now *auto* by default: their endpoints are the minimum and maximum of what is actually drawn, recomputed on every pan and every mechanism toggle, and the legend says whether it is auto or clamped. A second auto mode, **robust 5–95%**, ranges on the 5th to 95th percentile of the drawn values for heavy-tailed scores and is named in the legend. Previously the viewer silently clamped the top of the scale at the 95th percentile of the viewport on every pan, so colours saturated at a value the legend did not show, `reset range` was undone by the next pan, and a clamp set by hand was overwritten.
 - README rewritten as a concise, public-facing page; release notes moved here.
 - Worked examples re-shot for clarity.
 

@@ -952,7 +952,10 @@ write.csv(
     <li>A color legend shows the range in use. By default it is
     <strong>auto</strong>: the lowest and highest value currently drawn, so the
     legend's endpoints are exactly the colors' endpoints, and it follows you as
-    you pan or change the selection. Drag the <span class="ui">lo</span> or
+    you pan or change the selection. When a few extreme values own most of the
+    palette, switch auto to <span class="ui">robust 5–95%</span>: the window
+    becomes the 5th to 95th percentile of what is drawn, the tails saturate, and
+    the legend says so. Drag the <span class="ui">lo</span> or
     <span class="ui">hi</span> slider to fix a window instead, useful when a few
     outliers compress the variation across everything else; the legend then says
     <em>clamped</em>, the window stays put until you click

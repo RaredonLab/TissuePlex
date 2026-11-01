@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { valueToColor, QUAL_PALETTE, fadeAlpha } from "../utils/colormap";
+import { valueToColor, QUAL_PALETTE, fadeAlpha, rangeOf } from "../utils/colormap";
 import { geneColor } from "../utils/geneColor";
 
 const EMPTY = {
-  colorValues: null, type: "continuous", vmin: 0, vmax: 0,
+  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0,
   categories: [], categoryColors: new Map(),
 };
 
@@ -35,7 +35,7 @@ const EMPTY = {
  *   categoryColors Map<label, [r,g,b,a]> for categorical legend
  *   loading       always false — the boundaries fetch carries the loading state
  */
-export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryColorOverrides, fadeFrac = null) {
+export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryColorOverrides, fadeFrac = null, rangeMode = "full") {
   const [result, setResult] = useState(EMPTY);
 
   useEffect(() => {
@@ -56,12 +56,16 @@ export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryCol
       const cellColors = new Map(
         Object.entries(raw.values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])
       );
-      setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, categories, categoryColors: colorMap });
+      setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, categories, categoryColors: colorMap });
       return;
     }
-    const min = raw.min ?? 0, max = raw.max ?? 0;
-    const lo = clamp?.low  ?? min;
-    const hi = clamp?.high ?? max;
+    // The window follows the cells actually drawn (the values in this
+    // response), not the dataset: a legend describes what is on screen.
+    const drawn = Object.values(raw.values).filter((v) => typeof v === "number" && isFinite(v));
+    const r = drawn.length ? rangeOf(drawn, rangeMode) : { min: raw.min ?? 0, max: raw.max ?? 0, lo: raw.min ?? 0, hi: raw.max ?? 0 };
+    const { min, max } = r;
+    const lo = clamp?.low  ?? r.lo;
+    const hi = clamp?.high ?? r.hi;
     // Fade applies to gene-set colouring only (see colormap.fadeAlpha); the
     // alpha channel carries it and Viewer scales its base fill alpha by it.
     const span = hi - lo;
@@ -73,8 +77,8 @@ export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryCol
         return [id, [c[0], c[1], c[2], a]];
       })
     );
-    setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, categories: [], categoryColors: new Map() });
-  }, [raw, enabled, colorBy?.mode, colorBy?.field, clamp?.low, clamp?.high, palette, categoryColorOverrides, fadeFrac]); // eslint-disable-line
+    setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() });
+  }, [raw, enabled, colorBy?.mode, colorBy?.field, clamp?.low, clamp?.high, palette, categoryColorOverrides, fadeFrac, rangeMode]); // eslint-disable-line
 
   return { ...result, loading: false };
 }

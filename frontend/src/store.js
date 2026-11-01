@@ -40,8 +40,12 @@ export function makeSettings() {
     showLowQualityTranscripts: false,
 
     // Values outside [low, high] map to the palette ends (oob::squish).
+    // null = auto: the window follows what is drawn, per the range mode.
     cellColorClamp: { low: null, high: null },
     edgeColorClamp: { low: null, high: null },
+    // "full" = min..max of what is drawn; "robust" = 5th..95th percentile.
+    cellColorRangeMode: "full",
+    edgeColorRangeMode: "full",
 
     cellColorEnabled: false,
     colorBy: { mode: "off", field: null },   // 'off' | 'gene_set' | 'metadata'
@@ -490,6 +494,8 @@ export const useStore = create((set, get) => ({
 
   setCellColorClamp: (low, high) => get().patchSettings({ cellColorClamp: { low, high } }),
   setEdgeColorClamp: (low, high) => get().patchSettings({ edgeColorClamp: { low, high } }),
+  setCellColorRangeMode: (m) => get().patchSettings({ cellColorRangeMode: m }),
+  setEdgeColorRangeMode: (m) => get().patchSettings({ edgeColorRangeMode: m }),
 
   setCellColorEnabled: (v) => get().patchSettings({ cellColorEnabled: v }),
   setColorBy: (mode, field) => get().patchSettings({ colorBy: { mode, field } }),

@@ -176,6 +176,7 @@ function ViewerPanel({ panelIndex }) {
     autocrineRadius, autocrineLineWidth,
     hiddenLrms,
     cellColorClamp, edgeColorClamp, setEdgeColorClamp, linkColorScale,
+    cellColorRangeMode, edgeColorRangeMode,
     categoricalOverrides, cellFilter,
     sendingFilter, receivingFilter, edgeFilters,
     annotationMode,
@@ -826,16 +827,16 @@ function ViewerPanel({ panelIndex }) {
   ), [linkedRange, cellColorClamp]);
 
   const {
-    colorValues, vmin: cellVmin, vmax: cellVmax,
+    colorValues, vmin: cellVmin, vmax: cellVmax, lo: cellLo, hi: cellHi,
     type: cellType, categories: cellCategories, loading: cellColorsLoading,
   } = useCellColors(
     cellColorsRaw, colorBy, cellColorPalette, cellColorEnabled,
-    effectiveCellClamp, categoryColorOverrides, cellFadeFrac
+    effectiveCellClamp, categoryColorOverrides, cellFadeFrac, cellColorRangeMode
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
-    patch({ cellColorRange: { vmin: cellVmin, vmax: cellVmax } });
-  }, [cellVmin, cellVmax]); // eslint-disable-line
+    patch({ cellColorRange: { vmin: cellVmin, vmax: cellVmax, lo: cellLo, hi: cellHi } });
+  }, [cellVmin, cellVmax, cellLo, cellHi]); // eslint-disable-line
 
   // The backend is the authority on whether a column is categorical, so report
   // the type it actually returned rather than letting the panel re-derive it
@@ -845,13 +846,13 @@ function ViewerPanel({ panelIndex }) {
   }, [cellType, cellCategories]); // eslint-disable-line
 
   const edgeColorEnabled = edgeColorBy.mode !== "default";
-  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, loading: edgeColorsLoading } = useEdgeColors(
+  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, lo: edgeLo, hi: edgeHi, loading: edgeColorsLoading } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette,
-    edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac
+    edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac, edgeColorRangeMode
   );
   useEffect(() => {
-    patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax } });
-  }, [edgeVmin, edgeVmax]); // eslint-disable-line
+    patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax, lo: edgeLo, hi: edgeHi } });
+  }, [edgeVmin, edgeVmax, edgeLo, edgeHi]); // eslint-disable-line
 
   // No automatic clamp. The colour range is the min and max of what is drawn
   // (useEdgeColors), recomputed on every pan and every mechanism toggle, and a

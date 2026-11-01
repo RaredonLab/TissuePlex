@@ -133,19 +133,23 @@ canvas. Every example below starts by ticking what it needs.</p></div>
 <h2 id="ex1"><span class="num">1</span>Where is the signalling?</h2>
 <p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 5 minutes · the core use case</p>
 <p>NICHESv2 scores every neighbouring pair of cells for every ligand–receptor
-mechanism it can see in the panel. TissuePlex draws those scores as lines between the
-cells, on the tissue image, so you can ask the simplest question first: where in this
-tissue is the strongest signalling, and between which cells?</p>
+mechanism it can see in the panel. TissuePlex draws that as a graph on the tissue:
+first the <em>tissue graph</em>, every pair of cells close enough to be scored, then the
+<em>scores</em> as colour on those same lines. Start with the structure, then ask where
+the signalling is.</p>
 <ol>
-  <li>Choose <span class="ui">xenium_human_breast_2fov</span> in the <span class="ui">Dataset</span> menu. The first open builds the image tiles; allow about 15 seconds.</li>
-  <li>Tick <span class="ui">Morphology</span> and drag its opacity down to about 45%, so the DAPI image sits behind the data rather than in front of it.</li>
-  <li>Under <strong>Edge Data</strong>, tick <span class="ui">Edges</span>. Raise its opacity to 90% and <span class="ui">width</span> to 3.</li>
-  <li>Leave <span class="ui">edge color</span> on <span class="ui">LRM Set (selected mechanisms)</span>: each line is coloured by the summed score of the mechanisms that are ticked in the <strong>LRM Mechanisms</strong> list below it, yellow for the strongest.</li>
-  <li>Zoom in with the mouse wheel until single cells are clear.</li>
+  <li>Choose <span class="ui">xenium_human_breast_2fov</span> in the <span class="ui">Dataset</span> menu.</li>
+  <li>Under <strong>Cell Segments</strong>, drag <span class="ui">sample</span> to 100% and <span class="ui">fill</span> down to about 12%, so cells sit as a faint ghost under the lines. Leave <span class="ui">Morphology</span> off for this one; the image comes back in example 2.</li>
+  <li>Under <strong>Edge Data</strong>, drag <span class="ui">sample</span> to 100% and set the <span class="ui">Tissue Graph</span> opacity to about 60%. This is figure 1a.</li>
+  <li>Tick <span class="ui">Edges</span>, raise its opacity to 100% and lower <span class="ui">width</span> to 1. Drop the tissue graph back to 15% so it reads as a faint scaffold beneath the coloured lines. This is figure 1b.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/xenium_edges_lrmset.jpg" alt="Xenium breast tissue with DAPI in grey and NICHESv2 edges drawn as viridis-coloured lines between neighbouring cells">
-  <figcaption>Breast tissue, two fields of view. Grey: DAPI. Lines: directed cell–cell edges, coloured by LRM-set score (purple low, yellow high). The faint grey mesh behind them is the <span class="ui">Tissue Graph</span>, every neighbouring pair whether or not it scored.</figcaption>
+  <img src="img/vignettes/ex1_graph.jpg" alt="The tissue graph of a two-field Xenium breast section: every pair of neighbouring cells joined by a thin grey line on a dark background">
+  <figcaption><strong>1a · The tissue graph.</strong> 7,275 cells, 44,759 neighbouring pairs, every one drawn. This layer never changes with the mechanism selection or the filters: it is the set of pairs NICHESv2 scored, and everything else in the viewer is a subset of it.</figcaption>
+</figure>
+<figure>
+  <img src="img/vignettes/ex1_scored.jpg" alt="The same graph coloured by summed ligand-receptor score with the viridis palette: mostly purple with teal and yellow lines where scores are high">
+  <figcaption><strong>1b · The same graph, scored.</strong> Each line is coloured by the summed score of all 20 mechanisms on that pair (viridis: purple low, yellow high). Colour range clamped to <strong>9.0–10.5</strong>; scores in view span 4.7–12.0 with a median of 9.1, so this window shows the variation across the bulk of the pairs and saturates the tails. The sidebar legend shows the window in use and says whether it is <em>auto</em> (the full range of what is drawn) or <em>clamped</em>.</figcaption>
 </figure>
 <h3>What to notice</h3>
 <ul>

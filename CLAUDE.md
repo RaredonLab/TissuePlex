@@ -2182,8 +2182,11 @@ which it does not cover at all.
   opened — an image or the data frame — and the hooks key on the viewport. Gating a
   fetch or a layer on `activeImage`, the DZI, or `has_morphology` reintroduces the
   "no DAPI, no cells" bug. `no_image_check.py` is the test to run.
-- **The colour range is auto (min/max of what is drawn) unless the user clamps it, and
-  nothing else may write `edgeColorClamp`.** `Viewer.jsx` used to write `high = p95 of
+- **The colour range is auto (min/max of what is drawn, or the 5th–95th percentile under
+  `*ColorRangeMode: "robust"`; `colormap.rangeOf`) unless the user clamps it, and
+  nothing else may write `edgeColorClamp` / `cellColorClamp`.** Both hooks return the
+  window in use as `lo`/`hi`, stored beside `vmin`/`vmax` in `panels[i].*ColorRange`, so
+  the legend prints the window the colours actually use. `Viewer.jsx` used to write `high = p95 of
   the viewport` into the clamp on every viewport change: the palette then saturated at
   a value the legend never showed, `reset range` was undone by the next pan, and a
   hand-set clamp was overwritten too. Removed in v1.0.1. `useEdgeColors` ranges over
