@@ -14,7 +14,7 @@ sample_data/ as /data) and the dev backend (DATA_ROOT=../sample_data) find them.
 
 Each unpacked folder contains a PROVENANCE.md naming the original source, its
 licence, and exactly what was trimmed or added. The datasets are redistributed
-under their own licences, not TissuePlex's MIT licence; the CosMx set in
+under their own licences, not TissuePlex's AGPL-3.0 licence; the CosMx set in
 particular is for non-commercial use only (its licence PDF is in the folder).
 
 Standard library only; no third-party packages needed.
@@ -55,7 +55,7 @@ MANIFEST = {
         "summary": "1000-plex mouse brain FFPE via the OSTA project: 38,996 cells, no image, NICHESv2 edges",
         "licence": "Bruker Spatial Biology non-commercial data licence (PDF included)",
         "size_mb": 58,
-        "sha256": "d0481270cc3695e8491b03b0c626e56e0226d3157ef4f3ebdbdb76a47bf7c575",
+        "sha256": "149b91ece39151fa1f50a9a4084a560a247e462ec09f7955e3ec87da17af8283",
     },
 }
 
