@@ -405,7 +405,12 @@ function ClampableLegend({ label, palette, vmin, vmax, lo, hi, clamp, setClamp,
   const high = clamp?.high ?? hi ?? vmax;
   const step = hasData ? (vmax - vmin) / 200 : 0.01;
   const clamped = clamp?.low != null || clamp?.high != null;
-  const stateTag = clamped ? "· clamped" : rangeMode === "robust" ? "· auto 5–95%" : "· auto";
+  // Linked across panels, the window in use is the union of both sides' auto
+  // windows (Viewer), so an unclamped legend says so — its numbers are not
+  // this panel's own range.
+  const shared = useStore((s) => s.linkColorScale && s.panelCount >= 2);
+  const stateTag = clamped ? "· clamped"
+    : (rangeMode === "robust" ? "· auto 5–95%" : "· auto") + (shared ? ", shared" : "");
 
   return (
     <div style={{ marginTop: 6 }}>

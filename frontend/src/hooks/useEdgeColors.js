@@ -3,7 +3,7 @@ import { valueToColor, QUAL_PALETTE, fadeAlpha, rangeOf } from "../utils/colorma
 import { loggedFetch } from "../utils/clientLog";
 
 const EMPTY = {
-  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0,
+  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0, autoLo: 0, autoHi: 0,
   categories: [], categoryColors: new Map(),
 };
 
@@ -22,6 +22,8 @@ const EMPTY = {
  *   summary — the column's type and its categories.
  *
  * The colour range is the rule a reader expects of a legend: with no clamp,
+ * `autoLo`/`autoHi` are the window the range mode picks from the values drawn,
+ * clamp ignored; the linked scale across panels is built from them (Viewer).
  * `lo`/`hi` come from the values actually drawn — their min and max
  * (`rangeMode` "full") or their 5th and 95th percentiles ("robust") — so the
  * legend's endpoints are the colours' endpoints, and the range follows every
@@ -83,7 +85,7 @@ export function useEdgeColors(
       const a = fadeFrac == null ? 255 : fadeAlpha(span > 0 ? (scores[i] - lo) / span : 1, fadeFrac);
       colorMap.set(edges[i].edge, [c[0], c[1], c[2], a]);
     }
-    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() };
+    return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, autoLo: r.lo, autoHi: r.hi, categories: [], categoryColors: new Map() };
   }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac, rangeMode]);
 
   // ── metadata: one summary per column, then colours from the rows ─────────
@@ -139,7 +141,7 @@ export function useEdgeColors(
         const label = typeof v === "boolean" ? (v ? "True" : "False") : String(v);
         edgeColors.set(e.edge, colorMap.get(label) ?? [128, 128, 128, 255]);
       }
-      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, categories, categoryColors: colorMap };
+      return { colorValues: edgeColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, autoLo: 0, autoHi: 0, categories, categoryColors: colorMap };
     }
     // Continuous: range over the values in view, exactly as lrm_set does.
     const vals = [];
@@ -157,7 +159,7 @@ export function useEdgeColors(
       if (typeof v !== "number" || !isFinite(v)) continue;
       edgeColors.set(e.edge, valueToColor(v, lo, hi, palette));
     }
-    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() };
+    return { colorValues: edgeColors, type: "continuous", vmin: min, vmax: max, lo, hi, autoLo: r.lo, autoHi: r.hi, categories: [], categoryColors: new Map() };
   }, [enabled, mode, field, summary, summaryKey, edges, clamp?.low, clamp?.high, palette, rangeMode]);
 
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);

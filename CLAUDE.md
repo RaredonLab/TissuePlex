@@ -850,10 +850,16 @@ Consequences worth knowing:
   seqFISH ROI differ by 55×. It now converts through each panel's own `pixelSize`
   so the same number of microns spans the same screen width, exactly as a
   scalebar would. Verified across Visium↔seqFISH: 2997 µm vs 55 µm → 55 µm both.
-- **`linkColorScale` (default on) shares one colour range across panels.** This
+- **`linkColorScale` (default on) shares one colour range across panels, cells and edges.** This
   is figure integrity, not preference: two viridis panels that each auto-ranged
   to their own data look comparable and are not — one's yellow might be 40 counts
-  and the other's 4,000. An explicit clamp from the sliders always wins.
+  and the other's 4,000. An explicit clamp from the sliders always wins. The union
+  is taken over each panel's **auto** window (`autoLo`/`autoHi` from the colour
+  hooks: the range mode applied to that panel's values, clamp ignored), not over
+  the window in use — the linked window is fed back to the hooks as a clamp, so a
+  union over `lo`/`hi` could only ever grow. Edges were left unlinked until v1.0.1,
+  which is exactly the failure the toggle exists to prevent; the legend reads
+  `shared` when the window is the linked one.
 
 **What is per-panel (local state / per-instance):**
 - OSD viewer instance (`viewerRef`)

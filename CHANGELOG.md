@@ -8,6 +8,8 @@ Release notes for TissuePlex. Earlier releases are listed on the
 In progress.
 
 - **Honest colour ranges.** Cell and edge colour scales are now *auto* by default: their endpoints are the minimum and maximum of what is actually drawn, recomputed on every pan and every mechanism toggle, and the legend says whether it is auto or clamped. A second auto mode, **robust 5–95%**, ranges on the 5th to 95th percentile of the drawn values for heavy-tailed scores and is named in the legend. Previously the viewer silently clamped the top of the scale at the 95th percentile of the viewport on every pan, so colours saturated at a value the legend did not show, `reset range` was undone by the next pan, and a clamp set by hand was overwritten.
+- **The shared colour scale now covers edges.** With `shared colour scale across panels` on, both panels' edge colours go through one window, as the cells' already did; it is the union of each panel's own auto window (full or robust), and the legend reads `shared`. Edge colours used to range per panel regardless of the setting, so two panels of edges that looked comparable were not.
+- Two importable mechanism lists for the mouse brain (`sample_data/example_lists/`), used by worked example 6.
 - README rewritten as a concise, public-facing page; release notes moved here.
 - Worked examples re-shot for clarity.
 

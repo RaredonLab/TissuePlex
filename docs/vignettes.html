@@ -120,9 +120,9 @@ datasets are published as release assets; one command fetches them:</p>
   <tr><td><code>visium_hd_tiny</code></td><td>Visium HD</td><td>A corner of 10x's "Tiny Mouse Brain" Space Ranger output, 8 µm and 16 µm bins. In the clone.</td><td>4</td></tr>
   <tr><td><code>visium_tiny</code></td><td>Visium</td><td>Synthetic classic Visium slide, 252 spots. In the clone.</td><td>—</td></tr>
   <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells. In the clone.</td><td>5</td></tr>
-  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 6, 7</td></tr>
+  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 7</td></tr>
   <tr><td><code>visium_mouse_kidney</code></td><td>Visium</td><td>10x's mouse kidney coronal section, 1,438 spots on tissue, NICHESv2 spot–spot edges. Fetched.</td><td>4</td></tr>
-  <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, coronal section, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>1, 2</td></tr>
+  <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, coronal section, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>1, 2, 6</td></tr>
 </table>
 <div class="callout note"><strong class="label">Three layers start switched off</strong>
 <p>When the viewer opens, <span class="ui">Morphology</span>, <span class="ui">Transcripts</span>
@@ -301,22 +301,77 @@ geometry is the subject.</p>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex6"><span class="num">6</span>Side by side</h2>
-<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 3 minutes</p>
-<p>A comparison is only fair if both halves are drawn the same way. Split mode gives
-two panels driven by one sidebar: the same opacity, palette, colour range and
-mechanism selection on both sides, with the freedom to show two edge sets, two images,
-or two datasets.</p>
+<p class="meta">Dataset <code>cosmx-mousebrain</code> · 5 minutes · continues from example 1</p>
+<p>Split mode shows two panels driven by one sidebar, and there are two different
+questions it answers. Which one you are asking decides what you hold fixed:</p>
+<ul>
+  <li><strong>The same mechanisms in two places.</strong> Hold the mechanism selection,
+  change the view. This asks <em>is this signalling stronger here or there?</em>
+  The sidebar stays linked, so the two panels cannot drift apart in anything but
+  where they are looking.</li>
+  <li><strong>Two sets of mechanisms in the same place.</strong> Hold the view, change
+  the selection. This asks <em>which signalling does this structure carry?</em> The
+  sidebar is unlinked for the mechanism lists and nothing else.</li>
+</ul>
+<p>In both cases the pair is only readable because of one setting:
+<span class="ui">shared colour scale across panels</span>, on by default. The two
+panels are coloured through a single window, the union of what each would have
+chosen on its own, and the legend says <span class="ui">shared</span>. Two panels
+that each auto-range to their own data <em>look</em> comparable and are not.</p>
 <ol>
-  <li>Click <span class="ui">⊞ Split</span> in the toolbar of the left panel.</li>
-  <li>Each panel now has its own <span class="ui">Dataset</span>, <span class="ui">Image</span> and <span class="ui">Edge source</span> menus at its bottom-left. Set the right panel's edge source to <span class="ui">niches_rad30</span>, a run of the same tissue scored with a 30 µm neighbourhood radius, and leave the left on <span class="ui">edges</span>.</li>
-  <li>Click <span class="ui">⇔ Match</span> on one panel to give the other the same physical scale: the same number of microns across, which is what a scale bar would check.</li>
+  <li>Start from the settings of example 1: both <span class="ui">sample</span> sliders at
+  100%, cell <span class="ui">fill</span> 12%, <span class="ui">Tissue Graph</span> 15%,
+  <span class="ui">Edges</span> 100% at width 1, and the edge legend on
+  <span class="ui">robust 5–95%</span>. Click <span class="ui">⊞ Split</span> in the left
+  panel's toolbar. The right panel opens on the same dataset with the same settings,
+  and the sidebar gains <span class="ui">Panel 1</span> / <span class="ui">Panel 2</span>
+  tabs above a ticked <span class="ui">settings linked — edits apply to both panels</span> box.</li>
+  <li>Zoom the left panel into the midline, where the third ventricle holds its choroid
+  plexus between two dense cell layers, and the right panel into the lateral ventricle at
+  the edge of the section. Click <span class="ui">⇔ Match</span> on the left panel so the
+  right one shows the same number of microns across. This is figure 6a.</li>
+  <li>Untick <span class="ui">settings linked</span>. The sidebar now edits whichever tab
+  is selected. With <span class="ui">Panel 1</span> selected, click <span class="ui">none</span>
+  in <strong>LRM Mechanisms</strong> and tick the 31 neuropeptide mechanisms, or click
+  <span class="ui">import</span> and choose
+  <code>sample_data/example_lists/mouse_brain_neuropeptides.csv</code>. Select
+  <span class="ui">Panel 2</span>, click <span class="ui">none</span>, and tick the 22 glial
+  support mechanisms, or import <code>mouse_brain_glial_support.csv</code>. Bring both
+  panels to the midline view and <span class="ui">⇔ Match</span> them. This is figure 6b.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/split_pane.jpg" alt="Two viewer panels side by side showing the same breast tissue with two different NICHESv2 edge sets">
-  <figcaption>Left: <code>edges</code>. Right: <code>niches_rad30</code>. One sidebar, one colour scale (<span class="ui">shared colour scale across panels</span> is on by default), so a yellow line means the same score in both.</figcaption>
+  <img src="img/vignettes/ex6_areas.jpg" alt="Two panels at the same scale and with the same 228 mechanisms: left, the third ventricle with the choroid plexus inside it and dense yellow-scored cell layers on either side; right, the elongated lateral ventricle lined by a wall of cells scored mostly purple and blue">
+  <figcaption><strong>6a · The same mechanisms in two places.</strong> All 228 mechanisms,
+  settings linked, both panels 843 µm across after <span class="ui">⇔ Match</span>. Left:
+  the third ventricle, with the choroid plexus inside it and the cell layers that flank
+  it. Right: the lateral ventricle at the edge of the section and its wall. One window
+  for both, 2–769, the union of the two panels' own robust windows (2–769 on the left,
+  4–660 on the right), so a yellow line is the same summed score on either side. The
+  flanking layers on the left reach scores the ventricle wall on the right rarely does;
+  the choroid plexus, drawn in purple, is low on every mechanism at once.
+  Every cell and every pair is drawn: both sample sliders are at 100%.</figcaption>
 </figure>
-<div class="callout note"><strong class="label">Unlinking</strong>
-<p>Untick <span class="ui">settings linked — edits apply to both panels</span> to style one side independently, and use <span class="ui">copy panel 1 → panel 2</span> to push one side's settings to the other in one step.</p></div>
+<figure>
+  <img src="img/vignettes/ex6_sets.jpg" alt="The same midline view twice: left, with 31 neuropeptide mechanisms, the choroid plexus is drawn only as white tissue-graph lines and the layers are purple; right, with 22 glial lipid-transport, complement and microglial mechanisms, the choroid plexus and the ventricle lining are the brightest yellow in view">
+  <figcaption><strong>6b · Two sets of mechanisms in the same place.</strong> The left
+  panel keeps 31 neuropeptide mechanisms (Npy, Sst, Vip, Cck, Penk, Pdyn, Pomc, Tac1,
+  Gal, Crh, Avp and Calca, each to its receptors); the right keeps 22 glial support
+  mechanisms (Apoe, Clu, Cst3, Apod and Lpl to Lrp2, Sorl1, Trem2, Lsr and Lepr; the
+  C1q and C3 complement pairs; Csf1 and Trem2 to Csf1r; Psap to Gpr37; Pros1 to Axl and
+  Mertk). Shared window 0–169, the union of 0–20 on the left and 0–169 on the right. On
+  the left the choroid plexus and the ventricle lining are white: those are tissue-graph
+  lines with no neuropeptide pair scored on them. On the right the same lining is the
+  brightest signal in view. Had each panel ranged to its own data, the left would have
+  been drawn over 0–20 and looked as bright as the right; that is the comparison the
+  shared scale refuses to draw.</figcaption>
+</figure>
+<div class="callout note"><strong class="label">Two links, two jobs</strong>
+<p><span class="ui">settings linked</span> decides what is drawn: untick it to give
+one panel its own mechanism list, filter or opacity, and use
+<span class="ui">copy panel 1 → panel 2</span> to push one side's settings onto the
+other in one step. <span class="ui">shared colour scale across panels</span> decides
+how it is coloured. Leave the second one on for any figure; untick it only when one
+panel's range is so much narrower that sharing flattens it, and say so in the legend.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex7"><span class="num">7</span>A figure for the paper</h2>

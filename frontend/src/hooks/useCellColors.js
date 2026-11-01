@@ -3,7 +3,7 @@ import { valueToColor, QUAL_PALETTE, fadeAlpha, rangeOf } from "../utils/colorma
 import { geneColor } from "../utils/geneColor";
 
 const EMPTY = {
-  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0,
+  colorValues: null, type: "continuous", vmin: 0, vmax: 0, lo: 0, hi: 0, autoLo: 0, autoHi: 0,
   categories: [], categoryColors: new Map(),
 };
 
@@ -56,7 +56,7 @@ export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryCol
       const cellColors = new Map(
         Object.entries(raw.values).map(([id, label]) => [id, colorMap.get(label) ?? [128, 128, 128, 255]])
       );
-      setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, categories, categoryColors: colorMap });
+      setResult({ colorValues: cellColors, type: "categorical", vmin: 0, vmax: 0, lo: 0, hi: 0, autoLo: 0, autoHi: 0, categories, categoryColors: colorMap });
       return;
     }
     // The window follows the cells actually drawn (the values in this
@@ -77,7 +77,7 @@ export function useCellColors(raw, colorBy, palette, enabled, clamp, categoryCol
         return [id, [c[0], c[1], c[2], a]];
       })
     );
-    setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, categories: [], categoryColors: new Map() });
+    setResult({ colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, autoLo: r.lo, autoHi: r.hi, categories: [], categoryColors: new Map() });
   }, [raw, enabled, colorBy?.mode, colorBy?.field, clamp?.low, clamp?.high, palette, categoryColorOverrides, fadeFrac, rangeMode]); // eslint-disable-line
 
   return { ...result, loading: false };

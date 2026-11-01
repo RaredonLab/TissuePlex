@@ -1531,8 +1531,10 @@ Notch1,Dll4</code></pre>
   <h3>Color Scales Across Panels</h3>
   <p>The <span class="ui">shared colour scale across panels</span> checkbox in
   the <span class="ui">Cell Color</span> section, on by default, makes both
-  panels map color through one range computed across both.
-  Leave it on for any figure. Two panels that each auto-scaled to their own data
+  panels map color, cells and edges alike, through one window: the union of the
+  windows each panel would have chosen on its own (full or robust, per the
+  legend's auto mode). The legend then reads <span class="ui">shared</span>, and
+  a clamp you set by hand still wins. Leave it on for any figure. Two panels that each auto-scaled to their own data
   <em>look</em> comparable and are not — one panel's yellow might be 40 counts and
   the other's 4,000. Turn it off only when one panel's range is so much narrower
   that sharing flattens it, and say so in the legend.</p>
