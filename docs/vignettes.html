@@ -230,11 +230,11 @@ columns a lab would write about its own pairs.</p>
   <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose
   <span class="ui">Cell metadata</span>, then <span class="ui">graphclust</span>.</li>
   <li>The legend lists clusters 1 to 9 in numeric order with a swatch each; click a swatch to change its colour, or <span class="ui">import palette</span> to load a <code>category,#hex</code> file.</li>
-  <li>Tick <span class="ui">Edges</span> at about 45% so the signalling graph sits over the clusters, then hold <kbd>Shift</kbd> and click a line: the <strong>EDGE</strong> panel opens with an <strong>Annotations</strong> block from <code>edge-metadata/</code> above the mechanisms.</li>
+  <li>Tick <span class="ui">Edges</span> at about 55% with <span class="ui">width</span> 2 so the signalling graph sits over the clusters, then hold <kbd>Shift</kbd> and click a line: the <strong>EDGE</strong> panel opens with an <strong>Annotations</strong> block from <code>edge-metadata/</code> above the mechanisms.</li>
 </ol>
 <figure>
   <img src="img/vignettes/ex3_clusters.jpg" alt="Several hundred cells filled by cluster colour: red, green and blue tumour clusters packed together, a band of purple stromal cells running diagonally through them, blue outlines, and NICHESv2 edges drawn over everything in viridis">
-  <figcaption><strong>3a · Cells filled by <code>graphclust</code></strong> from a CSV in <code>cell-metadata/</code>, 437 cells in a 258 × 185 µm field at the tumour edge, with every NICHESv2 pair drawn over them at 45%. The viewer recognised nine integer levels as categories rather than a 1–9 gradient; <span class="ui">treat as categorical</span> is there to override that call either way. The clusters follow the tissue: the three tumour clusters (red 4, green 3, blue 1) fill the nests, and the purple cluster 5, whose enriched genes are VWF, PDGFRB, POSTN and LRRC15, is the stromal band between them.</figcaption>
+  <figcaption><strong>3a · Cells filled by <code>graphclust</code></strong> from a CSV in <code>cell-metadata/</code>, 437 cells in a 258 × 185 µm field at the tumour edge, with every NICHESv2 pair drawn over them at 55%. The viewer recognised nine integer levels as categories rather than a 1–9 gradient; <span class="ui">treat as categorical</span> is there to override that call either way. The clusters follow the tissue: the three tumour clusters (red 4, green 3, blue 1) fill the nests, and the purple cluster 5, whose enriched genes are VWF, PDGFRB, POSTN and LRRC15, is the stromal band between them.</figcaption>
 </figure>
 <figure class="pair">
   <img src="img/vignettes/ex3_legend.jpg" alt="The Cell Color section: Color cells ticked, Cell metadata, graphclust, treat as categorical ticked, nine colour swatches labelled 1 to 9, and import and export palette buttons">
@@ -353,7 +353,7 @@ layers, each from a different file, in one field 115 µm across.</p>
   and red with the swatches, or <span class="ui">import palette</span> with
   <code>breast_cxcl12_palette.csv</code>.</li>
   <li>Tick <span class="ui">Edges</span>, drag its <span class="ui">sample</span> to 100%, set
-  <span class="ui">width</span> 1.5, <span class="ui">offset</span> 2 and
+  <span class="ui">width</span> 2.5, <span class="ui">offset</span> 2 and
   <span class="ui">Harpoon</span>, and under <strong>LRM Mechanisms</strong> click
   <span class="ui">none</span> and tick only CXCL12 → CXCR4. Set the edge legend to
   <span class="ui">robust 5–95%</span>. Zoom in until about 80 cells fill the view.</li>
@@ -472,19 +472,29 @@ panel's range is so much narrower that sharing flattens it, and say so in the le
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex7"><span class="num">7</span>A figure for the paper</h2>
-<p class="meta">Any dataset · 3 minutes</p>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> · 3 minutes · continues from example 5</p>
 <p>A screenshot is limited to the pixels on your screen. <span class="ui">Export…</span>
 redraws the data layers at whatever size you ask for, because they are geometry rather
 than pixels, and writes the DPI you choose into the file so a journal's resolution check
-reads it.</p>
+reads it. Here the view is the one from figure 5d: CXCL12 → CXCR4 edges, the two genes'
+transcripts, cell outlines and 10x's clusters.</p>
 <ol>
-  <li>Choose <span class="ui">▭ Rectangle</span> and drag over the region you want. The rectangle stays on the tissue while you pan.</li>
+  <li>Choose <span class="ui">▭ Rectangle</span> and drag over the region you want. The rectangle stays on the tissue while you pan; it is stored in image coordinates, not screen ones.</li>
   <li>Click <span class="ui">Export…</span>. Pick a preset, <span class="ui">3.5in @500</span> for a single column or <span class="ui">7in @500</span> for a double, or type a width in pixels. Choose a <span class="ui">background</span>, tick <span class="ui">scale bar</span>, and click <span class="ui">Export PNG</span>.</li>
   <li>For a quick slide, <span class="ui">Save PNG</span> saves the panel as shown, image included, at screen resolution.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/export_dialog_pane.jpg" alt="The Export figure dialog with width, DPI, background and scale bar options over a framed region of tissue">
-  <figcaption>The <strong>Export figure</strong> dialog. The readout under the fields shows the output size in pixels and inches so the relationship between width and DPI stays visible.</figcaption>
+  <img src="img/vignettes/ex7_framed.jpg" alt="The viewer with a white framing rectangle drawn over the middle of the field from figure 5d">
+  <figcaption><strong>7a · Framing.</strong> The <span class="ui">▭ Rectangle</span> frames 89 × 60 µm of the field in figure 5d, 420 × 280 image pixels. Everything else about the view is unchanged.</figcaption>
+</figure>
+<figure class="pair">
+  <img src="img/vignettes/ex7_dialog.jpg" alt="The Export figure dialog: region 89.2 by 59.5 micrometres, width 3500 px, DPI 500, the three presets, an output readout of 3500 by 2333 px equal to 7.00 by 4.67 inches at 500 DPI and 8.3 times the region's 420 source pixels, background black, scale bar ticked with a 20 micrometre bar, and a Saved 3500 by 2496 px line">
+  <img src="img/vignettes/ex7_export_1to1.jpg" alt="A 1000 by 700 pixel crop of the exported PNG at its native size: crisp cell outlines, transcript dots and offset harpoon edges on black">
+  <figcaption><strong>7b · The dialog, and 1,000 × 700 px of the result at 1:1.</strong> Left: <span class="ui">7in @500</span> gives 3,500 px for 420 source pixels, 8.3 pixels of output per pixel of the microscope image, and the readout says so. Right: a crop of the exported file at its native size. The outlines, dots and harpoons are redrawn as geometry at 3,500 px, which is why they stay sharp where a screenshot enlarged 8× would not.</figcaption>
+</figure>
+<figure>
+  <img src="img/vignettes/ex7_export.jpg" alt="The exported figure: the framed field on black with cell fills by cluster, white and red transcript dots, CXCL12 to CXCR4 edges with harpoon heads, and a 20 micrometre scale bar in a margin band at the bottom">
+  <figcaption><strong>7c · The exported PNG</strong>, 3,500 × 2,496 px, tagged 500 DPI, here reduced for the page. The 20 µm scale bar sits in its own band below the plot rather than over the data. There is no DAPI: the export draws the data layers only, so nothing in it is limited by the source image's resolution.</figcaption>
 </figure>
 <div class="callout warn"><strong class="label">Two things to know before exporting a multi-panel figure</strong>
 <ul>
@@ -499,7 +509,7 @@ reads it.</p>
   <div class="card"><h4><a href="https://github.com/RaredonLab/TissuePlex/blob/dev/docs/public_datasets.md">Datasets and licences</a></h4><p>Where each demo dataset comes from, what was trimmed, and further public data to try.</p></div>
 </div>
 
-<footer>TissuePlex is developed in the Raredon Lab. Demo data: 10x Genomics example datasets (CC BY 4.0); Bruker Spatial Biology CosMx mouse brain via the OSTA project (non-commercial data licence); synthetic fixtures generated in this repository.</footer>
+<footer>TissuePlex is developed in the Raredon Lab. Demo data: 10x Genomics example datasets (CC BY 4.0); Bruker Spatial Biology CosMx mouse brain via the OSTA project (non-commercial data licence). No synthetic data appears in these examples.</footer>
 </div>
 </main>
 </body>
