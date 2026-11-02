@@ -78,11 +78,11 @@ One ready-made script per platform is in [`r/`](r/), handling each platform's co
 
 | Folder | Platform | Source | How it ships |
 |---|---|---|---|
-| `mouse_ileum_tiny` | Xenium | 10x tiny example (36 cells), with annotation and multi-edge-set examples | in the repository |
+| `mouse_ileum_tiny` | Xenium | 10x tiny example (36 cells) with generated edges and example metadata; a test fixture | in the repository |
 | `visium_hd_tiny` | Visium HD | subset of 10x "Tiny Mouse Brain", CC BY 4.0 | in the repository |
 | `visium_tiny` | Visium | synthetic slide | in the repository |
 | `seqfish_synthetic` | seqFISH | synthetic region | in the repository |
-| `xenium_human_breast_2fov` | Xenium | 10x human breast, 2 FOV, CC BY 4.0 | `fetch_samples.py` (290 MB) |
+| `xenium_human_breast_2fov` | Xenium | 10x human breast, 2 FOV, CC BY 4.0, with a NICHESv2 run and 10x's graph clusters | `fetch_samples.py` (274 MB) |
 | `visium_mouse_kidney` | Visium | 10x mouse kidney, CC BY 4.0 | `fetch_samples.py` (40 MB) |
 | `cosmx-mousebrain` | CosMx | Bruker mouse brain via the OSTA project, non-commercial licence | `fetch_samples.py` (60 MB) |
 

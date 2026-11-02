@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TissuePlex Worked Examples</title>
-  <meta name="description" content="Seven short, screenshot-led walkthroughs of TissuePlex on the demo datasets that ship with the repository: cell–cell signalling on Xenium, custom annotations, Visium spots and Visium HD bins, platforms without an image, side-by-side comparison, and publication figures.">
+  <meta name="description" content="Seven short, screenshot-led walkthroughs of TissuePlex on real demo datasets: cell–cell signalling on a CosMx mouse brain, one cell's neighbourhood, your own annotations on a Xenium breast section, Visium spots and Visium HD bins, transcripts inside their cells with every layer stacked, side-by-side comparison, and a publication-ready export.">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -174,7 +174,7 @@ with the same settings and the same <span class="ui">robust 5–95%</span> range
   <figcaption>Shift-click on an edge (breast dataset). The <strong>EDGE</strong> panel names the sending and receiving cell, shows the pair's annotations from <code>edge-metadata/</code>, then every mechanism NICHESv2 scored on it with its share of the total: here seven, led by CXCL12 → CD4 and CXCL12 → CXCR4.</figcaption>
 </figure>
 <div class="callout tip"><strong class="label">Try next</strong>
-<p>Open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to <span class="ui">graphclust</span>, then keep one cluster. Only edges leaving that cluster remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
+<p>On the breast dataset, open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to <span class="ui">graphclust</span>, then keep one cluster. Only edges leaving that cluster remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex2"><span class="num">2</span>One cell's neighbourhood</h2>
@@ -342,8 +342,8 @@ them: pick one ligand–receptor mechanism, draw its edges, draw the transcripts
 ligand and its receptor, and colour the cells by an independent clustering. Five
 layers, each from a different file, in one field 115 µm across.</p>
 <ol>
-  <li>Keep the settings of 5a, with <span class="ui">Morphology</span> down to 40% and
-  <span class="ui">Cell Segments → fill</span> up to 35%.</li>
+  <li>Keep the settings of 5a, with <span class="ui">Morphology</span> down to 40%,
+  <span class="ui">Cell Segments → fill</span> up to 35% and the transcript <span class="ui">dot</span> at 4 px.</li>
   <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose
   <span class="ui">Cell metadata</span>, then <span class="ui">graphclust</span>. That column
   is 10x's own graph-based clustering of this run, read from
