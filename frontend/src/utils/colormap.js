@@ -89,6 +89,27 @@ export function valueToColor(value, vmin, vmax, palette = "viridis") {
  * the minimum existed. The layer's `opacity` prop still multiplies the result,
  * which is what makes the existing slider the ceiling.
  */
+/**
+ * The colour window for a set of drawn values.
+ *
+ * "full"   → [min, max] of the values: the legend's ends are the data's ends.
+ * "robust" → [5th, 95th percentile]: the ends are where the bulk of the data
+ *            stops, so a thin tail cannot own most of the palette. Values past
+ *            the ends saturate. With fewer than 20 values there is no bulk to
+ *            speak of and the full range is used.
+ * Both are "auto": they follow what is drawn. Returns min/max alongside lo/hi
+ * so a legend can show the window against the data.
+ */
+export function rangeOf(values, mode = "full") {
+  let min = Infinity, max = -Infinity, n = 0;
+  for (const v of values) { if (v < min) min = v; if (v > max) max = v; n++; }
+  if (!n) return { min: 0, max: 0, lo: 0, hi: 0 };
+  if (mode !== "robust" || n < 20) return { min, max, lo: min, hi: max };
+  const sorted = Float64Array.from(values).sort();
+  const q = (p) => sorted[Math.min(n - 1, Math.max(0, Math.round(p * (n - 1))))];
+  return { min, max, lo: q(0.05), hi: q(0.95) };
+}
+
 export function fadeAlpha(t, minFrac) {
   const f = Math.max(0, Math.min(1, minFrac ?? 1));
   const u = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0;

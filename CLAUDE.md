@@ -323,10 +323,19 @@ split by licence, recorded in `docs/public_datasets.md` (*What ships with Tissue
 
 | Dataset | How it ships | Why |
 |---|---|---|
-| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.0` release) | 10x example data, CC BY 4.0 |
+| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.1` release; the breast zip was rebuilt for v1.0.1, see below) | 10x example data, CC BY 4.0 |
 | `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Separate from the code licence. |
 | `merscope-vpt-smallset` | not distributed | Vizgen's U2OS "small set" from the VPT vignette; no licence stated, terms of use reserve redistribution |
 | `seqfish_instrument2` | not distributed | Spatial Genomics test set used by scverse CI; gated download, no open licence |
+
+**The breast dataset carries real data only.** Its `edges.parquet` was a `make_edges.py`
+placeholder (20 mouse-named mechanisms with no transcripts behind them) and was
+removed in v1.0.1; `edges/niches_rad30.parquet` is the NICHESv2 run and the only edge
+source. `cell-metadata/graphclust_10x.csv` is 10x's graph-based clustering copied from
+`analysis.tar.gz`, and `edge-metadata/` is recomputed from the real run without the
+invented `demo_review_flag`. The worked examples use no synthetic data: `mouse_ileum_tiny`
+(generated edges, clusters and annotations), `seqfish_synthetic` and `visium_tiny` are
+test fixtures only.
 
 `sample_data/fetch_samples.py` downloads the release zips, verifies SHA-256 (the digests
 are in its `MANIFEST`), and unpacks each beside itself. The zips were built from the
@@ -365,6 +374,12 @@ dataset_dir/
 
 **Supported formats**: `.csv`, `.csv.gz`, `.parquet`.  Multiple files are allowed and
 are outer-joined on the barcode key.
+
+**Whole-number float columns are restored to `Int64` after the join**
+(`supplemental._restore_integers`, applied in `load_supplemental` and again in
+`_merge_supplemental`). An outer/left join leaves NaN for cells the file does not
+mention, which promotes an integer cluster column to float64: the legend then reads
+`1.0`, `2.0`, and a categorical filter comparing strings (`"1"`) matches nothing.
 
 **Barcode column resolution** (in order of precedence):
 1. A column explicitly named `cell_id`
@@ -579,6 +594,8 @@ makes that consumer silently stale, which is far worse than a redundant render.
   `{panelIndex, corners (image px), rotation}`. Panel-scoped like annotations;
   see the Figure Export section for why the corners are stored in image space
   and why the rotation travels with them.
+- **Transcript dot size**: `transcriptDotPx` (default 3) is the `radiusMaxPixels` of the
+  transcript layer; the world radius (4 image px) still rules zoomed out.
 - **Sampling**: `transcriptFraction` (default 0.1) and `cellBoundaryFraction`
   (`null` = auto) control how much of the viewport each hook requests;
   `transcriptStats` / `cellBoundaryStats` hold live `{shown, total}` counts that the
@@ -850,10 +867,16 @@ Consequences worth knowing:
   seqFISH ROI differ by 55×. It now converts through each panel's own `pixelSize`
   so the same number of microns spans the same screen width, exactly as a
   scalebar would. Verified across Visium↔seqFISH: 2997 µm vs 55 µm → 55 µm both.
-- **`linkColorScale` (default on) shares one colour range across panels.** This
+- **`linkColorScale` (default on) shares one colour range across panels, cells and edges.** This
   is figure integrity, not preference: two viridis panels that each auto-ranged
   to their own data look comparable and are not — one's yellow might be 40 counts
-  and the other's 4,000. An explicit clamp from the sliders always wins.
+  and the other's 4,000. An explicit clamp from the sliders always wins. The union
+  is taken over each panel's **auto** window (`autoLo`/`autoHi` from the colour
+  hooks: the range mode applied to that panel's values, clamp ignored), not over
+  the window in use — the linked window is fed back to the hooks as a clamp, so a
+  union over `lo`/`hi` could only ever grow. Edges were left unlinked until v1.0.1,
+  which is exactly the failure the toggle exists to prevent; the legend reads
+  `shared` when the window is the linked one.
 
 **What is per-panel (local state / per-instance):**
 - OSD viewer instance (`viewerRef`)
@@ -1652,11 +1675,11 @@ With no minimum the channel is 255 everywhere and nothing changes — that
 invariant is pinned in `src/fadeAlpha.test.js`. Metadata-continuous modes do
 not fade; extending them is one condition in each hook.
 
-**Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
+**Edge lrm_set coloring is fully client-side**, and ranges over drawn edges only — rows with `visible_lrm_count` 0 are skipped, or their zero scores pull the window down.: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server
-call is made for `lrm_set` mode. The p95 of `visible_score_sum` across the current
-viewport is auto-set as `edgeColorClamp.high` so the color range adapts to the data
-rather than being dominated by outlier edges.
+call is made for `lrm_set` mode. With no clamp the range is the min and max of
+`visible_score_sum` over the rows in view, recomputed on every pan and toggle, so the
+legend endpoints are the colour endpoints; only the user sets a clamp (v1.0.1).
 
 **Autocrine edges are colored on the same scale as directed edges.** They were once
 excluded from the `lrm_set` computation, which left the rings stuck on their default
@@ -2182,11 +2205,15 @@ which it does not cover at all.
   opened — an image or the data frame — and the hooks key on the viewport. Gating a
   fetch or a layer on `activeImage`, the DZI, or `has_morphology` reintroduces the
   "no DAPI, no cells" bug. `no_image_check.py` is the test to run.
-- **Edge color clamp has two different defaults, by design.** `Viewer.jsx` auto-sets
-  `edgeColorClamp.high` from the p95 of `visible_score_sum` so the initial view isn't
-  washed out by outliers. But `useEdgeColors` computes its own fallback `hi` as `max`, not
-  p95, so that "reset range" lands on a value matching the legend endpoints. They disagree
-  intentionally — don't "fix" one in isolation.
+- **The colour range is auto (min/max of what is drawn, or the 5th–95th percentile under
+  `*ColorRangeMode: "robust"`; `colormap.rangeOf`) unless the user clamps it, and
+  nothing else may write `edgeColorClamp` / `cellColorClamp`.** Both hooks return the
+  window in use as `lo`/`hi`, stored beside `vmin`/`vmax` in `panels[i].*ColorRange`, so
+  the legend prints the window the colours actually use. `Viewer.jsx` used to write `high = p95 of
+  the viewport` into the clamp on every viewport change: the palette then saturated at
+  a value the legend never showed, `reset range` was undone by the next pan, and a
+  hand-set clamp was overwritten too. Removed in v1.0.1. `useEdgeColors` ranges over
+  the rows in view in both modes and the legend shows `· auto` / `· clamped`.
 - **`edges.py` validates path traversal; the other routers don't.** `edges.py::_reader`
   resolves `edge_file` and rejects anything escaping the dataset directory.
   `spatial.py::_reader`, `tiles.py`, and `layers.py` do a bare `DATA_ROOT / dataset` with

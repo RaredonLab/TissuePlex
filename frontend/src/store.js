@@ -34,14 +34,21 @@ export function makeSettings() {
     // a number is the user's slider override.
     cellBoundaryFraction: null,
     transcriptFraction: 0.1,
+    // Largest radius a transcript dot draws at, in screen px. The world radius
+    // (4 image px) still rules when zoomed out; this is the cap when zoomed in.
+    transcriptDotPx: 3,
     // Xenium Explorer's default: transcripts with Q-Score < 20 are hidden, and
     // showing them draws them gray. Only datasets with a Q-Score are affected
     // (capability `has_transcript_qv`, Xenium only).
     showLowQualityTranscripts: false,
 
     // Values outside [low, high] map to the palette ends (oob::squish).
+    // null = auto: the window follows what is drawn, per the range mode.
     cellColorClamp: { low: null, high: null },
     edgeColorClamp: { low: null, high: null },
+    // "full" = min..max of what is drawn; "robust" = 5th..95th percentile.
+    cellColorRangeMode: "full",
+    edgeColorRangeMode: "full",
 
     cellColorEnabled: false,
     colorBy: { mode: "off", field: null },   // 'off' | 'gene_set' | 'metadata'
@@ -268,6 +275,11 @@ export const useStore = create((set, get) => ({
   // The LRM catalogue, colour range and edge filter are all specific to one
   // edges.parquet and must be re-derived when the source changes.
   setPanelEdgeFile: (i, edgeFile) => set((s) => {
+    // Re-selecting the file already in use is a no-op. The dataset picker
+    // confirms the default once the file list resolves, and clearing the
+    // catalogue here without a change of `edgeFile` to refetch it left the
+    // mechanism checklist empty ("0 of 0 LRMs").
+    if (s.panels[i]?.edgeFile === edgeFile) return s;
     const next = [...s.panels];
     next[i] = {
       ...next[i], edgeFile, lrmCatalogue: [],
@@ -487,9 +499,12 @@ export const useStore = create((set, get) => ({
   setTranscriptFraction: (f) =>
     get().patchSettings({ transcriptFraction: Math.max(0.0001, Math.min(1.0, f)) }),
   setShowLowQualityTranscripts: (v) => get().patchSettings({ showLowQualityTranscripts: !!v }),
+  setTranscriptDotPx: (px) => get().patchSettings({ transcriptDotPx: Math.max(0.5, Math.min(12, px)) }),
 
   setCellColorClamp: (low, high) => get().patchSettings({ cellColorClamp: { low, high } }),
   setEdgeColorClamp: (low, high) => get().patchSettings({ edgeColorClamp: { low, high } }),
+  setCellColorRangeMode: (m) => get().patchSettings({ cellColorRangeMode: m }),
+  setEdgeColorRangeMode: (m) => get().patchSettings({ edgeColorRangeMode: m }),
 
   setCellColorEnabled: (v) => get().patchSettings({ cellColorEnabled: v }),
   setColorBy: (mode, field) => get().patchSettings({ colorBy: { mode, field } }),
