@@ -275,6 +275,11 @@ export const useStore = create((set, get) => ({
   // The LRM catalogue, colour range and edge filter are all specific to one
   // edges.parquet and must be re-derived when the source changes.
   setPanelEdgeFile: (i, edgeFile) => set((s) => {
+    // Re-selecting the file already in use is a no-op. The dataset picker
+    // confirms the default once the file list resolves, and clearing the
+    // catalogue here without a change of `edgeFile` to refetch it left the
+    // mechanism checklist empty ("0 of 0 LRMs").
+    if (s.panels[i]?.edgeFile === edgeFile) return s;
     const next = [...s.panels];
     next[i] = {
       ...next[i], edgeFile, lrmCatalogue: [],

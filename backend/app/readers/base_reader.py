@@ -451,7 +451,12 @@ class SpatialDatasetReader(ABC):
         new_cols = [c for c in supp.columns if c not in cells.columns]
         if not new_cols:
             return cells
-        return cells.merge(supp[["cell_id"] + new_cols], on="cell_id", how="left")
+        merged = cells.merge(supp[["cell_id"] + new_cols], on="cell_id", how="left")
+        # A cell the user's file does not mention is NaN after the join, which
+        # promotes an integer cluster column to float ("1.0" in the legend, and a
+        # filter on "1" matching nothing). Restore Int64 for whole-number columns.
+        from .supplemental import _restore_integers
+        return _restore_integers(merged, "cell_id")
 
     # ── Shared utilities ──────────────────────────────────────────────────────
 

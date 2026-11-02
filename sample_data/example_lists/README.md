@@ -9,6 +9,7 @@ CSV files for the **import** buttons in the sidebar, matched to `mouse_ileum_tin
 | `mouse_brain_neuropeptides.csv` | LRM Mechanisms | `cosmx-mousebrain`: 31 neuropeptide → receptor mechanisms (worked example 6) |
 | `breast_stroma_markers.csv` | Transcript species | `xenium_human_breast_2fov`: LUM, ACTA2, CD68, PECAM1 (worked example 5) |
 | `breast_tumour_markers.csv` | Transcript species | `xenium_human_breast_2fov`: EPCAM, LUM, MKI67 (worked example 5) |
+| `breast_cxcl12_palette.csv` | Transcript species → import palette | White for CXCL12, red for CXCR4 (worked example 5d) |
 | `breast_marker_palette.csv` | Transcript species → import palette | Colours for the six genes above, `gene,#hex` |
 | `mouse_brain_glial_support.csv` | LRM Mechanisms | `cosmx-mousebrain`: 22 glial lipid-transport, complement and microglial mechanisms (worked example 6) |
 

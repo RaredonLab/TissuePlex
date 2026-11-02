@@ -1783,7 +1783,7 @@
       "has_transcripts": true,
       "unit_label": "cell"
     },
-    "cell_detail_0": "a359455dace01553",
+    "cell_detail_0": "0af2acdd4f8b6411",
     "cell_expression_0": {
       "digest": "bcc35f27b554d1f2",
       "n": 32
@@ -1811,6 +1811,7 @@
         "control_codeword_counts": "int64",
         "control_probe_counts": "int64",
         "deprecated_codeword_counts": "int64",
+        "graphclust": "Int64",
         "nucleus_area": "float64",
         "total_counts": "int64",
         "transcript_counts": "int64",
@@ -1855,94 +1856,6 @@
       "n": 7275,
       "type": "continuous"
     },
-    "edge__edges.parquet__catalogue": {
-      "digest": "556c70f23429ddd8",
-      "n": 20
-    },
-    "edge__edges.parquet__color_lrm": {
-      "digest": "f454e9ec05ba3d82"
-    },
-    "edge__edges.parquet__detail0": "07e4a0feab68ed99",
-    "edge__edges.parquet__filter__demo_review_flag": {
-      "digest": "2104bf58593a5e26",
-      "keys": [
-        "edge",
-        "is_autocrine",
-        "lrm_count",
-        "receiving_cell",
-        "receiving_type",
-        "score_sum",
-        "sending_cell",
-        "sending_type",
-        "x1",
-        "x2",
-        "y1",
-        "y2"
-      ],
-      "n": 14781
-    },
-    "edge__edges.parquet__grouped": {
-      "digest": "2587c77fd6f6a1b3",
-      "keys": [
-        "edge",
-        "is_autocrine",
-        "lrm_count",
-        "receiving_cell",
-        "receiving_type",
-        "score_sum",
-        "sending_cell",
-        "sending_type",
-        "x1",
-        "x2",
-        "y1",
-        "y2"
-      ],
-      "n": 44759
-    },
-    "edge__edges.parquet__schema": {
-      "columns": {
-        "demo_review_flag": "object",
-        "edge": "string",
-        "interaction_class": "object",
-        "is_autocrine": "bool",
-        "ligand": "string",
-        "lrm": "string",
-        "lrm_id": "int64",
-        "receiving_cell": "string",
-        "receiving_type": "string",
-        "receptor": "string",
-        "score": "double",
-        "score_norm": "double",
-        "score_percentile": "float64",
-        "score_tier": "object",
-        "sending_cell": "string",
-        "sending_type": "string",
-        "x1": "double",
-        "x2": "double",
-        "y1": "double",
-        "y2": "double"
-      }
-    },
-    "edge__edges.parquet__scores": {
-      "digest": "96471c6f8561b653",
-      "keys": [
-        "edge",
-        "visible_lrm_count",
-        "visible_score_sum"
-      ],
-      "n": 44759
-    },
-    "edge__edges.parquet__structure": {
-      "digest": "f9eacf53fffc98ca",
-      "keys": [
-        "edge",
-        "x1",
-        "x2",
-        "y1",
-        "y2"
-      ],
-      "n": 44759
-    },
     "edge__edges__niches_rad30.parquet__catalogue": {
       "digest": "931e3a76e6dcb943",
       "n": 32
@@ -1950,7 +1863,7 @@
     "edge__edges__niches_rad30.parquet__color_lrm": {
       "digest": "f746905c1d52f0aa"
     },
-    "edge__edges__niches_rad30.parquet__detail0": "b3e4808506fe2c80",
+    "edge__edges__niches_rad30.parquet__detail0": "beafe4dbecdf93ae",
     "edge__edges__niches_rad30.parquet__filter__demo_review_flag": {
       "digest": "bd6aef6053d1632d",
       "keys": [

@@ -116,11 +116,11 @@ datasets are published as release assets; one command fetches them:</p>
 <pre><code>python3 sample_data/fetch_samples.py</code></pre>
 <table>
   <tr><th>Menu entry</th><th>Platform</th><th>What it is</th><th>Used in</th></tr>
-  <tr><td><code>mouse_ileum_tiny</code></td><td>Xenium</td><td>Three 640-px patches of mouse ileum (36 cells) from 10x's tiny example run, with example <code>cell-metadata/</code>, <code>edge-metadata/</code> and two extra edge sets. In the clone.</td><td>3</td></tr>
+  <tr><td><code>mouse_ileum_tiny</code></td><td>Xenium</td><td>Three 640-px patches of mouse ileum (36 cells) from 10x's tiny example run, with generated edges and example metadata: a test fixture. In the clone.</td><td>—</td></tr>
   <tr><td><code>visium_hd_tiny</code></td><td>Visium HD</td><td>A corner of 10x's "Tiny Mouse Brain" Space Ranger output, 8 µm and 16 µm bins. In the clone.</td><td>4</td></tr>
-  <tr><td><code>visium_tiny</code></td><td>Visium</td><td>Synthetic classic Visium slide, 252 spots. In the clone.</td><td>—</td></tr>
-  <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells. In the clone.</td><td>5</td></tr>
-  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, NICHESv2 edges. Fetched.</td><td>1, 5, 7</td></tr>
+  <tr><td><code>visium_tiny</code></td><td>Visium</td><td>Synthetic classic Visium slide, 252 spots, a test fixture. In the clone.</td><td>—</td></tr>
+  <tr><td><code>seqfish_synthetic</code></td><td>seqFISH</td><td>Synthetic Spatial Genomics GenePS region, 36 cells, a test fixture. In the clone.</td><td>—</td></tr>
+  <tr><td><code>xenium_human_breast_2fov</code></td><td>Xenium</td><td>10x's human breast example, two fields of view, 7,275 cells, DAPI image, a NICHESv2 run and 10x's own graph clusters. Fetched.</td><td>1, 3, 5, 7</td></tr>
   <tr><td><code>visium_mouse_kidney</code></td><td>Visium</td><td>10x's mouse kidney coronal section, 1,438 spots on tissue, NICHESv2 spot–spot edges. Fetched.</td><td>4</td></tr>
   <tr><td><code>cosmx-mousebrain</code></td><td>CosMx</td><td>Bruker/NanoString 1000-plex mouse brain, coronal section, 38,996 cells, no image. Fetched; non-commercial licence.</td><td>1, 2, 6</td></tr>
 </table>
@@ -162,20 +162,19 @@ already know its anatomy, so you can judge the answer.</p>
 </ul>
 <h3>The same two steps on a different platform</h3>
 <p>Nothing above is specific to CosMx. The pair below is the Xenium human breast example
-(two fields of view, 7,275 cells, 44,759 pairs) drawn with the same settings. Its scores are
-tightly bunched rather than heavy-tailed (median 9.1 in a span of 4.7–12.0), so here the
-range is a stated clamp rather than the robust window.</p>
+(two fields of view, 7,275 cells, 181,523 directed pairs scored over 32 mechanisms) drawn
+with the same settings and the same <span class="ui">robust 5–95%</span> range.</p>
 <figure class="pair">
-  <img src="img/vignettes/ex1_breast_graph.jpg" alt="The tissue graph of a two-field Xenium breast section drawn as thin grey lines">
-  <img src="img/vignettes/ex1_breast_scored.jpg" alt="The same breast graph scored with viridis: mostly purple with scattered yellow pairs">
-  <figcaption>Xenium breast, tissue graph and scored graph. Colour range clamped to <strong>9.0–10.5</strong>; scores in view span 4.7–12.0.</figcaption>
+  <img src="img/vignettes/ex1_breast_graph.jpg" alt="The tissue graph of a two-field Xenium breast section drawn as thin grey lines, dense in the tumour and open in the stroma">
+  <img src="img/vignettes/ex1_breast_scored.jpg" alt="The same breast graph scored with viridis: purple through the stroma, with yellow concentrated in the tumour nests">
+  <figcaption>Xenium breast, tissue graph and scored graph, every pair drawn. Window 0–33 (robust 5–95% of the scores in view, whose full span is 0–693). The yellow sits in the tumour nests, where epithelial cells pack tightly and homotypic pairs such as CDH1–CDH1 and DSC2–DSC2 score highly; the stroma between them is purple.</figcaption>
 </figure>
 <figure>
-  <img src="img/vignettes/xenium_edge_info_pane.jpg" alt="The viewer with an edge selected; a floating panel lists sending cell, receiving cell, annotations and the scored mechanisms with their percentages">
-  <figcaption>Shift-click on an edge (breast dataset). The panel reads sending cell (Endothelial) → receiving cell (Smooth_Muscle), the demo annotations, then Fgf2→Fgfr1, Efnb1→Ephb4 and Vegfa→Flt1 with their scores.</figcaption>
+  <img src="img/vignettes/xenium_edge_info_pane.jpg" alt="The EDGE panel for one cell pair: sending and receiving cell ids, an Annotations block with interaction_class, score_tier and score_percentile, and seven mechanisms with their scores and shares, led by CXCL12 to CD4 and CXCL12 to CXCR4">
+  <figcaption>Shift-click on an edge (breast dataset). The <strong>EDGE</strong> panel names the sending and receiving cell, shows the pair's annotations from <code>edge-metadata/</code>, then every mechanism NICHESv2 scored on it with its share of the total: here seven, led by CXCL12 → CD4 and CXCL12 → CXCR4.</figcaption>
 </figure>
 <div class="callout tip"><strong class="label">Try next</strong>
-<p>Open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to a cell-type column. Only edges leaving that cell type remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
+<p>Open <strong>Edge Filter</strong> and set <span class="ui">Sending cell</span> to <span class="ui">graphclust</span>, then keep one cluster. Only edges leaving that cluster remain; the tissue graph underneath is untouched, so you can still see the neighbourhood structure the filter removed.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex2"><span class="num">2</span>One cell's neighbourhood</h2>
@@ -209,7 +208,7 @@ with, how far they reach, and which mechanisms dominate across those edges.</p>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex3"><span class="num">3</span>Your own annotations, without touching the data</h2>
-<p class="meta">Dataset <code>mouse_ileum_tiny</code> · 3 minutes · in the clone</p>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> (fetched) · 3 minutes</p>
 <p>Most analysis happens in R or Python after the instrument has finished. TissuePlex
 reads that work from two plain folders dropped beside the dataset, so clusters,
 scores or review flags appear in the viewer without regenerating anything:</p>
@@ -217,34 +216,39 @@ scores or review flags appear in the viewer without regenerating anything:</p>
   <li><code>cell-metadata/</code>, one row per cell, keyed on the cell barcode. <code>write.csv(df, "cell-metadata/clusters.csv")</code> from R works as is.</li>
   <li><code>edge-metadata/</code>, one row per cell pair, keyed on <code>"Sender|Receiver"</code>.</li>
 </ul>
-<p>The demo dataset ships both. Its <code>cell-metadata/example_clusters.csv</code> has a
-<code>seurat_clusters</code> column with twelve integer levels, chosen on purpose: integers
-are the common case for cluster ids and the awkward one for a viewer. It is a tiny
-fixture, three 640-pixel patches with 36 cells, so the figures here are small by nature;
-everything in it works the same on a full run.</p>
+<p>The breast dataset ships both. <code>cell-metadata/graphclust_10x.csv</code> is 10x's own
+graph-based clustering of this run, copied from the <code>analysis/</code> folder Xenium
+Onboard Analysis writes, with nine integer levels: integers are the common case for
+cluster ids and the awkward one for a viewer. <code>edge-metadata/example_annotations.csv</code>
+holds three per-pair summaries computed from the NICHESv2 file (whether the pair is
+autocrine or paracrine, a score tercile, and a score percentile), standing in for the
+columns a lab would write about its own pairs.</p>
 <ol>
-  <li>Choose <span class="ui">mouse_ileum_tiny</span> and zoom into the middle patch. Raise <span class="ui">outline</span> to 50% under <strong>Cell Segments</strong>.</li>
-  <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose <span class="ui">Cell metadata</span>, then <span class="ui">seurat_clusters</span>.</li>
-  <li>The legend lists clusters 0 to 11 in numeric order with a swatch each; click a swatch to change its colour, or <span class="ui">import palette</span> to load a <code>category,#hex</code> file.</li>
-  <li>Hold <kbd>Shift</kbd> and click an edge: the <strong>EDGE</strong> panel opens with an <strong>Annotations</strong> block from <code>edge-metadata/example_annotations.csv</code>.</li>
+  <li>Choose <span class="ui">xenium_human_breast_2fov</span> and zoom into the edge of the tumour,
+  where the stroma runs through it as a dark band. Set <span class="ui">Cell Segments → fill</span> to
+  55% and <span class="ui">outline</span> to 40%, <span class="ui">Morphology</span> to 40%.</li>
+  <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose
+  <span class="ui">Cell metadata</span>, then <span class="ui">graphclust</span>.</li>
+  <li>The legend lists clusters 1 to 9 in numeric order with a swatch each; click a swatch to change its colour, or <span class="ui">import palette</span> to load a <code>category,#hex</code> file.</li>
+  <li>Tick <span class="ui">Edges</span> at about 45% so the signalling graph sits over the clusters, then hold <kbd>Shift</kbd> and click a line: the <strong>EDGE</strong> panel opens with an <strong>Annotations</strong> block from <code>edge-metadata/</code> above the mechanisms.</li>
 </ol>
 <figure>
-  <img src="img/vignettes/ex3_clusters.jpg" alt="Fourteen cell polygons filled in twelve distinct cluster colours with light outlines, joined by thin directed edges, on a dark background">
-  <figcaption><strong>3a · Cells filled by <code>seurat_clusters</code></strong> from a CSV in <code>cell-metadata/</code>, with the NICHESv2 edges between them. The viewer recognised twelve integer levels as categories rather than a 0–11 gradient; <span class="ui">treat as categorical</span> is there to override that call either way.</figcaption>
+  <img src="img/vignettes/ex3_clusters.jpg" alt="Several hundred cells filled by cluster colour: red, green and blue tumour clusters packed together, a band of purple stromal cells running diagonally through them, blue outlines, and NICHESv2 edges drawn over everything in viridis">
+  <figcaption><strong>3a · Cells filled by <code>graphclust</code></strong> from a CSV in <code>cell-metadata/</code>, 437 cells in a 258 × 185 µm field at the tumour edge, with every NICHESv2 pair drawn over them at 45%. The viewer recognised nine integer levels as categories rather than a 1–9 gradient; <span class="ui">treat as categorical</span> is there to override that call either way. The clusters follow the tissue: the three tumour clusters (red 4, green 3, blue 1) fill the nests, and the purple cluster 5, whose enriched genes are VWF, PDGFRB, POSTN and LRRC15, is the stromal band between them.</figcaption>
 </figure>
 <figure class="pair">
-  <img src="img/vignettes/ex3_legend.jpg" alt="The Cell Color section: Color cells ticked, Cell metadata, seurat_clusters, treat as categorical ticked, twelve colour swatches labelled 0 to 11, and import and export palette buttons">
-  <img src="img/vignettes/ex3_edgepanel.jpg" alt="The EDGE panel for an Endothelial to Fibroblast pair: an Annotations block with interaction_class heterotypic, score_tier mid, score_percentile 52.44, demo_review_flag unreviewed, then three mechanisms with scores">
-  <figcaption><strong>3b · The two places annotations surface.</strong> Left: the <strong>Cell Color</strong> section with the categorical legend. Cluster 10 sorts after cluster 9, not between 1 and 2, because columns whose labels all parse as numbers are ordered numerically. Right: the <strong>EDGE</strong> panel for one Endothelial→Fibroblast pair; the <strong>Annotations</strong> block is the row for this pair in <code>edge-metadata/</code>, above the three mechanisms NICHESv2 scored on it. The folder's README says which of those columns are derived from the edge file and which one is invented.</figcaption>
+  <img src="img/vignettes/ex3_legend.jpg" alt="The Cell Color section: Color cells ticked, Cell metadata, graphclust, treat as categorical ticked, nine colour swatches labelled 1 to 9, and import and export palette buttons">
+  <img src="img/vignettes/ex3_edgepanel.jpg" alt="The EDGE panel for one pair: sending and receiving cell ids, an Annotations block with interaction_class paracrine, score_tier high and score_percentile 99.920, then seven mechanisms with scores and shares, led by CXCL12 to CD4 and CXCL12 to CXCR4">
+  <figcaption><strong>3b · The two places annotations surface.</strong> Left: the <strong>Cell Color</strong> section with the categorical legend; the labels read <code>1</code> to <code>9</code>, not <code>1.0</code>, even though two cells in the file have no cluster. Right: the <strong>EDGE</strong> panel for one pair in the stroma; the <strong>Annotations</strong> block is the row for this pair from <code>edge-metadata/</code>, and below it the seven mechanisms NICHESv2 scored on it.</figcaption>
 </figure>
 <h3>What to notice</h3>
 <ul>
-  <li>The same column is offered under <strong>Cell Filter</strong>. Choose it there and untick all but one cluster: the remaining cells are drawn at full density, because the filter is applied on the server before sampling.</li>
-  <li>Annotation columns also appear in the <span class="ui">edge color</span> and <strong>Edge Filter</strong> menus, so a review flag or a confidence tier can colour or subset the edges directly.</li>
-  <li>The cell types in the EDGE panel header (Endothelial, Fibroblast) come from the edge file's own <code>sending_type</code> / <code>receiving_type</code> columns, which NICHESv2 writes only when asked; in this fixture they are simulated.</li>
+  <li>The same column is offered under <strong>Cell Filter</strong>. Choose <span class="ui">graphclust</span> there and untick all but cluster 5: only the stroma remains, drawn at full density, because the filter is applied on the server before sampling.</li>
+  <li>Annotation columns also appear in the <span class="ui">edge color</span> and <strong>Edge Filter</strong> menus, so <code>score_tier</code> can colour the edges and <code>interaction_class</code> can subset them directly.</li>
+  <li>The clusters carry no names. What each one is enriched for can be read off the transcripts (example 5): cluster 6 for CD163, C1QA and LYZ, cluster 8 for KRT14 and KRT5, cluster 9 for PTPRC. Naming them is the analyst's job, in the CSV.</li>
 </ul>
 <div class="callout tip"><strong class="label">Try next</strong>
-<p>This dataset also has three edge sets. The <span class="ui">Edge source</span> menu at the top of the sidebar switches between <code>edges</code>, <code>edge.raw.minimum</code> and <code>edge.normalized.product</code>, each a different scoring of the same tissue.</p></div>
+<p>Open <strong>Edge Filter</strong>, set <span class="ui">Sending cell</span> to <span class="ui">graphclust</span> and keep only cluster 5. The edges that remain all leave the stroma; the tissue graph underneath is untouched, so the neighbourhood structure the filter removed is still visible.</p></div>
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex4"><span class="num">4</span>Spots and bins: the array platforms</h2>
@@ -284,7 +288,7 @@ and <strong>Spot Info</strong> on Visium, <strong>Bin Segments</strong> on HD.</
 
 <!-- ─────────────────────────────────────────────────────────────── -->
 <h2 id="ex5"><span class="num">5</span>Transcripts inside their cells</h2>
-<p class="meta">Datasets <code>xenium_human_breast_2fov</code> (fetched) and <code>seqfish_synthetic</code> (in the clone) · 4 minutes</p>
+<p class="meta">Dataset <code>xenium_human_breast_2fov</code> (fetched) · 4 minutes</p>
 <p>Imaging platforms record every transcript as a point with a gene name. TissuePlex
 draws those points where they were detected, over the nuclear stain and inside the
 cell outlines they were assigned to, coloured by gene, and filters them by gene in the
@@ -332,16 +336,61 @@ histologist asks of an in-situ stain: which cells, exactly, express this?</p>
   where LUM (pink) takes over; MKI67 (green) picks out the cells in cycle. Nothing here
   was drawn by hand: this is the gene filter and three colours.</figcaption>
 </figure>
+<h3>Every layer at once: one mechanism, its transcripts, and the cells</h3>
+<p>The layers above were introduced one at a time. On real data the point is to stack
+them: pick one ligand–receptor mechanism, draw its edges, draw the transcripts of its
+ligand and its receptor, and colour the cells by an independent clustering. Five
+layers, each from a different file, in one field 115 µm across.</p>
+<ol>
+  <li>Keep the settings of 5a, with <span class="ui">Morphology</span> down to 40% and
+  <span class="ui">Cell Segments → fill</span> up to 35%.</li>
+  <li>Under <strong>Cell Color</strong>, tick <span class="ui">Color cells</span>, choose
+  <span class="ui">Cell metadata</span>, then <span class="ui">graphclust</span>. That column
+  is 10x's own graph-based clustering of this run, read from
+  <code>cell-metadata/graphclust_10x.csv</code> beside the dataset; the viewer recognises its
+  nine integer levels as categories and gives each a colour.</li>
+  <li>Under <strong>Transcript Species</strong>, select only CXCL12 and CXCR4; give them white
+  and red with the swatches, or <span class="ui">import palette</span> with
+  <code>breast_cxcl12_palette.csv</code>.</li>
+  <li>Tick <span class="ui">Edges</span>, drag its <span class="ui">sample</span> to 100%, set
+  <span class="ui">width</span> 1.5, <span class="ui">offset</span> 2 and
+  <span class="ui">Harpoon</span>, and under <strong>LRM Mechanisms</strong> click
+  <span class="ui">none</span> and tick only CXCL12 → CXCR4. Set the edge legend to
+  <span class="ui">robust 5–95%</span>. Zoom in until about 80 cells fill the view.</li>
+</ol>
 <figure>
-  <img src="img/vignettes/ex5_seqfish.jpg" alt="Thirty-six synthetic cells in a grid, each a DAPI blob inside a polygon outline filled with coloured transcript dots">
-  <figcaption><strong>5d · The same layers on a Spatial Genomics GenePS export.</strong>
-  <code>seqfish_synthetic</code> is a 36-cell fixture made by <code>sample_data/make_seqfish.py</code>,
-  not tissue, and it exists for a reason worth knowing: on this platform the cell
-  outlines (GeoJSON) are in pixels and the transcripts (CSV) are in microns. The reader
-  decides each table's units separately, which is why both land on the same cells; a
-  viewer that applied one transform to everything would draw the dots at a hundredth
-  of the size of the outlines. All 10,026 transcripts of its 36 genes are drawn.</figcaption>
+  <img src="img/vignettes/ex5_layers.jpg" alt="About eighty cells filled in cluster colours, mostly tan with some purple, green and pink, outlined in blue over faint DAPI; white CXCL12 and red CXCR4 transcript dots inside them; and CXCL12 to CXCR4 edges drawn as offset lines with harpoon heads, coloured purple to yellow by score, converging on receiving cells">
+  <figcaption><strong>5d · One mechanism, every layer.</strong> A 115 × 83 µm field of
+  breast stroma: 84 cells, 252 CXCL12 and 107 CXCR4 transcripts, and the 754 directed
+  CXCL12 → CXCR4 edges that touch the field, out of 1,707 scored pairs there. Both
+  sample sliders at 100%, so nothing is thinned. Edge colour: viridis, window 1–30
+  (robust 5–95% of the drawn edges, whose full span is 1–130).</figcaption>
 </figure>
+<p>Reading it from the bottom up:</p>
+<ul>
+  <li><strong>DAPI</strong>, grey, from the morphology image: where the nuclei are. It is
+  the one layer that is a picture rather than data.</li>
+  <li><strong>Cell outlines</strong>, blue, from the segmentation: which pixels the
+  instrument assigned to which cell. Every other layer is joined to these by cell id.</li>
+  <li><strong>Cell fill</strong>, one colour per cluster, from a CSV of analysis results
+  dropped beside the data. Here nine clusters from 10x's pipeline; the tan cluster (cluster 6, 44 of these
+  cells) is enriched for CD163, C1QA, LYZ and ITGAX, the purple one (cluster 5) for
+  VWF, PDGFRB and POSTN. A Seurat or scanpy label column works the same way.</li>
+  <li><strong>Transcripts</strong>, white for the ligand CXCL12 and red for the receptor
+  CXCR4, each dot at the position it was detected. This is the evidence: the nine cells
+  of cluster 5 in view, the stromal cluster, hold 87 of the 252 CXCL12 dots, while
+  CXCR4 is spread over the macrophage-like cluster 6 and the PTPRC-rich cluster 9.</li>
+  <li><strong>Edges</strong>, one per sending → receiving pair, from NICHESv2: each line is
+  that pair's score for this one mechanism, drawn from sender to receiver with the
+  harpoon at the receiving end, offset so that A → B and B → A are separate lines. The
+  fan of yellow lines converging on a cell is a cell whose neighbours send it CXCL12
+  while it expresses CXCR4; the transcripts underneath show why.</li>
+</ul>
+<p>Every number in the caption can be checked against the files: the cells and
+transcripts against the platform's own output, the clusters against 10x's
+<code>analysis/</code> folder, the edges against <code>edges/niches_rad30.parquet</code>.
+Nothing was drawn by hand.</p>
+
 <div class="callout note"><strong class="label">Quality filter</strong>
 <p>Xenium scores each transcript's decoding quality. Like Xenium Explorer, TissuePlex
 hides transcripts below Q&nbsp;20 by default; tick <span class="ui">show low-quality

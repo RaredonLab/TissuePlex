@@ -2,7 +2,7 @@
 """Fetch the larger TissuePlex demo datasets into sample_data/.
 
 Four small datasets are committed to the repository. The real, larger ones are
-too big for git and are attached to the v1.0.0 GitHub release instead. This
+too big for git and are attached to the v1.0.1 GitHub release instead. This
 script downloads them, verifies their SHA-256 checksums, and unpacks each into
 its own folder beside this file, where `docker compose up` (which mounts
 sample_data/ as /data) and the dev backend (DATA_ROOT=../sample_data) find them.
@@ -31,17 +31,17 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-RELEASE_TAG = "v1.0.0"
+RELEASE_TAG = "v1.0.1"
 RELEASE_BASE = f"https://github.com/RaredonLab/TissuePlex/releases/download/{RELEASE_TAG}"
 
 # name -> metadata. `sha256` is of the zip asset; `size_mb` is the download size.
 MANIFEST = {
     "xenium_human_breast_2fov": {
         "platform": "Xenium (10x Genomics)",
-        "summary": "10x 'Human Breast 2 FOV' example run: 7,275 cells, DAPI morphology, NICHESv2 edges",
+        "summary": "10x 'Human Breast 2 FOV' example run: 7,275 cells, DAPI morphology, NICHESv2 edges, 10x graph clusters",
         "licence": "CC BY 4.0 (10x Genomics)",
-        "size_mb": 290,
-        "sha256": "06fda6529e91cef5e696e38442c277d5f63e5e763baeea0d8508bb84ecc44d82",
+        "size_mb": 274,
+        "sha256": "7fcb428d6c539cea7f1f87738f8a1660a6dbace3781549d1eca6796cece6f1f8",
     },
     "visium_mouse_kidney": {
         "platform": "Visium (10x Genomics)",

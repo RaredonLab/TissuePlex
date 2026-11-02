@@ -67,9 +67,16 @@ export function useEdgeColors(
     if (!enabled || mode !== "lrm_set" || !edges || edges.length === 0) return null;
     // visible_score_sum is present only while an LRM filter is active; with no
     // filter the rows are the raw structural rows and score_sum is the total.
-    const n = edges.length;
+    // Only edges that will be drawn enter the range: a pair carrying none of
+    // the selected mechanisms has visible_lrm_count 0 and is skipped by the
+    // layer, and letting its zero score into the window pulled the robust
+    // 5th percentile to 0 and the 95th well below the drawn edges' own.
+    const drawn = [];
+    for (const e of edges) if ((e.visible_lrm_count ?? e.lrm_count ?? 1) > 0) drawn.push(e);
+    const n = drawn.length;
+    if (n === 0) return null;
     const scores = new Float64Array(n);
-    for (let i = 0; i < n; i++) scores[i] = edges[i].visible_score_sum ?? edges[i].score_sum ?? 0;
+    for (let i = 0; i < n; i++) scores[i] = drawn[i].visible_score_sum ?? drawn[i].score_sum ?? 0;
     const r = rangeOf(scores, rangeMode);
     const { min, max } = r;
     const lo = clamp?.low  ?? r.lo;
@@ -83,7 +90,7 @@ export function useEdgeColors(
     for (let i = 0; i < n; i++) {
       const c = valueToColor(scores[i], lo, hi, palette);
       const a = fadeFrac == null ? 255 : fadeAlpha(span > 0 ? (scores[i] - lo) / span : 1, fadeFrac);
-      colorMap.set(edges[i].edge, [c[0], c[1], c[2], a]);
+      colorMap.set(drawn[i].edge, [c[0], c[1], c[2], a]);
     }
     return { colorValues: colorMap, type: "continuous", vmin: min, vmax: max, lo, hi, autoLo: r.lo, autoHi: r.hi, categories: [], categoryColors: new Map() };
   }, [enabled, mode, edges, palette, clamp?.low, clamp?.high, fadeFrac, rangeMode]);

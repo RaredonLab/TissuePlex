@@ -323,10 +323,19 @@ split by licence, recorded in `docs/public_datasets.md` (*What ships with Tissue
 
 | Dataset | How it ships | Why |
 |---|---|---|
-| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.0` release) | 10x example data, CC BY 4.0 |
+| `xenium_human_breast_2fov`, `visium_mouse_kidney` | release asset (attached to the `v1.0.1` release; the breast zip was rebuilt for v1.0.1, see below) | 10x example data, CC BY 4.0 |
 | `cosmx-mousebrain` | release asset, with Bruker's licence PDF inside | Bruker "Data License Agreement for Non-Commercial Use" via the OSTA OSF archive; redistributable only with the licence, a modification notice and non-commercial use. `tx_file.csv` is truncated to FOV 1 (399,999 rows). Separate from the code licence. |
 | `merscope-vpt-smallset` | not distributed | Vizgen's U2OS "small set" from the VPT vignette; no licence stated, terms of use reserve redistribution |
 | `seqfish_instrument2` | not distributed | Spatial Genomics test set used by scverse CI; gated download, no open licence |
+
+**The breast dataset carries real data only.** Its `edges.parquet` was a `make_edges.py`
+placeholder (20 mouse-named mechanisms with no transcripts behind them) and was
+removed in v1.0.1; `edges/niches_rad30.parquet` is the NICHESv2 run and the only edge
+source. `cell-metadata/graphclust_10x.csv` is 10x's graph-based clustering copied from
+`analysis.tar.gz`, and `edge-metadata/` is recomputed from the real run without the
+invented `demo_review_flag`. The worked examples use no synthetic data: `mouse_ileum_tiny`
+(generated edges, clusters and annotations), `seqfish_synthetic` and `visium_tiny` are
+test fixtures only.
 
 `sample_data/fetch_samples.py` downloads the release zips, verifies SHA-256 (the digests
 are in its `MANIFEST`), and unpacks each beside itself. The zips were built from the
@@ -365,6 +374,12 @@ dataset_dir/
 
 **Supported formats**: `.csv`, `.csv.gz`, `.parquet`.  Multiple files are allowed and
 are outer-joined on the barcode key.
+
+**Whole-number float columns are restored to `Int64` after the join**
+(`supplemental._restore_integers`, applied in `load_supplemental` and again in
+`_merge_supplemental`). An outer/left join leaves NaN for cells the file does not
+mention, which promotes an integer cluster column to float64: the legend then reads
+`1.0`, `2.0`, and a categorical filter comparing strings (`"1"`) matches nothing.
 
 **Barcode column resolution** (in order of precedence):
 1. A column explicitly named `cell_id`
@@ -1660,7 +1675,7 @@ With no minimum the channel is 255 everywhere and nothing changes — that
 invariant is pinned in `src/fadeAlpha.test.js`. Metadata-continuous modes do
 not fade; extending them is one condition in each hook.
 
-**Edge lrm_set coloring is fully client-side**: `useEdgeColors` computes colors
+**Edge lrm_set coloring is fully client-side**, and ranges over drawn edges only — rows with `visible_lrm_count` 0 are skipped, or their zero scores pull the window down.: `useEdgeColors` computes colors
 synchronously from `visible_score_sum` in the already-fetched edges array. No server
 call is made for `lrm_set` mode. With no clamp the range is the min and max of
 `visible_score_sum` over the rows in view, recomputed on every pan and toggle, so the
