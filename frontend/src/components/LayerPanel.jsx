@@ -227,6 +227,7 @@ function ColorBySection({ unitLabel = "cell" }) {
     layers, setLayerProp,
     selectedGenes,
     cellColorClamp, setCellColorClamp,
+    cellColorRangeMode, setCellColorRangeMode,
     categoricalOverrides, setCategoricalOverride,
   } = usePanelSettings();
 
@@ -373,13 +374,15 @@ function ColorBySection({ unitLabel = "cell" }) {
           {/* Legend */}
           {mode === "gene_set" && (
             <ClampableLegend label="gene set expression" palette={cellColorPalette}
-              vmin={cellColorRange.vmin} vmax={cellColorRange.vmax}
-              clamp={cellColorClamp} setClamp={setCellColorClamp} accentColor="#6cf" />
+              vmin={cellColorRange.vmin} vmax={cellColorRange.vmax} lo={cellColorRange.lo} hi={cellColorRange.hi}
+              clamp={cellColorClamp} setClamp={setCellColorClamp}
+              rangeMode={cellColorRangeMode} setRangeMode={setCellColorRangeMode} accentColor="#6cf" />
           )}
           {mode === "metadata" && field && !isCategorical && (
             <ClampableLegend label={field} palette={cellColorPalette}
-              vmin={cellColorRange.vmin} vmax={cellColorRange.vmax}
-              clamp={cellColorClamp} setClamp={setCellColorClamp} accentColor="#6cf" />
+              vmin={cellColorRange.vmin} vmax={cellColorRange.vmax} lo={cellColorRange.lo} hi={cellColorRange.hi}
+              clamp={cellColorClamp} setClamp={setCellColorClamp}
+              rangeMode={cellColorRangeMode} setRangeMode={setCellColorRangeMode} accentColor="#6cf" />
           )}
           {mode === "metadata" && field && isCategorical && (
             <CategoricalLegend field={field} categories={cellColorCategories} />
@@ -390,21 +393,33 @@ function ColorBySection({ unitLabel = "cell" }) {
   );
 }
 
-function ClampableLegend({ label, palette, vmin, vmax, clamp, setClamp, accentColor = "#f90" }) {
+function ClampableLegend({ label, palette, vmin, vmax, lo, hi, clamp, setClamp,
+                           rangeMode = "full", setRangeMode = null, accentColor = "#f90" }) {
   const fmt = (v) => (v == null ? "" : Math.abs(v) < 0.01 || Math.abs(v) >= 1000
     ? v.toExponential(1) : v.toFixed(2));
   const hasData = vmin != null && vmax != null && vmax > vmin;
-  const low  = clamp?.low  ?? vmin;
-  const high = clamp?.high ?? vmax;
+  // The window in use: a clamp the user set, else the auto window the hook
+  // chose (full or robust). The sliders span the data; their thumbs sit on
+  // the window, so what the legend prints is what the colours do.
+  const low  = clamp?.low  ?? lo ?? vmin;
+  const high = clamp?.high ?? hi ?? vmax;
   const step = hasData ? (vmax - vmin) / 200 : 0.01;
   const clamped = clamp?.low != null || clamp?.high != null;
+  // Linked across panels, the window in use is the union of both sides' auto
+  // windows (Viewer), so an unclamped legend says so — its numbers are not
+  // this panel's own range.
+  const shared = useStore((s) => s.linkColorScale && s.panelCount >= 2);
+  const stateTag = clamped ? "· clamped"
+    : (rangeMode === "robust" ? "· auto 5–95%" : "· auto") + (shared ? ", shared" : "");
 
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ height: 8, borderRadius: 2, background: legendGradient(palette), marginBottom: 2 }} />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#555", marginBottom: hasData ? 4 : 0 }}>
         <span>{hasData ? fmt(low) : "low"}</span>
-        <span style={{ color: "#666", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 100 }}>{label}</span>
+        <span style={{ color: "#666", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 130 }}>
+          {label}{hasData && <span style={{ color: clamped ? "#c80" : "#3a7", marginLeft: 4 }}>{stateTag}</span>}
+        </span>
         <span>{hasData ? fmt(high) : "high"}</span>
       </div>
       {hasData && (
@@ -425,12 +440,31 @@ function ClampableLegend({ label, palette, vmin, vmax, clamp, setClamp, accentCo
               style={{ flex: 1, accentColor, cursor: "pointer" }} />
             <span style={{ width: 36, textAlign: "right", color: "#555" }}>{fmt(high)}</span>
           </div>
-          {clamped && (
-            <button onClick={() => setClamp(null, null)}
-              style={{ ...CHIP_STYLE, marginTop: 3, color: "#888" }}>
-              reset range
-            </button>
-          )}
+          <div style={{ display: "flex", gap: 4, marginTop: 3, alignItems: "center" }}>
+            {clamped && (
+              <button onClick={() => setClamp(null, null)}
+                style={{ ...CHIP_STYLE, color: "#888" }}>
+                reset range
+              </button>
+            )}
+            {setRangeMode && (
+              <>
+                <span style={{ color: "#444" }}>auto:</span>
+                <button onClick={() => setRangeMode("full")}
+                  title="Window = minimum to maximum of the values drawn"
+                  style={{ ...CHIP_STYLE, color: rangeMode === "full" ? "#ddd" : "#777",
+                           borderColor: rangeMode === "full" ? accentColor : undefined }}>
+                  full
+                </button>
+                <button onClick={() => setRangeMode("robust")}
+                  title="Window = 5th to 95th percentile of the values drawn; the tails saturate. Stated in the legend."
+                  style={{ ...CHIP_STYLE, color: rangeMode === "robust" ? "#ddd" : "#777",
+                           borderColor: rangeMode === "robust" ? accentColor : undefined }}>
+                  robust 5–95%
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1121,6 +1155,7 @@ function TranscriptLayerRow() {
   const {
     layers, setLayerProp, transcriptFraction, setTranscriptFraction,
     showLowQualityTranscripts, setShowLowQualityTranscripts,
+    transcriptDotPx, setTranscriptDotPx,
   } = usePanelSettings();
   const hasQv = useUnionCapabilities().has_transcript_qv;
   // Summed across the visible panels: with two datasets, "how much is on
@@ -1164,6 +1199,17 @@ function TranscriptLayerRow() {
               style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
             <span style={{ color: "#555", width: 28, textAlign: "right" }}>
               {Math.round(state.opacity * 100)}%
+            </span>
+          </div>
+          {/* Dot size: the largest radius a dot draws at, in screen px */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}
+            title="Largest radius a transcript dot is drawn at, in screen pixels. Zoomed out, dots are smaller than this.">
+            <span style={{ fontSize: 10, color: "#555", width: 42, flexShrink: 0 }}>dot</span>
+            <input type="range" min={0.5} max={8} step={0.5} value={transcriptDotPx}
+              onChange={(e) => setTranscriptDotPx(parseFloat(e.target.value))}
+              style={{ flex: 1, accentColor: "#e88", cursor: "pointer" }} />
+            <span style={{ color: "#555", width: 28, textAlign: "right" }}>
+              {transcriptDotPx} px
             </span>
           </div>
           {/* Sample fraction */}
@@ -1670,6 +1716,7 @@ function EdgeSection() {
     arrowheadScale, setArrowheadScale,
     hiddenLrms, toggleLrm, setAllLrmsVisible, hideAllLrms, applyLrmList,
     edgeColorClamp, setEdgeColorClamp,
+    edgeColorRangeMode, setEdgeColorRangeMode,
     categoricalOverrides, setCategoricalOverride,
   } = usePanelSettings();
   const active = useActivePanels();
@@ -1949,13 +1996,15 @@ function EdgeSection() {
           {/* Legend */}
           {mode === "lrm_set" && (
             <ClampableLegend label="LRM set score" palette={edgeColorPalette}
-              vmin={edgeColorRange.vmin} vmax={edgeColorRange.vmax}
-              clamp={edgeColorClamp} setClamp={setEdgeColorClamp} accentColor="#f90" />
+              vmin={edgeColorRange.vmin} vmax={edgeColorRange.vmax} lo={edgeColorRange.lo} hi={edgeColorRange.hi}
+              clamp={edgeColorClamp} setClamp={setEdgeColorClamp}
+              rangeMode={edgeColorRangeMode} setRangeMode={setEdgeColorRangeMode} accentColor="#f90" />
           )}
           {mode === "metadata" && field && !isCategorical && (
             <ClampableLegend label={field} palette={edgeColorPalette}
-              vmin={edgeColorRange.vmin} vmax={edgeColorRange.vmax}
-              clamp={edgeColorClamp} setClamp={setEdgeColorClamp} accentColor="#f90" />
+              vmin={edgeColorRange.vmin} vmax={edgeColorRange.vmax} lo={edgeColorRange.lo} hi={edgeColorRange.hi}
+              clamp={edgeColorClamp} setClamp={setEdgeColorClamp}
+              rangeMode={edgeColorRangeMode} setRangeMode={setEdgeColorRangeMode} accentColor="#f90" />
           )}
           {mode === "metadata" && field && isCategorical && (
             <EdgeCategoricalLegend categories={edgeMeta?.categories ?? []} />

@@ -176,6 +176,7 @@ function ViewerPanel({ panelIndex }) {
     autocrineRadius, autocrineLineWidth,
     hiddenLrms,
     cellColorClamp, edgeColorClamp, setEdgeColorClamp, linkColorScale,
+    cellColorRangeMode, edgeColorRangeMode,
     categoricalOverrides, cellFilter,
     sendingFilter, receivingFilter, edgeFilters,
     annotationMode,
@@ -185,7 +186,7 @@ function ViewerPanel({ panelIndex }) {
     addMeasurement,
     setExportRect, clearExportRect,
     panelCount,
-    transcriptFraction, showLowQualityTranscripts,
+    transcriptFraction, showLowQualityTranscripts, transcriptDotPx,
     cellBoundaryFraction,
     setLoadingKey,
     panelRotations, setPanelRotation,
@@ -810,32 +811,51 @@ function ViewerPanel({ panelIndex }) {
   // linked (the default) both panels clamp to the union of the two ranges, so
   // the single legend is true for everything on screen. An explicit clamp from
   // the sliders always wins — the user asked for that range specifically.
+  //
+  // The union is taken over each panel's *auto* window (`autoLo`/`autoHi`: the
+  // range mode applied to that panel's own values, clamp ignored), not over the
+  // window in use. The linked window is fed back to the hooks as a clamp, so
+  // `lo`/`hi` of a linked panel are the linked window itself; a union over
+  // those could only ever grow. Using the auto window also keeps robust mode
+  // meaningful when linked: 5–95% of each side, then the union of the two.
+  // Edges are linked the same way as cells — they used to be left to range
+  // independently, which is the exact failure the toggle exists to prevent.
   const allPanels = useStore((s) => s.panels);
-  const linkedRange = useMemo(() => {
+  const linkedWindow = (key) => {
     if (!linkColorScale || panelCount < 2) return null;
     const rs = allPanels.slice(0, panelCount)
-      .map((p) => p.cellColorRange).filter((r) => r && r.vmin != null && r.vmax != null);
+      .map((p) => p[key]).filter((r) => r && r.autoLo != null && r.autoHi != null && r.vmax > r.vmin);
     if (rs.length < 2) return null;
-    return { lo: Math.min(...rs.map((r) => r.vmin)), hi: Math.max(...rs.map((r) => r.vmax)) };
-  }, [allPanels, panelCount, linkColorScale]);
+    return { lo: Math.min(...rs.map((r) => r.autoLo)), hi: Math.max(...rs.map((r) => r.autoHi)) };
+  };
+  const linkedRange = useMemo(() => linkedWindow("cellColorRange"),
+    [allPanels, panelCount, linkColorScale]); // eslint-disable-line
+  const linkedEdgeRange = useMemo(() => linkedWindow("edgeColorRange"),
+    [allPanels, panelCount, linkColorScale]); // eslint-disable-line
 
   const effectiveCellClamp = useMemo(() => (
     linkedRange
       ? { low: cellColorClamp?.low ?? linkedRange.lo, high: cellColorClamp?.high ?? linkedRange.hi }
       : cellColorClamp
   ), [linkedRange, cellColorClamp]);
+  const effectiveEdgeClamp = useMemo(() => (
+    linkedEdgeRange
+      ? { low: edgeColorClamp?.low ?? linkedEdgeRange.lo, high: edgeColorClamp?.high ?? linkedEdgeRange.hi }
+      : edgeColorClamp
+  ), [linkedEdgeRange, edgeColorClamp]);
 
   const {
-    colorValues, vmin: cellVmin, vmax: cellVmax,
+    colorValues, vmin: cellVmin, vmax: cellVmax, lo: cellLo, hi: cellHi,
+    autoLo: cellAutoLo, autoHi: cellAutoHi,
     type: cellType, categories: cellCategories, loading: cellColorsLoading,
   } = useCellColors(
     cellColorsRaw, colorBy, cellColorPalette, cellColorEnabled,
-    effectiveCellClamp, categoryColorOverrides, cellFadeFrac
+    effectiveCellClamp, categoryColorOverrides, cellFadeFrac, cellColorRangeMode
   );
   // Only update shared store ranges from panel 0 to avoid redundant updates
   useEffect(() => {
-    patch({ cellColorRange: { vmin: cellVmin, vmax: cellVmax } });
-  }, [cellVmin, cellVmax]); // eslint-disable-line
+    patch({ cellColorRange: { vmin: cellVmin, vmax: cellVmax, lo: cellLo, hi: cellHi, autoLo: cellAutoLo, autoHi: cellAutoHi } });
+  }, [cellVmin, cellVmax, cellLo, cellHi, cellAutoLo, cellAutoHi]); // eslint-disable-line
 
   // The backend is the authority on whether a column is categorical, so report
   // the type it actually returned rather than letting the panel re-derive it
@@ -845,19 +865,22 @@ function ViewerPanel({ panelIndex }) {
   }, [cellType, cellCategories]); // eslint-disable-line
 
   const edgeColorEnabled = edgeColorBy.mode !== "default";
-  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, p95: edgeP95, loading: edgeColorsLoading } = useEdgeColors(
+  const { colorValues: edgeColorValues, vmin: edgeVmin, vmax: edgeVmax, lo: edgeLo, hi: edgeHi,
+    autoLo: edgeAutoLo, autoHi: edgeAutoHi, loading: edgeColorsLoading } = useEdgeColors(
     apiBase, dataset, edgeColorBy, hiddenLrms, lrmCatalogue, edgeColorPalette,
-    edgeColorEnabled, edgeColorClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac
+    edgeColorEnabled, effectiveEdgeClamp, edges, edgeFile, edgeCategorical, edgeFadeFrac, edgeColorRangeMode
   );
   useEffect(() => {
-    patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax } });
-  }, [edgeVmin, edgeVmax]); // eslint-disable-line
+    patch({ edgeColorRange: { vmin: edgeVmin, vmax: edgeVmax, lo: edgeLo, hi: edgeHi, autoLo: edgeAutoLo, autoHi: edgeAutoHi } });
+  }, [edgeVmin, edgeVmax, edgeLo, edgeHi, edgeAutoLo, edgeAutoHi]); // eslint-disable-line
 
-  useEffect(() => {
-    if (panelIndex === 0 && edgeColorBy?.mode === "lrm_set" && edgeP95 != null) {
-      setEdgeColorClamp(edgeColorClamp?.low ?? null, edgeP95);
-    }
-  }, [edgeP95]); // eslint-disable-line
+  // No automatic clamp. The colour range is the min and max of what is drawn
+  // (useEdgeColors), recomputed on every pan and every mechanism toggle, and a
+  // clamp exists only when the user sets one. This used to write
+  // `high = p95 of the viewport` into the store on every viewport change: the
+  // legend then printed the true max while the palette saturated at a number
+  // the user never saw, "reset range" was undone by the next pan, and so was
+  // any clamp the user had set by hand.
 
   useEffect(() => { setSelectedEdge(null, panelIndex); }, [dataset]); // eslint-disable-line
 
@@ -941,8 +964,8 @@ function ViewerPanel({ panelIndex }) {
     opacity: transcriptsOpacity,
     getPosition: (d) => [d.x_location, d.y_location],
     getRadius: 4,
-    radiusMinPixels: 1,
-    radiusMaxPixels: 8,
+    radiusMinPixels: Math.min(1, transcriptDotPx),
+    radiusMaxPixels: transcriptDotPx,
     // Low-quality transcripts reach the client only when the user asked to see
     // them, and are then drawn gray as in Xenium Explorer — so they read as
     // "shown on request", never as a gene's own colour.

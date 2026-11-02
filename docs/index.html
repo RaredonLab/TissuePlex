@@ -796,8 +796,8 @@ write.csv(
     <code>write.csv()</code> with that as the row names works unchanged. The
     columns appear in the <span class="ui">edge color</span> and edge filter
     dropdowns, and show as an <strong>Annotations</strong> block when you click
-    an edge. The <code>mouse_ileum_tiny</code> demo dataset includes a worked
-    example of both folders.</p>
+    an edge. The <code>xenium_human_breast_2fov</code> demo dataset ships both
+    folders, and worked example 3 walks through them.</p>
   </div>
 </div>
 
@@ -949,11 +949,17 @@ write.csv(
     <li>Choose a <strong>color palette</strong>: viridis (yellow&rarr;purple),
     plasma (yellow&rarr;magenta), magma (yellow&rarr;black), or inferno.
     <em>Viridis</em> is recommended for colorblind accessibility.</li>
-    <li>A color legend shows the data range. Use the <span class="ui">lo</span>
-    and <span class="ui">hi</span> sliders to restrict the color range to a
-    specific window, useful when outliers at the high end compress the variation
-    across the rest of the dataset; <span class="ui">reset range</span> puts
-    the full range back.</li>
+    <li>A color legend shows the range in use. By default it is
+    <strong>auto</strong>: the lowest and highest value currently drawn, so the
+    legend's endpoints are exactly the colors' endpoints, and it follows you as
+    you pan or change the selection. When a few extreme values own most of the
+    palette, switch auto to <span class="ui">robust 5–95%</span>: the window
+    becomes the 5th to 95th percentile of what is drawn, the tails saturate, and
+    the legend says so. Drag the <span class="ui">lo</span> or
+    <span class="ui">hi</span> slider to fix a window instead, useful when a few
+    outliers compress the variation across everything else; the legend then says
+    <em>clamped</em>, the window stays put until you click
+    <span class="ui">reset range</span>, and a figure legend should quote it.</li>
     <li>The <span class="ui">fade to</span> slider sets the fill opacity of the
     <em>lowest</em>-expressing cells; the <span class="ui">fill</span> slider
     stays the maximum. At the maximum nothing fades. Drag it down to let
@@ -1096,7 +1102,10 @@ write.csv(
   <p>The <span class="ui">Transcripts</span> layer renders individual detected
   RNA molecules as colored dots, each colored by gene identity. The layer is
   <strong>off by default</strong>; tick its checkbox to draw it. Hover over a
-  dot to see its gene name (and, on Xenium, its Q-Score).</p>
+  dot to see its gene name (and, on Xenium, its Q-Score). The
+  <span class="ui">dot</span> slider sets the largest radius a dot is drawn at,
+  in screen pixels (3 by default); zoomed out, dots are smaller than that, so
+  the slider matters when you are close enough to see single cells.</p>
 
   <div class="callout note">
     <strong class="label">Note:</strong> Transcripts draw at every zoom level.
@@ -1525,8 +1534,10 @@ Notch1,Dll4</code></pre>
   <h3>Color Scales Across Panels</h3>
   <p>The <span class="ui">shared colour scale across panels</span> checkbox in
   the <span class="ui">Cell Color</span> section, on by default, makes both
-  panels map color through one range computed across both.
-  Leave it on for any figure. Two panels that each auto-scaled to their own data
+  panels map color, cells and edges alike, through one window: the union of the
+  windows each panel would have chosen on its own (full or robust, per the
+  legend's auto mode). The legend then reads <span class="ui">shared</span>, and
+  a clamp you set by hand still wins. Leave it on for any figure. Two panels that each auto-scaled to their own data
   <em>look</em> comparable and are not — one panel's yellow might be 40 counts and
   the other's 4,000. Turn it off only when one panel's range is so much narrower
   that sharing flattens it, and say so in the legend.</p>

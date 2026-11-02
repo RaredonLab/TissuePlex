@@ -112,7 +112,26 @@ def load_supplemental(
         # pandas' _x/_y suffixes and silently rename a user's column.
         new_cols = [key] + [c for c in frame.columns if c not in merged.columns]
         merged = merged.merge(frame[new_cols], on=key, how="outer")
-    return merged
+    return _restore_integers(merged, key)
+
+
+def _restore_integers(df: pd.DataFrame, key: str) -> pd.DataFrame:
+    """Give integer columns back their dtype after the outer join.
+
+    A cluster id column is integers in the user's file, but a cell the file
+    does not mention becomes NaN on the join, and pandas then promotes the
+    whole column to float64 — so the sidebar lists clusters as ``1.0``, ``2.0``
+    and a categorical filter on ``"1"`` matches nothing. Any float column whose
+    non-null values are all whole numbers goes to the nullable ``Int64`` dtype,
+    which keeps the missing cells missing and the labels ``1``, ``2``.
+    """
+    for col in df.columns:
+        if col == key or not pd.api.types.is_float_dtype(df[col]):
+            continue
+        vals = df[col].dropna()
+        if len(vals) and (vals == vals.round()).all():
+            df[col] = df[col].astype("Int64")
+    return df
 
 
 def collect_files(
